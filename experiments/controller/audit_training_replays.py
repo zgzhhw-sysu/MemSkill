@@ -63,11 +63,14 @@ def probability_placement(records):
             "spans": n, "dialogues": by_dialogue, "arms": aggregate}
 
 
-def compare(study, *, centered_candidate=False, source_count_candidate=False):
+def compare(study, *, centered_candidate=False, source_count_candidate=False, duration_references=None):
     protocol = json.loads((study / "protocol.json").read_text())
     windows = read_windows(study, protocol, source_counts=source_count_candidate)
     counts = Counter()
     source_fits = {}
+    if duration_references is not None:
+        from experiments.controller.audit_duration_credit import audit
+        duration_report, corrected = audit(study, duration_references)
     records = []
     for held in protocol["train"]:
         train = [r for (sample, _), pairs in windows.items() if sample != held for r, _ in pairs]
@@ -80,6 +83,10 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False):
         if source_count_candidate:
             intercept, slope = fit_source_count_correction(train, anchor)
             source_fits[held] = {"intercept": intercept, "slope_for_log1p_count": slope}
+        if duration_references is not None:
+            adjusted = [dict(row, delta=corrected[row["episode"], row["span"]]) for row in train]
+            checked = fit_anchored_credit(adjusted, terminal)
+            weights["duration_checked"] = match_training_probability(train, checked, anchor)
         for (sample, start), pairs in windows.items():
             if sample != held:
                 continue
@@ -129,7 +136,8 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False):
             "unique_questions": len({(r["dialogue"], r["question"]) for r in records}),
             "mean_link_f1": means, "anchor_minus": differences,
             "single_decision_expectation": expectation, "records": records}
-    for candidate_name, enabled in (("centered", centered_candidate), ("source_count", source_count_candidate)):
+    for candidate_name, enabled in (("centered", centered_candidate), ("source_count", source_count_candidate),
+                                    ("duration_checked", duration_references is not None)):
         if not enabled:
             continue
         required = ("expected_f1", "placement_delta")
@@ -139,6 +147,8 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False):
                 "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
     if source_count_candidate:
         report["source_count_training_screen"]["training_fits_by_held_dialogue"] = source_fits
+    if duration_references is not None:
+        report["duration_checked_training_screen"]["flagged_links"] = duration_report["flagged_links"]
     return report
 
 
@@ -149,6 +159,8 @@ if __name__ == "__main__":
                         help="Test a centered, dispersion-scaled credit correction at the original training mean probability")
     parser.add_argument("--source-count-candidate", action="store_true",
                         help="Learn a correction from the number of source items available before choosing the skill")
+    parser.add_argument("--duration-references", type=Path, help="LoCoMo corpus for a training-only duration-alias correction")
     args = parser.parse_args()
     print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate,
-                             source_count_candidate=args.source_count_candidate), indent=2))
+                             source_count_candidate=args.source_count_candidate,
+                             duration_references=args.duration_references), indent=2))
