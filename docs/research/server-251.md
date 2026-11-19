@@ -38,4 +38,6 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 
 第一轮已完成。扩充训练窗口的任务使用 `memskill-251-followup.service`。另一个独立任务 `memskill-251-aligned.service` 在 3 号卡编码，5、6 号卡以 28% 工作时间比例生成，重新采集训练和反事实写入提示都与部署相同的十二个窗口。对应的断点和日志位于 `~/memskill-work/study-aligned-writer/` 和 `~/memskill-work/runs/paired-251-aligned/`。用 `systemctl --user status memskill-251-followup memskill-251-aligned` 可查看两组当前进程。
 
-`memskill-251-anchor.service` 从第一轮十二个经过校验的训练窗口重新拟合策略，断点在 `~/memskill-work/study-anchor/`。五个验证组都用 CPU 编码，以及同一个 18752 端口的限载 BF16 生成服务。首次发生选技分歧后，各组按实际写入独立运行。查看 `~/memskill-work/runs/paired-251-anchor/validation-credit.log` 可跟踪信用组，五组完成后的逐题核对和选择决定在 `study-anchor/validation/selection.json`。若这组通过，再在第一轮使用的 GPU 编码环境复核。
+`memskill-251-anchor.service` 从第一轮十二个经过校验的训练窗口重新拟合策略，断点在 `~/memskill-work/study-anchor/`。五个验证组都用 CPU 编码，以及同一个 18752 端口的限载 BF16 生成服务。首次发生选技分歧后，各组按实际写入独立运行。查看 `~/memskill-work/runs/paired-251-anchor/validation-credit.log` 可跟踪信用组，五组完成后的逐题核对和选择决定在 `study-anchor/validation/selection.json`。
+
+在 `conv-47` 上，CPU 编码的信用组前三次实际选择活动细节技能，第四次切换到时间上下文技能。原 GPU 后端在已保存的固定策略轨迹上预计第三次就会切换。`memskill-251-anchor-gpu.service` 已校验两个基线的原始轨迹、回答和冻结权重，并等待扩充训练释放 4、7 号卡，再用原编码配置复核。该组使用 `~/memskill-work/study-anchor-gpu/` 和 `~/memskill-work/runs/paired-251-anchor-gpu/`，生成服务使用端口 18754，限载设置与 18752 相同。
