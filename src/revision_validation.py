@@ -10,7 +10,8 @@ from .operation_bank import OperationBank
 
 def evaluate_bank(trainer, bank, conversations, directory):
     # Use the same deterministic controller, memory builder, reader and F1 as --eval-only.
-    from main import _build_memory_bank_from_sessions, _resolve_sample_id, evaluate_text_dataset_queries
+    from src.inference.memory import _build_memory_bank_from_sessions, _resolve_sample_id
+    from src.inference.text import evaluate_text_dataset_queries
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     previous_bank = trainer.operation_bank

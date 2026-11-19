@@ -33,7 +33,11 @@
 
 | Directory | Contents |
 | --- | --- |
-| [`src/`](src/) | Controller, Designer, Executor, memory, retrieval, data processing, and evaluation code |
+| [`src/cli.py`](src/cli.py) | Training and evaluation entry point, also available through `python main.py` |
+| [`src/`](src/) | Controller, Designer, Executor, memory bank, and retrieval |
+| [`src/data_processing/`](src/data_processing/) | Dataset loading, fixed splits, and dataset-specific input processors |
+| [`src/inference/`](src/inference/) | Shared memory construction and caching, text question answering, and ALFWorld rollouts |
+| [`src/eval/`](src/eval/) | Dataset-specific evaluation metrics |
 | [`experiments/designer/`](experiments/designer/) | LoCoMo pilots, fault injection, and replay of proposed skill revisions |
 | [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults. [Paired study protocol](docs/research/span-credit-paired.md) |
 | [`scripts/train/`](scripts/train/) and [`scripts/eval/`](scripts/eval/) | Training and evaluation launchers for the supported datasets |
@@ -146,7 +150,7 @@ MemSkill builds training and evaluation data from the datasets below. Please dow
 
 #### **1) LoCoMo**
 - Download LoCoMo from the official repo: [LoCoMo](https://github.com/snap-research/locomo)  
-- **Splits**: LoCoMo splits are **already configured in `main.py`** (no extra split file needed).  
+- **Splits**: LoCoMo splits are configured in [`src/data_processing/datasets.py`](src/data_processing/datasets.py) (no extra split file needed).
 - Put the downloaded files under:
   - `data/locomo10.json`
 

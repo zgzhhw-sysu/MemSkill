@@ -6,7 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from experiments.designer.designer_pilot import prefix, save
-from main import evaluate_text_dataset_queries, load_dataset, set_seed, split_data
+from src.cli import set_seed
+from src.data_processing.datasets import load_dataset, split_data
+from src.inference.text import evaluate_text_dataset_queries
 from experiments.designer.replay_revision import normalized
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.designer import DesignerCase

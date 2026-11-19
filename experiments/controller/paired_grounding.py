@@ -15,7 +15,8 @@ import torch
 
 from experiments.controller.paired_policy import PairedPolicy, fit_policy
 from experiments.designer.designer_pilot import prefix, save
-from main import load_dataset, set_seed, split_data
+from src.cli import set_seed
+from src.data_processing.datasets import load_dataset, split_data
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.controller import PPOBuffer
 from src.episode_trace import skill_spec
