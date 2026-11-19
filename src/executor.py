@@ -105,7 +105,7 @@ class Executor:
         )
 
     def execute_operation(self, operation: Union[object, List[object]], session_text: str,
-                          retrieved_memories: List[str]) -> List[ExecutionResult]:
+                          retrieved_memories: List[str], *, audit=None) -> List[ExecutionResult]:
         """
         Execute a memory operation
         Args:
@@ -138,7 +138,7 @@ class Executor:
 
             # Call LLM API
             try:
-                  response, _, _ = get_llm_response_via_api(
+                  response, input_tokens, output_tokens = get_llm_response_via_api(
                       prompt=instruction,
                       LLM_MODEL=self.args.model,
                       base_url=self.args.api_base,
@@ -146,8 +146,13 @@ class Executor:
                       MAX_TOKENS=self.args.max_new_tokens,
                       TAU=self.args.temperature,
                       MAX_TRIALS=10,
+                      usage_kind="executor",
                       TIME_GAP=3,
                   )
+                  if audit is not None:
+                      import hashlib
+                      audit.append({"prompt_sha256": hashlib.sha256(instruction.encode()).hexdigest(),
+                                    "response": response, "input_tokens": input_tokens, "output_tokens": output_tokens})
             except Exception as e:
                 self.logger.warning(f"Executor API call failed: {e}")
                 all_results.append(ExecutionResult(
@@ -166,6 +171,12 @@ class Executor:
                 success=False,
                 reasoning="No executor results produced"
             )]
+        if any(getattr(op, "source_rule", None) == "dated_relative_turns" and op.update_type.lower() == "insert"
+               for op in operations) and all(r.success for r in all_results):
+            from .replay import dated_relative_turns
+            seen = set(retrieved_memories) | {r.memory_content for r in all_results}
+            all_results.extend(ExecutionResult("INSERT", True, memory_content=text, reasoning="dated_relative_turns")
+                               for text in dated_relative_turns(session_text) if text not in seen)
         return all_results
 
     def _parse_response(self, response: str, num_retrieved: int) -> List[ExecutionResult]:
@@ -624,6 +635,8 @@ class Executor:
         # 3. Process INSERTs last (doesn't affect existing indices)
         for i, result in enumerate(inserts):
             try:
+                if result.reasoning == "dated_relative_turns" and result.memory_content in memory_bank.get_all_contents():
+                    continue
                 retriever_emb = insert_retriever_embeddings[i]
                 state_encoder_emb = (
                     insert_state_encoder_embeddings[i] if i < len(insert_state_encoder_embeddings) else None

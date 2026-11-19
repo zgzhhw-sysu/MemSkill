@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 import torch
@@ -199,7 +200,7 @@ def init_context_model(retriever: str):
             context_model = _load_hf_model(AutoModel, 'facebook/dragon-plus-context-encoder', device)
         elif _is_qwen_embedding_retriever(retriever):
             context_tokenizer = None
-            context_model = _load_sentence_transformer(retriever, device)
+            context_model = _load_sentence_transformer(os.environ.get("MEMSKILL_QWEN_EMBEDDING_PATH", retriever), device)
         else:
             raise ValueError(f"Unknown retriever type: {retriever}")
     
@@ -270,7 +271,7 @@ def init_query_model(retriever: str):
             question_model = _load_hf_model(AutoModel, 'facebook/dragon-plus-query-encoder', device)
         elif _is_qwen_embedding_retriever(retriever):
             question_tokenizer = None
-            question_model = _load_sentence_transformer(retriever, device)
+            question_model = _load_sentence_transformer(os.environ.get("MEMSKILL_QWEN_EMBEDDING_PATH", retriever), device)
         else:
             raise ValueError(f"Unknown retriever type: {retriever}")
     

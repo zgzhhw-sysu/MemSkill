@@ -15,10 +15,10 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.trainer import BaseTrainer, get_trainer
+from src.episode_trace import EpisodeTrace
 from src.executor import ExecutionResult
 from src.memory_bank import MemoryBank
 from src.data_processing.alfworld import chunk_trajectories_by_tokens
-from src.alfworld_env_runner import run_alfworld_episode
 from rag_utils import get_embeddings
 from eval_utils import llm_judge
 from llm_utils import get_llm_response
@@ -152,12 +152,17 @@ def _extract_memory_actions_step(trainer: BaseTrainer,
     ]
     # print([i.instruction_template for i in executor_ops])
     exec_impl = executor if executor is not None else trainer.executor
+    audit = {} if memory_bank.trace is None else {"audit": []}
     exec_result = exec_impl.execute_operation(
         operation=executor_ops,
         session_text=session_text,
-        retrieved_memories=retrieved_memories
+        retrieved_memories=retrieved_memories, **audit
     )
 
+    if memory_bank.trace is not None:
+        memory_bank.trace.begin(memory_bank.timestep, session_text, executor_ops, retrieved_memories,
+                                retrieved_indices, selected=selected_ops)
+        memory_bank.trace.current["executor_responses"] = audit["audit"]
     operation_names = []
     seen = set()
     for op in selected_ops:
@@ -177,12 +182,14 @@ def _apply_extracted_memory_actions(trainer: BaseTrainer,
                                     extracted: Dict[str, Any],
                                     executor=None):
     exec_impl = executor if executor is not None else trainer.executor
-    exec_impl.apply_to_memory_bank(
+    applied = exec_impl.apply_to_memory_bank(
         results=extracted.get("results", []),
         memory_bank=memory_bank,
         retrieved_indices=extracted.get("retrieved_indices", []),
         operation_name=extracted.get("operation_names", [])
     )
+    if memory_bank.trace is not None:
+        memory_bank.trace.finish(extracted["results"], applied)
 
 
 def _normalize_insert_content(text: str) -> str:
@@ -350,10 +357,13 @@ def _build_memory_bank_from_sessions(trainer: BaseTrainer,
                                      total: int = None,
                                      executor=None,
                                      show_progress: bool = True,
-                                     session_parallel_workers: int = 1):
+                                     session_parallel_workers: int = 1, trace=None):
     memory_bank = trainer._initialize_memory_bank()
 
+    memory_bank.trace = trace
     workers = max(1, int(session_parallel_workers or 1))
+    if trace is not None and workers != 1:
+        raise ValueError("Use --inference-session-workers 1 for ordered span traces")
     if workers == 1:
         iterator = enumerate(sessions)
         if show_progress:
@@ -369,6 +379,8 @@ def _build_memory_bank_from_sessions(trainer: BaseTrainer,
                 session_embedding=session_embedding,
                 executor=executor
             )
+        if trace is not None:
+            trace.verify(memory_bank)
         return memory_bank
 
     session_texts = sessions if isinstance(sessions, list) else list(sessions)
@@ -535,6 +547,8 @@ def evaluate_text_dataset_queries(trainer: BaseTrainer,
         sample_id = _resolve_sample_id(trainer, conversation, conv_idx)
         memory_bank = memory_banks.get(sample_id)
         if memory_bank is None:
+            if getattr(args, "eval_f1_only", False):
+                raise ValueError(f"Missing evaluation memory bank for {sample_id}")
             print(f"[Eval] Missing memory bank for sample_id={sample_id}, skipping.")
             continue
 
@@ -575,6 +589,11 @@ def evaluate_text_dataset_queries(trainer: BaseTrainer,
         return {}
 
     ret = get_llm_response(args=eval_args, task_args=task_args)
+    if getattr(args, "eval_f1_only", False):
+        actual_ids = [qid for qid, _, _, _ in ret]
+        if (len(actual_ids) != len(meta_by_qid) or set(actual_ids) != set(meta_by_qid)
+                or any(not ok for _, _, _, ok in ret)):
+            raise RuntimeError("Missing, duplicate or failed reader responses")
 
     predictions = {}
     metrics = {
@@ -583,7 +602,7 @@ def evaluate_text_dataset_queries(trainer: BaseTrainer,
     }
     category_metrics = {}
 
-    for qid, response, _, success in ret:
+    for qid, response, tokens, success in ret:
         meta = meta_by_qid.get(qid, {})
         qa = meta.get("qa", {})
         ground_truth = trainer.evaluator.get_ground_truth(qa)
@@ -592,14 +611,31 @@ def evaluate_text_dataset_queries(trainer: BaseTrainer,
             prediction = extractor(prediction)
         # print(prediction)
         predictions[qid] = prediction
-
         f1 = trainer.evaluator.compute_f1(prediction, ground_truth, qa)
+        bank = memory_banks[meta["sample_id"]]
+        if bank.trace is not None:
+            bank.trace.write("qa", {"query_id": meta["qa_idx"], "question": qa["question"],
+                                    "prediction": prediction, "success": success, "f1": f1, "tokens": tokens,
+                                    "refs": [bank.trace.ref(i) for i in meta["retrieved_indices"]]})
+
         metrics["f1"].append(f1)
 
         category = qa.get("category")
         if category is not None:
             bucket = category_metrics.setdefault(category, {"f1": [], "llm_judge": []})
             bucket["f1"].append(f1)
+
+    if getattr(args, "eval_f1_only", False):
+        rows = [
+            {"sample_id": meta_by_qid[qid]["sample_id"], "qa_index": meta_by_qid[qid]["qa_idx"],
+             "retrieved_indices": [int(i) for i in meta_by_qid[qid]["retrieved_indices"]],
+             "prediction": predictions[qid], "f1": score, "tokens": tokens}
+            for (qid, _, tokens, _), score in zip(ret, metrics["f1"])
+        ]
+        report = {"count": len(rows), "f1": float(np.mean(metrics["f1"])), "answers": rows}
+        with open(args.out_file, "w") as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2)
+        return report
 
     # LLM judge
     judge_task_args = []
@@ -700,7 +736,9 @@ def infer_text_dataset_memories(trainer: BaseTrainer, test_data, args):
             total=total,
             executor=exec_impl,
             show_progress=True,
-            session_parallel_workers=inference_session_workers
+            session_parallel_workers=inference_session_workers,
+            trace=EpisodeTrace(args.trace_dir, sample_id, conversation.get("conversation"))
+            if getattr(args, "trace_dir", None) else None
         )
         return sample_id, memory_path, memory_bank
 
@@ -712,7 +750,7 @@ def infer_text_dataset_memories(trainer: BaseTrainer, test_data, args):
                 continue
         sample_id = _resolve_sample_id(trainer, conversation, conv_idx)
         memory_path = _memory_cache_path(memory_dir, args, sample_id)
-        if not overwrite:
+        if not overwrite and not getattr(args, "trace_dir", None):
             cached_bank = _load_memory_bank(memory_path)
             if cached_bank is not None:
                 memory_banks[sample_id] = cached_bank
@@ -817,6 +855,7 @@ def _extract_alfworld_objective(text: str) -> str:
 
 
 def infer_alfworld_memories(trainer: BaseTrainer, train_data, test_data, args):
+    from src.alfworld_env_runner import run_alfworld_episode
     print("\n" + "="*80)
     print("Constructing Memory Bank from ALFWorld Train Trajectories")
     print("="*80)

@@ -22,6 +22,7 @@ from prompts.designer_prompts import (
     DESIGNER_REFINEMENT_PROMPT,
 )
 from src.operation_bank import Operation
+from src.episode_trace import skill_spec
 
 
 @dataclass
@@ -54,6 +55,8 @@ class DesignerCase:
     step: int = 0  # Which step within the epoch
     fail_count: int = 1  # Number of times this failure recurred
 
+    replay: Optional[Dict] = None
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for serialization"""
         return {
@@ -72,6 +75,7 @@ class DesignerCase:
             'conversation_id': self.conversation_id,
             'epoch': self.epoch,
             'step': self.step,
+            'replay': self.replay,
             'fail_count': self.fail_count
         }
 
@@ -94,6 +98,7 @@ class DesignerCase:
             conversation_id=data.get('conversation_id'),
             epoch=data.get('epoch', 0),
             step=data.get('step', 0),
+            replay=data.get('replay'),
             fail_count=data.get('fail_count', 1)
         )
 
@@ -167,6 +172,7 @@ class CaseCollector:
             existing = self.failure_pool.get(key)
             if existing is not None:
                 existing.fail_count += 1
+                existing.replay = case.replay
                 existing.prediction = case.prediction
                 existing.f1_score = case.f1_score
                 existing.llm_judge_score = case.llm_judge_score
@@ -868,7 +874,8 @@ class Designer:
                     LLM_MODEL=self.designer_model,
                     base_url=self.args.api_base,
                     api_key=self.args.api_key,
-                    MAX_TOKENS=max_tokens,
+                    MAX_TOKENS=min(max_tokens, getattr(self.args, "designer_output_limit", max_tokens)),
+                    usage_kind="designer",
                     TAU=tau
                 )
                 return response
@@ -1049,7 +1056,7 @@ class Designer:
             op_descriptions.append(op_desc)
         return "\n".join(op_descriptions)
 
-    def _format_failure_cases_details(self, cases: List[DesignerCase]) -> str:
+    def _format_failure_cases_details(self, cases: List[DesignerCase], operation_bank) -> str:
         case_details = []
         for i, case in enumerate(cases):
             case_str = f"### Case {i + 1}\n"
@@ -1065,6 +1072,19 @@ class Designer:
             else:
                 case_str += "**Retrieved Memories:** None\n"
 
+            if case.replay:
+                recorded_version = case.replay.get("skill_version")
+                target = operation_bank.operations.get(case.replay.get("skill"))
+                if recorded_version and (target is None or skill_spec(target)["version"] != recorded_version):
+                    case_str += "\nThe intervention targeted an older skill version. Re-test the current version."
+                    case_details.append(case_str)
+                    continue
+                case_str += "\nMatched replay evidence: " + json.dumps(case.replay, ensure_ascii=False)
+                case_str += ("\nInterpret only a reproduced write with a positive paired effect as "
+                             "support for this local edit. Keep unresolved cases as hypotheses. "
+                             "If restoring an existing item helps, investigate retrieval. If restoring an old "
+                             "version helps, inspect the later update. A raw source turn supplies an upper "
+                             "bound on recoverability. Propose reusable rules without sample facts.")
             case_details.append(case_str)
 
         return "\n".join(case_details)
@@ -1094,10 +1114,13 @@ class Designer:
         """
         cases = self._normalize_cases_for_prompt(cases)
         operation_bank_description = self._format_operation_bank_description(operation_bank)
-        failure_cases_details = self._format_failure_cases_details(cases)
+        failure_cases_details = self._format_failure_cases_details(cases, operation_bank)
 
         new_skill_hint = ""
-        if getattr(self.args, "designer_new_skill_hint", False):
+        if getattr(self.args, "designer_refine_only", False):
+            new_skill_hint = ("Only revise an existing skill or return no_change. Identify the existing skill by "
+                              "its exact name. Explain which instruction the evidence supports changing.")
+        elif getattr(self.args, "designer_new_skill_hint", False):
             new_skill_hint = ("Note: If failures indicate a capability gap, it is encouraged to recommend "
                               "adding a new skill.")
 
@@ -1150,7 +1173,7 @@ class Designer:
         """
         cases = self._normalize_cases_for_prompt(cases)
         operation_bank_description = self._format_operation_bank_description(operation_bank)
-        failure_cases_details = self._format_failure_cases_details(cases)
+        failure_cases_details = self._format_failure_cases_details(cases, operation_bank)
 
         new_skill_hint = ""
         if getattr(self.args, "designer_new_skill_hint", False):
@@ -1197,7 +1220,10 @@ class Designer:
         operation_bank_full = "\n".join(op_full_details) if op_full_details else "(No evolvable operations available)"
 
         new_skill_hint = ""
-        if getattr(self.args, "designer_new_skill_hint", False):
+        if getattr(self.args, "designer_refine_only", False):
+            new_skill_hint = ("Only refine_existing and no_change are available for this run. A refinement must "
+                              "use an exact name from the operation bank and preserve its action type.")
+        elif getattr(self.args, "designer_new_skill_hint", False):
             new_skill_hint = ("Note: If you see a clear capability gap, it is encouraged to propose "
                               "a new operation (skill).")
 
@@ -1267,6 +1293,13 @@ class Designer:
         """
         analysis_prompt = prepared_data['analysis_prompt']
         analysis_cases = prepared_data.get('analysis_cases') or []
+        if getattr(self.args, 'designer_calendar_proposal', False):
+            from .episode_trace import calendar_proposal
+            return calendar_proposal(operation_bank, self._normalize_cases_for_prompt(analysis_cases),
+                                     use_source_rule=getattr(self.args, "designer_dated_source_rule", False))
+        if getattr(self.args, 'designer_confirmed_proposals', False):
+            from .episode_trace import confirmed_proposal
+            return confirmed_proposal(operation_bank, self._normalize_cases_for_prompt(analysis_cases))
         evolution_feedback = prepared_data.get('evolution_feedback', "")
 
         reflection_cycles = getattr(self.args, "designer_reflection_cycles", 3)
@@ -1495,6 +1528,16 @@ class Designer:
         Returns:
             True if changes were applied, False otherwise
         """
+        expected = evolution_result.get("base_version")
+        if expected:
+            proposed = evolution_result.get("changes", [])
+            if len(proposed) != 1:
+                return False
+            target = proposed[0].get("refined_operation", {}).get("name")
+            current = operation_bank.operations.get(target)
+            if current is None or skill_spec(current)["version"] != expected:
+                self.logger.info("Skipping revision because its tested skill version is no longer active")
+                return False
         changes = evolution_result.get('changes')
         if not isinstance(changes, list):
             changes = []
@@ -1630,6 +1673,11 @@ class Designer:
                     if not changes_payload:
                         self.logger.warning("[Designer] No changes specified for refinement")
                         raise ValueError("no changes")
+                    if "source_rule" in changes_payload and not (
+                            changes_payload["source_rule"] == "dated_relative_turns"
+                            and existing_op.update_type.lower() == "insert"
+                            and evolution_result.get("base_version") and evolution_result.get("reader_support")):
+                        raise ValueError("Dated source writes require a versioned INSERT proposal with reader evidence")
 
                     if 'instruction_template' in changes_payload:
                         template = changes_payload['instruction_template']

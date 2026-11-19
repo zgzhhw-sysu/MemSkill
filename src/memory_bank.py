@@ -101,6 +101,7 @@ class MemoryBank:
         self.memories: List[MemoryItem] = []
         self.retriever_name = retriever_name
         self.top_k = top_k
+        self.trace = None
         self.timestep = 0
         self._faiss_index = None
         self._state_encoder = state_encoder  # StateEncoder for computing state embeddings
@@ -178,6 +179,8 @@ class MemoryBank:
             else:
                 memory_item.operation_history.append(str(operation_name))
         self.memories.append(memory_item)
+        if self.trace is not None:
+            self.trace.change("INSERT", len(self.memories)-1, None, content)
         self._rebuild_index()
 
     def update_memory(self, index: int, new_content: str, new_embedding: np.ndarray,
@@ -211,6 +214,8 @@ class MemoryBank:
                             mem.operation_history.append(str(name))
                 else:
                     mem.operation_history.append(str(operation_name))
+            if self.trace is not None:
+                self.trace.change("UPDATE", index, mem.content_history[-1], new_content)
             self._rebuild_index()
         else:
             raise IndexError(f"Memory index {index} out of range [0, {len(self.memories)})")
@@ -218,6 +223,8 @@ class MemoryBank:
     def delete_memory(self, index: int):
         """Delete a memory item"""
         if 0 <= index < len(self.memories):
+            if self.trace is not None:
+                self.trace.change("DELETE", index, self.memories[index].content, None)
             del self.memories[index]
             self._rebuild_index()
         else:

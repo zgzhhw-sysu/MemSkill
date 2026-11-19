@@ -1,6 +1,8 @@
 import time
 import openai
 import threading
+import json
+import os
 import tiktoken
 from transformers import AutoTokenizer
 from multiprocessing.dummy import Pool as ThreadPool
@@ -48,7 +50,10 @@ MAX_CONTEXT_LENGTH = {
 
 
 
-_client_cache = {}        
+from contextvars import ContextVar
+
+usage_purpose = ContextVar("usage_purpose", default="rollout_or_eval")
+_client_cache = {}
 _key_index = 0            
 _client_lock = threading.Lock()
 
@@ -71,7 +76,8 @@ def _get_client_round_robin(
         key = api_keys[_key_index % len(api_keys)]
         _key_index += 1
 
-        client = _client_cache.get(key)
+        cache_key = (key, base_url, max_retries, timeout)
+        client = _client_cache.get(cache_key)
         if client is None:
             client = openai.OpenAI(
                 base_url=base_url,
@@ -79,7 +85,7 @@ def _get_client_round_robin(
                 max_retries=max_retries,
                 timeout=timeout
             )
-            _client_cache[key] = client
+            _client_cache[cache_key] = client
 
     return client
 
@@ -94,7 +100,7 @@ def get_llm_response_via_api(prompt,
                              SEED=42,
                              MAX_TRIALS=3,
                              TIME_GAP=5,
-                             response_format=None):
+                             response_format=None, usage_kind="reader"):
     '''
     res = get_llm_response_via_api(prompt='hello')  # Default: TAU Sampling (TAU=1.0)
     res = get_llm_response_via_api(prompt='hello', TAU=0)  # Greedy Decoding
@@ -106,13 +112,14 @@ def get_llm_response_via_api(prompt,
     completion = None
     trials_left = MAX_TRIALS
 
+    started = time.monotonic()
     while trials_left:
         trials_left -= 1
         client = _get_client_round_robin(
             api_keys=api_key,
             base_url=base_url,
             max_retries=2,
-            timeout=60
+            timeout=float(os.environ.get("MEMSKILL_API_TIMEOUT_S", "60"))
         )
         try:
             api_params = {
@@ -130,10 +137,10 @@ def get_llm_response_via_api(prompt,
             completion = client.chat.completions.create(**api_params)
             break
         except Exception as e:
-            print(client.api_key, e)
+            print(e)
             if "request timed out" in str(e).strip().lower():
                 break
-            print(client.api_key, "Retrying...")
+            print("Retrying...")
             time.sleep(TIME_GAP)
 
     if completion is None:
@@ -143,6 +150,12 @@ def get_llm_response_via_api(prompt,
     meta_info = completion.usage
     completion_tokens = meta_info.completion_tokens
     prompt_tokens = meta_info.prompt_tokens
+    usage_log = os.environ.get("MEMSKILL_USAGE_LOG")
+    if usage_log:
+        row = {"kind": usage_kind, "purpose": usage_purpose.get(), "model": LLM_MODEL, "input": prompt_tokens, "output": completion_tokens,
+               "attempts": MAX_TRIALS - trials_left, "elapsed_s": time.monotonic() - started}
+        with _client_lock, open(usage_log, "a") as stream:
+            stream.write(json.dumps(row) + "\n")
     # total_tokens = meta_info.total_tokens
     # print(completion_tokens, prompt_tokens, total_tokens)
     if len(contents) == 1:

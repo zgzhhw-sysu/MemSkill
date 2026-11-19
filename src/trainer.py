@@ -23,6 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.controller import PPOController, StateEncoder, OpEncoder, PPOBuffer
 from src.memory_bank import MemoryBank
 from src.operation_bank import OperationBank
+from src.episode_trace import EpisodeTrace, local_diagnosis
 from src.executor import Executor
 from src.designer import Designer, DesignerCase, EvolutionSnapshotManager
 from src.data_processing import get_processor, DataProcessor
@@ -503,6 +504,11 @@ class BaseTrainer:
             'raw_performance': 0.0
         }
 
+        if getattr(self.args, "trace_dir", None):
+            memory_bank.trace = EpisodeTrace(self.args.trace_dir, conversation_data.get("sample_id"),
+                                             conversation_data.get("conversation"))
+
+        buffer_start = len(ppo_buffer.rewards)
         # Process each session sequentially
         if precompute_embeddings and isinstance(sessions, list):
             if episode_length is None:
@@ -561,6 +567,21 @@ class BaseTrainer:
             redistribution_decay=redistribution_decay,
             final_reward_last_ratio=final_reward_last_ratio
         )
+        if getattr(self.args, "span_credit_weight", 0) or getattr(self.args, "span_credit_audit", False):
+            from .credit_assignment import allocate, diagnose_episode
+            from llm_utils import usage_purpose
+            trace = memory_bank.trace
+            token = usage_purpose.set("span_credit")
+            try:
+                diagnoses = diagnose_episode(self, conversation_data, trace, episode_log['steps'])
+            finally:
+                usage_purpose.reset(token)
+            components = allocate(ppo_buffer, buffer_start, episode_log['steps'], diagnoses,
+                                  self.args.span_credit_weight, self.args.span_credit_clip,
+                                  qa_performance, final_reward_last_ratio, redistribute)
+            for diagnosis, rewards in zip(diagnoses, components, strict=True):
+                trace.write("span_credit", {"diagnosis": diagnosis, "rewards": rewards})
+            episode_log["reward_components"] = components
 
         return episode_log
 
@@ -620,9 +641,11 @@ class BaseTrainer:
         state_tensor = torch.tensor(state_embedding, dtype=torch.float32).to(self.device)
         op_tensor = torch.tensor(op_embeddings, dtype=torch.float32).to(self.device)
 
+        credit_enabled = getattr(self.args, "span_credit_weight", 0) or getattr(self.args, "span_credit_audit", False)
+        sampling = {"record_noise": {}} if credit_enabled else {}
         with torch.no_grad():
             action_idx, log_prob, value = self.controller(
-                state_tensor, op_tensor, deterministic=False, new_op_mask=new_op_mask
+                state_tensor, op_tensor, deterministic=False, new_op_mask=new_op_mask, **sampling
             )
 
         # Handle both single action (K=1) and top-K actions
@@ -645,11 +668,12 @@ class BaseTrainer:
 
         # Execute operation(s) - optionally prepend fixed initial operations
         executor_ops = selected_ops
+        audit = {} if memory_bank.trace is None else {"audit": []}
         # Executor handles the logic for single vs multiple operations internally
         exec_results = self.executor.execute_operation(
             operation=executor_ops,
             session_text=session_text,
-            retrieved_memories=retrieved_memories
+            retrieved_memories=retrieved_memories, **audit
         )
         step_log['exec_results'] = [str(r) for r in exec_results]
         step_log['parse_total'] = len(exec_results)
@@ -682,12 +706,24 @@ class BaseTrainer:
             if name and name not in seen:
                 seen.add(name)
                 operation_names.append(name)
+        if memory_bank.trace is not None:
+            memory_bank.trace.begin(session_idx, session_text, selected_ops, retrieved_memories, retrieved_indices)
+            memory_bank.trace.current.update(executor_responses=audit["audit"], old_log_probability=float(log_prob),
+                                             value=float(value))
+            if credit_enabled:
+                from .episode_trace import skill_spec
+                memory_bank.trace.current.update(candidate_versions=[skill_spec(op)["version"] for op in candidate_ops],
+                                                 sampling_noise=sampling["record_noise"],
+                                                 policy_update=self.total_steps,
+                                                 new_op_mask=None if new_op_mask is None else new_op_mask.tolist())
         success = self.executor.apply_to_memory_bank(
             results=exec_results,
             memory_bank=memory_bank,
             retrieved_indices=retrieved_indices,
             operation_name=operation_names
         )
+        if memory_bank.trace is not None:
+            memory_bank.trace.finish(exec_results, success)
         step_log['apply_success'] = success
 
         # Store for logging
@@ -876,7 +912,16 @@ class BaseTrainer:
             qa_list, valid_qa_indices, ret, reward_metric, eval_args
         )
 
+        trace = memory_bank.trace
+        if trace is not None:
+            trace.verify(memory_bank)
+            for idx, _, tokens, ok in ret:
+                trace.write("qa", {"query_id": f"{conversation_id}_{idx}" if conversation_id else str(idx),
+                                   "question": qa_list[idx]["question"], "prediction": predictions[idx],
+                                   "f1": f1_scores_map[idx], "success": ok, "tokens": tokens,
+                                   "refs": [trace.ref(i) for i in retrieval_info[idx][1]]})
         if collect_cases:
+            replay_budget = getattr(self.args, "designer_replay_cases", 0)
             # Collect cases
             for qa_idx in valid_qa_indices:
                 qa = qa_list[qa_idx]
@@ -914,6 +959,9 @@ class BaseTrainer:
                     epoch=outer_epoch * self.config.inner_epochs + inner_epoch,
                     step=step
                 )
+                if trace is not None and not is_correct and replay_budget > 0 and qa.get("evidence"):
+                    case.replay = local_diagnosis(self, case, qa, conversation_data["conversation"], trace)
+                    replay_budget -= 1
                 self.designer.case_collector.add_case(case)
 
         return avg_reward, avg_reward
@@ -1035,6 +1083,13 @@ class BaseTrainer:
         - Computes advantages using GAE
         - Multiple PPO update epochs per batch
         """
+        reserved = set(getattr(self.args, "designer_calibration_ids", ()))
+        calibration = []
+        if reserved:
+            calibration = [c for c in train_data if c.get("sample_id") in reserved]
+            train_data = [c for c in train_data if c.get("sample_id") not in reserved]
+            if reserved != {c["sample_id"] for c in calibration} or not train_data:
+                raise ValueError("Calibration IDs must be a proper subset of the training conversations")
         start_outer_epoch = max(0, int(getattr(self, 'completed_outer_epoch', 0) or 0))
         if start_outer_epoch >= self.config.outer_epochs:
             self.log(
@@ -1244,6 +1299,8 @@ class BaseTrainer:
                     'train/episode_length': len(batch_steps) / num_episodes,
                     # Process reward (op selection quality)
                     'train/process_reward_mean': np.mean(process_rewards) if process_rewards else 0.0,
+                    'train/span_credit_mean': np.mean([s.get('span_credit', 0.0) for s in batch_steps]) if batch_steps else 0.0,
+                    'train/span_credit_nonzero': sum(s.get('span_credit', 0.0) != 0 for s in batch_steps),
                     # PPO losses
                     'ppo/policy_loss': update_info.get('policy_loss', 0.0),
                     'ppo/value_loss': update_info.get('value_loss', 0.0),
@@ -1468,6 +1525,23 @@ class BaseTrainer:
                             prepared_data=prepared_data,
                             evolution_feedback_for_refinement=evolution_feedback_detailed
                         )
+                        if evolution_result.get("action") == "no_change" and (
+                                getattr(self.args, "designer_calendar_proposal", False) or
+                                getattr(self.args, "designer_confirmed_proposals", False)):
+                            self.log(evolution_result["reasoning"])
+                            break
+                        if calibration and evolution_result.get('action') != 'no_change':
+                            from pathlib import Path
+                            from uuid import uuid4
+                            from .revision_validation import validate_proposal
+                            directory = Path(self.args.log_dir) / "revision_checks" / uuid4().hex
+                            decision = validate_proposal(self, evolution_result, calibration, directory)
+                            if not decision["accept"]:
+                                evolution_result = {"action": "no_change", "reasoning": "Calibration rejected revision",
+                                                    "proposal": evolution_result, "validation": decision}
+                                self.log(f"Retaining original skills after calibration: {decision}")
+                                break
+                            evolution_result["validation"] = decision
                         evolution_applied = self.designer.apply_evolution(self.operation_bank, evolution_result)
 
                         if evolution_applied:
