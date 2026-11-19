@@ -118,3 +118,9 @@ bash scripts/experiments/paired_holdout.sh
 LoCoMo 主测试含两段完整对话、55 个 session、314 道可评分题。预设目标为相对 `terminal` 和 `native` 的逐题平均 F1 均至少提高 **0.02**，且两段对话分别为正。另有 86 道无普通参考答案的对抗题按原协议单列。LongMemEval-S 迁移测试含 105 段完整历史、5,027 个 session，覆盖六类问题；101 道可回答题用于主 F1，4 道弃答题另报。报告逐类结果和按历史配对、按题型分层的 95% 区间。两个数据集分别报告，保留逐题回退和无法由选技解释的变化。
 
 六组正式报告在 `test/comparison-with-count.json` 和 `longmemeval/comparison-with-count.json`，冻结清单及运行日志在 `holdout/`。每个已完成的评估历史保存实际问题编号、分数、决策、轨迹及用量；完整历史间可续跑。实验结束后在启动服务的终端执行 `kill "$MODEL_PID"; wait "$MODEL_PID"`，并按目标机约定释放租约或恢复限量空闲守护。
+
+### 确定性评估请求的复用
+
+运行器在 `validation`、`test` 和 `transfer` 阶段复用同一研究、同一阶段、同一本地后端的贪心回答。请求指纹包含完整提示、模型、生成参数和读写用途。记录保存首次生成的回答、服务端输入和输出 token 数及校验值。拷贝可审计的评估结果时，同时迁移 `$STUDY_DIR/response-cache/`、各组的 `usage.jsonl` 和轨迹目录。审计逐次核对实际提示、回答和 token 数，`executor_tokens` 与 `reader_tokens` 表示实际请求模型的用量，命中的用量分别列为 `executor_cached_tokens` 与 `reader_cached_tokens`。
+
+两条 CPU 编码开发对话中，整段动作相同的轨迹已先行复用。余下实际执行的 48 次写入和 300 次问答仍有 12 次写入和 33 次问答完全重复，涉及 32,961 个输入和输出 token。各对重复调用的实际回复和 token 数逐一相同。训练、换技重放和重复性检查继续发出独立模型请求。

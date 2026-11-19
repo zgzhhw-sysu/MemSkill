@@ -14,6 +14,10 @@ module=experiments.controller.paired_grounding
 dataset=locomo
 data_file=$LOCOMO_DATA
 phase_args=(--study-phase "$phase" --span-credit-audit)
+unset MEMSKILL_GREEDY_EVAL_CACHE
+if [[ "$phase" == validation || "$phase" == test || "$phase" == transfer ]]; then
+    export MEMSKILL_GREEDY_EVAL_CACHE="$STUDY_DIR/response-cache/${phase/transfer/longmemeval}"
+fi
 if [[ $phase == transfer ]]; then
     module=experiments.controller.transfer_grounding
     dataset=longmemeval

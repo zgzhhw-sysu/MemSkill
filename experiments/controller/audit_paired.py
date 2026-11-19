@@ -17,6 +17,7 @@ from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix
 from src.credit_assignment import recovered
 from src.eval import get_evaluator
+from src.evaluation_cache import read_response
 from src.eval_utils import normalize_answer
 from src.replay import restore_text
 
@@ -200,7 +201,8 @@ def audit(directory, dataset_file, phase, arms):
             events = [json.loads(line) for line in traces[0].read_text().splitlines()]
             if any(event["sample"] != sid for event in events):
                 raise ValueError(f"Trace belongs to another history at {parent}")
-            for index, evidence in reader_inputs(events, report["answers"], refs, ev).items():
+            qa_prompts = reader_inputs(events, report["answers"], refs, ev)
+            for index, evidence in qa_prompts.items():
                 readers[arm][sid, ids[index]] = evidence
             spans = [e for e in events if e["kind"] == "span"]
             if [e["span_id"] for e in spans] != list(range(expected_spans)):
@@ -238,9 +240,34 @@ def audit(directory, dataset_file, phase, arms):
             counts["grounded_spans"] += sum(d["use"] for d in decisions)
             for event in spans:
                 counts["memory_writes"] += len(event["changes"])
+            evidence = Counter(("reader", qa_prompts[r["qa_index"]][0], r["prediction"].strip(), *r["tokens"])
+                               for r in report["answers"])
+            evidence.update(("executor", call["prompt_sha256"], call["response"], call["input_tokens"], call["output_tokens"])
+                            for span in spans for call in span.get("executor_responses", ()))
+            checked = 0
             for line in (parent / "usage.jsonl").read_text().splitlines():
                 usage = json.loads(line)
-                counts[usage["kind"] + "_tokens"] += usage["input"] + usage["output"]
+                tokens = usage["input"] + usage["output"]
+                if "cache_key" in usage:
+                    measured = read_response(directory / "response-cache" / phase, usage["cache_key"])
+                    if (not measured or measured["sha256"] != usage["response_sha256"]
+                            or measured["payload"]["tokens"] != [usage["input"], usage["output"]]
+                            or usage["cache_hit"] != (usage["attempts"] == 0)):
+                        raise ValueError(f"Unverified evaluation cache record in {parent}")
+                    payload = measured["payload"]
+                    answer = payload["response"].strip() if usage["kind"] == "reader" else payload["response"]
+                    proof = (usage["kind"], payload["prompt_sha256"], answer, *payload["tokens"])
+                    if evidence[proof] <= 0:
+                        raise ValueError(f"Measured request differs from the evaluation trace in {parent}")
+                    evidence[proof] -= 1
+                    checked += 1
+                if usage.get("cache_hit"):
+                    counts[usage["kind"] + "_cache_hits"] += 1
+                    counts[usage["kind"] + "_cached_tokens"] += tokens
+                else:
+                    counts[usage["kind"] + "_tokens"] += tokens
+            if checked and any(evidence.values()):
+                raise ValueError(f"Missing measured request for an evaluation trace in {parent}")
         scores[arm], extra[arm] = scored, dict(counts)
     keys = [k for k in scores["credit"] if answerable[k]]
     if any(s.keys() != scores["credit"].keys() for s in scores.values()):
