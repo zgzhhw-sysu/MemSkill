@@ -12,6 +12,7 @@ import numpy as np
 from typing import List, Tuple, Optional, Dict, Union
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModel, AutoTokenizer
+from src.evaluation_cache import encode_batch
 
 
 class PPOBuffer:
@@ -773,7 +774,7 @@ class BaseTextEncoder:
             batch_size = self.encode_batch_size
 
         if self._use_sentence_transformer:
-            return self.model.encode(texts, convert_to_numpy=True, batch_size=batch_size)
+            return encode_batch(self.model, texts, batch_size)
         else:
             # Process in batches to avoid OOM
             all_embeddings = []

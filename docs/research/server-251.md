@@ -55,3 +55,13 @@ systemctl --user status memskill-251-transfer-validation memskill-251-official -
 ```
 
 `memskill-251-omitted-weaker` 等待遗漏题记录收齐后，用同一限载后端逐条复核较差分支。`memskill-251-duration-aligned` 等待十二个对齐写入窗口全部完成，再用 CPU 重新计算排除数词写法影响后的留一对话结果。
+
+第一轮真实写入的发言分组对照由 `memskill-251-writer-granularity` 在 CPU 建库，再请求 5、6 号卡已有的 28% 限载服务。逐题记录在 `~/memskill-work/runs/paired-251/writer-granularity/`，完整结果写入该目录的 `summary.json`。在 251 复跑已发布版本可执行以下命令。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+export CUDA_VISIBLE_DEVICES="" MEMSKILL_DEVICE=cpu OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
+export MEMSKILL_BACKEND_ID=251-hf-llama3-bf16-pre16-duty28-gpu56-qwen-cpu-fp16
+export MEMSKILL_API_BASE=http://127.0.0.1:18753/v1
+"$MEMSKILL_PYTHON" -m experiments.controller.writer_granularity "$STUDY_DIR" "$LOCOMO_DATA" "$run_dir/writer-granularity"
+```

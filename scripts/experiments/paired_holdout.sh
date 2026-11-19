@@ -27,14 +27,16 @@ bash "$runner" validation --study-arm count >"$report_dir/validation-count.log" 
     fi
 )
 for phase in test transfer; do
-    for arm in "${arms[@]}"; do
-        bash "$runner" "$phase" --study-arm "$arm" >"$report_dir/$phase-$arm.log" 2>&1
-    done
     dataset=$LOCOMO_DATA
     audit_phase=$phase
     if [[ $phase == transfer ]]; then
         dataset=$LONGMEMEVAL_DATA
         audit_phase=longmemeval
+        bash "$runner" transfer --study-arm all >"$report_dir/transfer-all.log" 2>&1
+    else
+        for arm in "${arms[@]}"; do
+            bash "$runner" "$phase" --study-arm "$arm" >"$report_dir/$phase-$arm.log" 2>&1
+        done
     fi
     "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$dataset" "$audit_phase" --arms "${arms[@]}" >"$report_dir/$phase.log"
 done

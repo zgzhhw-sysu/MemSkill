@@ -7,11 +7,44 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.evaluation_cache import publish_response, read_response, response_path
+import numpy as np
+
+from src.evaluation_cache import encode_batch, history_embeddings, publish_response, read_response, response_path
 from src.llm_utils import get_llm_response_via_api
 
 
 class EvaluationCacheTest(unittest.TestCase):
+    def test_history_embeddings_require_identical_order_model_and_options(self):
+        class Encoder:
+            def encode(self, texts, **kwargs):
+                self.last_options = kwargs
+                return np.array([[ord(t)] for t in texts])
+
+        model = Encoder()
+        other = Encoder()
+        with history_embeddings() as stats:
+            cold = encode_batch(model, ["a", "b"], 2)
+            cold[0, 0] = -1
+            np.testing.assert_array_equal(encode_batch(model, ["a", "b"], 2), [[97], [98]])
+            encode_batch(model, ["b", "a"], 2)
+            encode_batch(other, ["a", "b"], 2)
+            encode_batch(model, ["a", "b"], 1)
+            self.assertEqual(model.last_options, {"batch_size": 1, "convert_to_numpy": True})
+            encode_batch(model, ["a", "b"], 2, normalize=True)
+            self.assertTrue(model.last_options["normalize_embeddings"])
+            with self.assertRaisesRegex(ValueError, "interrupted"):
+                with history_embeddings() as nested:
+                    encode_batch(model, ["a", "b"], 2)
+                    self.assertEqual(nested().misses, 1)
+                    raise ValueError("interrupted")
+            encode_batch(model, ["a", "b"], 2)
+            self.assertEqual((stats().hits, stats().misses), (2, 5))
+        self.assertEqual(stats().currsize, 0)
+        with patch.object(model, "encode", wraps=model.encode) as measured:
+            for _ in range(2):
+                encode_batch(model, ["a", "b"], 2)
+            self.assertEqual(measured.call_count, 2)
+
     def test_frozen_local_requests_reuse_measured_tokens_and_check_identity(self):
         with TemporaryDirectory() as tmp, patch.dict(os.environ, {
             "MEMSKILL_GREEDY_EVAL_CACHE": tmp, "MEMSKILL_BACKEND_ID": "fixed",
