@@ -50,7 +50,7 @@ def case(args, evaluator, conversation, index, fault, directory):
     record = EpisodeTrace(directory,conversation["sample_id"],conversation["conversation"])
     bank = trainer._initialize_memory_bank()
     bank.trace = record
-    with patch("rag_utils.get_embeddings",side_effect=embeddings), patch("src.executor.get_embeddings",side_effect=embeddings):
+    with patch("src.rag_utils.get_embeddings",side_effect=embeddings), patch("src.executor.get_embeddings",side_effect=embeddings):
         record.begin(0,source,[ops[chosen]],[],[])
         record.current.update(candidate_versions=[skill_spec(o)["version"] for o in ops],old_log_probability=0.)
         actions = writer([ops[chosen]],source,[])
@@ -78,7 +78,7 @@ def run():
     options=parser.parse_args()
     output=options.output
     output.mkdir(parents=True,exist_ok=False)
-    root=Path(__file__).resolve().parents[1]
+    root=Path(__file__).resolve().parents[3]
     data={c["sample_id"]:c for c in json.loads((root/"runs/llama3_8b/assets/locomo10.json").read_text())}
     args=SimpleNamespace(api=True,api_base=f"http://127.0.0.1:{options.port}/v1",api_key="local-only",model="llama3-8b",
                          retriever="fixture",span_credit_spans=1,span_credit_questions=1,temperature=0.,max_new_tokens=32)

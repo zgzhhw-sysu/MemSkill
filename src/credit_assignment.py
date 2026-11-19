@@ -56,7 +56,7 @@ def classify(observed, swap, truth, *, execution, retrieval, fault=None):
 
 def possible_recovery(before, after, truth):
     """Whole-reference containment can veto attribution, but never authorize a reward."""
-    from eval_utils import normalize_answer, ps
+    from src.eval_utils import normalize_answer, ps
     if not after or not before["ok"] or not after["ok"] or after["f1"] <= before["f1"]:
         return False
     def contains(answer, ref):
@@ -135,7 +135,7 @@ def allocate(buffer, start, steps, diagnostics, weight, clip, final_reward, last
 
 
 def _answer(trainer, qa, memories):
-    from llm_utils import request_task
+    from src.llm_utils import request_task
     evaluator = trainer.evaluator
     prompt = evaluator.build_prompt(qa["question"], memories, qa)
     _, prediction, tokens, ok = request_task((0, prompt, evaluator.prepare_eval_args()))
@@ -228,7 +228,7 @@ def _retrieval_probe(trainer, qa, row, live, turns, versions):
 
 def diagnose_episode(trainer, conversation, trace, steps):
     """Probe evidence-linked spans before PPO. Never use evaluation conversations as training input."""
-    from rag_utils import get_embeddings
+    from src.rag_utils import get_embeddings
     events = trace.events
     live = restore_text(events)
     expected_hash = _digest(list(live.values()))

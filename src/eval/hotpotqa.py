@@ -117,7 +117,7 @@ class HotpotQAEvaluator(Evaluator):
         Returns:
             F1 score (0-1)
         """
-        from eval_utils import f1_score
+        from src.eval_utils import f1_score
 
         # Extract answer from tags if present
         extracted_prediction = self._extract_answer(prediction)

@@ -9,8 +9,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from json_repair import repair_json
-from llm_utils import get_llm_response_via_api
-from rag_utils import get_embeddings
+from src.llm_utils import get_llm_response_via_api
+from src.rag_utils import get_embeddings
 from typing import List, Union
 
 

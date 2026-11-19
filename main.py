@@ -19,9 +19,9 @@ from src.episode_trace import EpisodeTrace
 from src.executor import ExecutionResult
 from src.memory_bank import MemoryBank
 from src.data_processing.alfworld import chunk_trajectories_by_tokens
-from rag_utils import get_embeddings
-from eval_utils import llm_judge
-from llm_utils import get_llm_response
+from src.rag_utils import get_embeddings
+from src.eval_utils import llm_judge
+from src.llm_utils import get_llm_response
 from prompts.prompt_pool import LLM_JUDGE_GENERAL_PROMPT
 
 def set_seed(seed: int):

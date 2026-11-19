@@ -1,5 +1,6 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." || exit 1
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}"
 
 # --disable-flash-attn \
 python main.py \

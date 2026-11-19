@@ -74,7 +74,7 @@ def restore_text(events):
 
 def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None, observe_suffix=None):
     """Restore the prefix and run the suffix once for any questions sharing this intervention."""
-    from rag_utils import get_embeddings
+    from src.rag_utils import get_embeddings
     bank = trainer._initialize_memory_bank()
     prefix = restore_text(events[:start])
     texts = list(prefix.values())
@@ -111,8 +111,8 @@ def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None,
 
 def replay_suffix(trainer, events, start, first_actions, qa, case):
     """Hold the logged later skill choices fixed. Recompute retrieval, writes and QA."""
-    from rag_utils import get_embeddings
-    from llm_utils import request_task
+    from src.rag_utils import get_embeddings
+    from src.llm_utils import request_task
     bank, failed_span = rebuild_suffix(trainer, events, start, first_actions)
     if bank is None:
         return {"valid": False, "failed_span": failed_span}
@@ -131,7 +131,7 @@ def replay_suffix(trainer, events, start, first_actions, qa, case):
 
 def reader_probes(trainer, case, qa, events, turns):
     """Change one final reader slot; use existing versions and source evidence for candidate selection."""
-    from llm_utils import request_task
+    from src.llm_utils import request_task
 
     if not turns:
         return {"finding": "unresolved", "reason": "no linked source turn"}

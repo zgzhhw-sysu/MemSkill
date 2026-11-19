@@ -2,7 +2,7 @@
 Replay ALFWorld episodes using expert_plan and save trajectories.
 
 Usage:
-  python alfworld_replay.py --split train --batch-size 8 \
+  python scripts/data/alfworld_replay.py --split train --batch-size 8 \
     --output ./data/alfworld_expert_train.json
 
 Note: batch-size controls the number of worker threads.
@@ -326,7 +326,7 @@ def _run_single_game(task_type: str,
 
 
 '''
-python alfworld_replay.py
+python scripts/data/alfworld_replay.py
 '''
 def main() -> None:
     parser = argparse.ArgumentParser()

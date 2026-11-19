@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from designer_pilot import prefix, save
+from experiments.designer.designer_pilot import prefix, save
 from main import load_dataset, split_data, set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.designer import DesignerCase

@@ -30,7 +30,7 @@ DETAIL_INSTRUCTION = (" Preserve the source speaker, explicitly stated event det
 
 def reference_match(answer, reference):
     """Conservative evidence for automatic promotion; the benchmark still uses its native F1."""
-    from eval_utils import normalize_answer
+    from src.eval_utils import normalize_answer
     if not isinstance(answer, str) or not isinstance(reference, str) or not reference.strip():
         return False
     if normalize_answer(answer) == normalize_answer(reference):
@@ -51,7 +51,7 @@ def reference_match(answer, reference):
 
 def reference_recovered(before, after, reference):
     """Exclude format-only gains when the old response already contained the reference phrase."""
-    from eval_utils import normalize_answer, ps
+    from src.eval_utils import normalize_answer, ps
     if not isinstance(before, str) or not reference_match(after, reference) or reference_match(before, reference):
         return False
     target = [ps.stem(w) for w in normalize_answer(reference).split()]
@@ -212,10 +212,10 @@ def local_diagnosis(trainer, case, qa, conversation, trace):
     if editable is None:
         return {"finding": "unresolved", "span_id": event["span_id"], "reason": "no editable skill"}
     ev = trainer.evaluator
-    from llm_utils import request_task
+    from src.llm_utils import request_task
     from .memory_bank import MemoryBank
     from .replay import replay_suffix, reader_probes
-    from rag_utils import get_embeddings
+    from src.rag_utils import get_embeddings
     import numpy as np
 
     # Replay the affected retrieval window. Indices in Executor results are local to this window.

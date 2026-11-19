@@ -10,7 +10,7 @@ from statistics import mean
 import numpy as np
 import torch
 
-from designer_pilot import prefix, save
+from experiments.designer.designer_pilot import prefix, save
 from main import load_dataset, set_seed, split_data
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.controller import PPOBuffer

@@ -5,8 +5,8 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 
-from designer_pilot import prefix, save
-from llm_utils import request_task
+from experiments.designer.designer_pilot import prefix, save
+from src.llm_utils import request_task
 from src.config import get_agentic_memory_args
 from src.episode_trace import evidence_turns
 from src.eval import get_evaluator

@@ -155,7 +155,7 @@ class SpanCreditTest(unittest.TestCase):
                                 qa={0:dict(prediction(pred),indices=[0],
                                            context_hash="edited" if (alt or quotes) and cause!="unchanged_context" else "original")})
                 retrieval_answer = {"retrieval":"Paris", "plausible_retrieval":"They met in Paris."}.get(cause, "London")
-                with self.subTest(cause=cause), patch("rag_utils.get_embeddings",return_value=[[1]]), \
+                with self.subTest(cause=cause), patch("src.rag_utils.get_embeddings",return_value=[[1]]), \
                      patch("src.credit_assignment._write_branch",side_effect=writer), \
                      patch("src.credit_assignment._answer",return_value=prediction(retrieval_answer)):
                     result,=diagnose_episode(trainer,conv,trace,[step])

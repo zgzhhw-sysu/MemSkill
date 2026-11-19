@@ -17,7 +17,7 @@ import textworld
 import textworld.gym
 
 from alfworld.agents.environment.alfred_tw_env import AlfredDemangler, AlfredInfos
-from llm_utils import get_llm_response_via_api
+from src.llm_utils import get_llm_response_via_api
 
 
 TASK_TYPE_TO_PROMPT_KEY = {
