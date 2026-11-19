@@ -157,6 +157,25 @@ def score(trainer, conversation, dest, arm, weights):
         print(arm, report["answers"][0]["sample_id"], len(answers), report["f1"], flush=True)
 
 
+def load_arm_weights(study, arm):
+    if arm in ("native", "always"):
+        return None
+    path = study / (arm + ".json")
+    if arm == "rate" and not path.exists():
+        # Older training runs saved this training-only control at their first validation.
+        protocol = json.loads((study / "protocol.json").read_text())
+        rows = [row for start, end in protocol["train_sessions"] for sid in protocol["train"]
+                for row in load_episode(study / "train" / f"{sid}_s{start}", sid, end - start + 1,
+                                        deployment_writer=protocol.get("deployment_writer", False))]
+        weights = match_training_probability(rows, load_arm_weights(study, "terminal"), load_arm_weights(study, "credit"))
+        with TemporaryDirectory(dir=study) as tmp:
+            temporary = Path(tmp) / path.name
+            save(temporary, weights.tolist())
+            temporary.replace(path)
+        return weights
+    return torch.tensor(json.loads(path.read_text()), dtype=torch.float32)
+
+
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test"])
@@ -244,35 +263,21 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX)
             terminal = fit_policy(rows, 0)
             credit = fit_anchored_credit(rows, terminal) if protocol.get("anchor_abstentions") else fit_policy(rows, 1)
-            for arm, weights in (("terminal", terminal), ("credit", credit)):
+            rate = match_training_probability(rows, terminal, credit)
+            for arm, weights in (("terminal", terminal), ("credit", credit), ("rate", rate)):
                 with TemporaryDirectory(dir=out) as tmp:
                     temp = Path(tmp) / (arm + ".json")
                     save(temp, weights.tolist())
                     temp.replace(out / temp.name)
         print("Fitted", len(rows), "training spans;", sum(r["delta"] != 0 for r in rows), "nonzero credits", flush=True)
         return
-    if options.study_arm == "rate" and options.study_phase != "validation":
-        raise ValueError("The probability-matched control is a development-only comparison")
     group = [prefix(c, 6) for c in val] if options.study_phase == "validation" else test
     root = out / options.study_phase
-    arms = ["native", "terminal", "credit", "always"]
-    if options.study_phase == "validation":
-        arms.append("rate")
+    arms = ["native", "terminal", "credit", "always", "rate"]
     for arm in arms if options.study_arm == "all" else [options.study_arm]:
         directory = root / arm
         directory.mkdir(parents=True, exist_ok=True)
-        weights = torch.tensor(json.loads((out / (arm + ".json")).read_text())) if arm in ("credit", "terminal") else None
-        if arm == "rate":
-            rows = [row for start, end in protocol["train_sessions"] for sid in protocol["train"]
-                    for row in load_episode(out / "train" / f"{sid}_s{start}", sid, end - start + 1,
-                                            deployment_writer=args.span_credit_deployment_writer)]
-            fitted = [torch.tensor(json.loads((out / (name + ".json")).read_text()))
-                      for name in ("terminal", "credit")]
-            weights = match_training_probability(rows, *fitted)
-            with TemporaryDirectory(dir=out) as tmp:
-                path = Path(tmp) / "rate.json"
-                save(path, weights.tolist())
-                path.replace(out / path.name)
+        weights = load_arm_weights(out, arm)
         for conversation in group:
             dest = directory / conversation["sample_id"]
             with (directory / (dest.name + ".lock")).open("a") as lock:

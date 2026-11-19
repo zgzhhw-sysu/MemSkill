@@ -7,7 +7,8 @@ from unittest.mock import call, patch
 
 import torch
 
-from experiments.controller.paired_grounding import reuse_identical_choices
+from experiments.controller.audit_paired import audit_rate_control
+from experiments.controller.paired_grounding import load_arm_weights, reuse_identical_choices
 from experiments.controller.paired_policy import PairedPolicy, fit_policy, fit_anchored_credit, match_training_probability
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
@@ -54,6 +55,25 @@ class PairedPolicyTest(unittest.TestCase):
         self.assertAlmostEqual(probs(rate).mean().item(), probs(credit).mean().item(), places=6)
         self.assertFalse(torch.allclose(probs(rate), probs(credit)))
         self.assertTrue(torch.equal(match_training_probability(rows, terminal, terminal), terminal))
+
+    def test_legacy_rate_fit_uses_only_training_then_both_benchmarks_load_frozen_weights(self):
+        with TemporaryDirectory() as tmp:
+            study = Path(tmp)
+            (study / "protocol.json").write_text(json.dumps({"train_sessions": [[1, 2]], "train": ["sample"]}))
+            terminal, credit = torch.tensor([-0.4, 0.2]), torch.tensor([1., -1.5])
+            for name, weight in (("terminal", terminal), ("credit", credit)):
+                (study / (name + ".json")).write_text(json.dumps(weight.tolist()))
+            rows = [{"state": [float(x)], "base_logit": -0.5} for x in (-1, 1, 1)]
+            with patch("experiments.controller.paired_grounding.load_episode", return_value=rows) as read_rows:
+                rate = load_arm_weights(study, "rate")
+                self.assertTrue(torch.equal(rate, load_arm_weights(study, "rate")))
+                read_rows.assert_called_once_with(study / "train/sample_s1", "sample", 2, deployment_writer=False)
+            weights = {name: w.numpy() for name, w in (("terminal", terminal), ("credit", credit), ("rate", rate))}
+            with patch("experiments.controller.audit_paired.load_episode", return_value=rows):
+                self.assertEqual(audit_rate_control(study, weights)["training_spans"], 3)
+                for bad in (rate + torch.tensor([1., 0.]), credit):
+                    with self.assertRaises(ValueError):
+                        audit_rate_control(study, dict(weights, rate=bad.numpy()))
 
     def test_credit_anchor_preserves_the_terminal_actor_without_local_evidence(self):
         terminal = torch.tensor([-0.5, 0.1])

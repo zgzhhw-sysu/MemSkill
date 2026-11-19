@@ -60,6 +60,8 @@
 
 LoCoMo 报告每段对话的配对差值以及各题型 F1。LongMemEval-S 在同一段历史上配对，并按题型分层对历史做 bootstrap。使用 token F1 衡量回答重合度，官方 LLM judge 准确率属于另一项指标。两个基准分别汇报。[预先固定的样本、文件指纹与指标](../../experiments/controller/protocols/paired_grounding_cohort.json)
 
+正式测试同时携带冻结的 `rate.json`。该策略沿用终局模型的状态权重，只在训练数据上调整截距来匹配信用组的平均选技概率。两项基准都核对这两个条件，并报告信用组相对该对照的逐题 F1 差值。
+
 ## 推理负载
 
 训练用的 [Transformers 服务](../../scripts/experiments/serve_low_duty.py) 每次接一个请求，提示按 16 个 token 分块。每段预填充和每个解码步都等待 CUDA 完成后再休眠，默认工作时间比例为 0.40。PyTorch 的本进程分配上限为物理显存的 76%。用 `nvidia-smi` 分别记录实际显存、利用率、温度和功率。
@@ -78,13 +80,13 @@ touch "$STUDY_DIR/require-selective-validation"
 
 # 冻结方案后执行
 bash scripts/experiments/paired_grounding.sh test
-python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" test
+python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" test --arms native terminal credit always rate
 
 # LONGMEMEVAL_DATA 指向 longmemeval_s_cleaned.json
-for arm in native terminal credit; do
+for arm in native terminal credit always rate; do
   bash scripts/experiments/paired_grounding.sh transfer --study-arm "$arm"
 done
-python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" longmemeval
+python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" longmemeval --arms native terminal credit always rate
 ```
 
 第二轮在新的 `STUDY_DIR` 下使用 `bash scripts/experiments/paired_grounding.sh train --study-train-sessions 8`。后续验证、测试和断点续跑从该目录的 `protocol.json` 读取训练窗口范围。

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 from scipy.special import expit
 
+from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix
 from src.eval import get_evaluator
 from src.replay import restore_text
@@ -36,6 +37,19 @@ def bootstrap_by_type(deltas, types, seed=20261120):
 def probability(decision, weights):
     state = np.asarray(decision["state"], dtype=np.float64)
     return float(expit(decision["base_logit"] + weights[0] + np.dot(weights[1:], state / max(np.linalg.norm(state), 1e-12))))
+
+
+def audit_rate_control(study, weights):
+    if not np.array_equal(weights["terminal"][1:], weights["rate"][1:]):
+        raise ValueError("Rate control changed state-dependent terminal weights")
+    protocol = read(study / "protocol.json")
+    rows = [r for start, end in protocol["train_sessions"] for sid in protocol["train"]
+            for r in load_episode(study / "train" / f"{sid}_s{start}", sid, end - start + 1,
+                                  deployment_writer=protocol.get("deployment_writer", False))]
+    means = {arm: mean(probability(r, weights[arm]) for r in rows) for arm in ("credit", "rate")}
+    if not math.isclose(means["credit"], means["rate"], rel_tol=0, abs_tol=2e-7):
+        raise ValueError("Rate control does not match the credit policy on training states")
+    return {"training_spans": len(rows), "mean_grounded_probability": means}
 
 
 def reader_inputs(events, scored_rows, questions, evaluator):
@@ -175,6 +189,8 @@ def audit(directory, dataset_file, phase, arms):
     by_group = {t: [k for k in keys if groups[k] == t] for t in sorted({groups[k] for k in keys})}
     report = {"phase": phase, "scored_questions": len(keys), "histories": len(conversations),
               "per_type_counts": {t:len(ks) for t,ks in by_group.items()}, "arms": {}, "credit_minus": {}}
+    if "rate" in arms:
+        report["rate_control"] = audit_rate_control(directory, weights)
     for arm, s in scores.items():
         kind = {t:mean(s[k] for k in ks) for t,ks in by_group.items()}
         report["arms"][arm] = {"f1":mean(s[k] for k in keys), "macro_type_f1":mean(kind.values()),

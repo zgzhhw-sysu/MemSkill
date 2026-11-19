@@ -6,9 +6,7 @@ import json
 from pathlib import Path
 import sys
 
-import torch
-
-from experiments.controller.paired_grounding import score
+from experiments.controller.paired_grounding import load_arm_weights, score
 from experiments.controller.paired_policy import PairedPolicy
 from src.cli import set_seed
 from src.data_processing.datasets import load_dataset
@@ -20,7 +18,7 @@ from src.trainer import get_trainer
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always"), required=True)
+    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "rate"), required=True)
     parser.add_argument("--study-reverse", action="store_true")
     options, remaining = parser.parse_known_args()
     sys.argv[1:] = remaining
@@ -57,7 +55,7 @@ def main():
         raise ValueError("Training and transfer skill libraries differ")
     trainer.controller = PairedPolicy(trainer.controller, [s["name"] for s in skills].index(target))
     arm = options.study_arm
-    weights = torch.tensor(json.loads((out / (arm + ".json")).read_text())) if arm in ("credit", "terminal") else None
+    weights = load_arm_weights(out, arm)
     dest = out / "longmemeval" / arm
     dest.mkdir(exist_ok=True, parents=True)
     for c in reversed(held) if options.study_reverse else held:
