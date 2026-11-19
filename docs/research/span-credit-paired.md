@@ -12,6 +12,8 @@
 - `native` 使用原生贪心排序。`terminal` 从同一批采样动作学习，每步使用 episode 终局 F1 减去其他 episode 的均值。`credit` 使用相同终局项，再加入有独立选择证据的 span 差值。对原采样动作按差值的符号及绝对值训练。额外项在有非零信用的 span 上取均值，单步差值裁剪到 ±0.5。`always` 每步选带来源发言的组合，用于检验始终使用该技能的效果。
 - 报告实际部署的二选一概率，并在同一份已记录状态上分别重算 `terminal` 和 `credit` 的概率。这是给定这两种组合时的条件概率。另计实际发生的三技能组合切换数及变动的问答。
 
+验证集还运行 `rate` 对照。它保留 `terminal` 的全部状态系数，只调整一个截距，使其在完整训练窗口上的平均选技概率与 `credit` 一致。比较两组在相同验证状态上的贪心选择和实际逐题 F1，可检查收益是否仅靠整体提高某项技能的使用概率就能复现。概率匹配不保证贪心使用次数相同。
+
 ## 测试范围
 
 | 数据 | 使用方式 | 样本 |
@@ -35,7 +37,7 @@ LoCoMo 报告每段对话的配对差值以及各题型 F1。LongMemEval-S 在�
 ```bash
 bash scripts/experiments/paired_grounding.sh train
 bash scripts/experiments/paired_grounding.sh validation
-python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms native terminal credit always
+python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms native terminal credit always rate
 
 # 冻结方案后执行
 bash scripts/experiments/paired_grounding.sh test

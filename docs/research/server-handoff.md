@@ -2,6 +2,8 @@
 
 接手任务是补完 LoCoMo 的配对训练，冻结 Controller，再检验 span 级信用能否改变实际选技并提高独立测试 F1。当前已保存 **6/12 个训练窗口、12 个 span，其中 4 个有非零信用**。还没有最终策略权重、完整验证分数或测试分数。训练窗口中的局部 F1 差值不能作为测试收益。[实验方法](span-credit-paired.md) · [固定测试清单](../../experiments/controller/protocols/paired_grounding_cohort.json)
 
+251 已完成迁移。目标机工作目录、资源占用约定和运行日志见 [251 运行说明](server-251.md)。下列窗口数是交接快照的计数。
+
 ## 从哪里接
 
 | 训练窗口 | 已完成，可续用 | 迁移后补跑 |
