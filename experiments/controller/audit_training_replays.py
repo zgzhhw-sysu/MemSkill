@@ -2,17 +2,19 @@
 import argparse
 from collections import Counter, defaultdict
 import json
+import math
 from pathlib import Path
 from statistics import mean
 
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.paired_policy import fit_anchored_credit, fit_policy, match_training_probability
+from experiments.controller.paired_policy import fit_anchored_credit, fit_policy, fit_source_count_correction, match_training_probability
 from experiments.controller.resume_status import load_episode
+from src.replay import attributed_turn_pairs
 
 
-def read_windows(study, protocol):
+def read_windows(study, protocol, *, source_counts=False):
     windows = {}
     for start, end in protocol["train_sessions"]:
         for sample in protocol["train"]:
@@ -20,7 +22,11 @@ def read_windows(study, protocol):
             rows = load_episode(directory, sample, end - start + 1,
                                 deployment_writer=protocol.get("deployment_writer", False))
             trace, = (directory / "traces").glob("*.jsonl")
-            events = map(json.loads, trace.read_text().splitlines())
+            events = [json.loads(line) for line in trace.read_text().splitlines()]
+            if source_counts:
+                spans = (e for e in events if e["kind"] == "span")
+                for row, span in zip(rows, spans, strict=True):
+                    row["source_item_count"] = len(set(attributed_turn_pairs(span["source"])) - set(span["retrieved"]))
             diagnoses = [e["diagnosis"] for e in events if e["kind"] == "span_credit"]
             windows[sample, start] = list(zip(rows, diagnoses, strict=True))
     return windows
@@ -57,10 +63,11 @@ def probability_placement(records):
             "spans": n, "dialogues": by_dialogue, "arms": aggregate}
 
 
-def compare(study, *, centered_candidate=False):
+def compare(study, *, centered_candidate=False, source_count_candidate=False):
     protocol = json.loads((study / "protocol.json").read_text())
-    windows = read_windows(study, protocol)
+    windows = read_windows(study, protocol, source_counts=source_count_candidate)
     counts = Counter()
+    source_fits = {}
     records = []
     for held in protocol["train"]:
         train = [r for (sample, _), pairs in windows.items() if sample != held for r, _ in pairs]
@@ -70,6 +77,9 @@ def compare(study, *, centered_candidate=False):
         if centered_candidate:
             candidate = fit_anchored_credit(train, terminal, center_states=True)
             weights["centered"] = match_training_probability(train, candidate, anchor)
+        if source_count_candidate:
+            intercept, slope = fit_source_count_correction(train, anchor)
+            source_fits[held] = {"intercept": intercept, "slope_for_log1p_count": slope}
         for (sample, start), pairs in windows.items():
             if sample != held:
                 continue
@@ -83,6 +93,8 @@ def compare(study, *, centered_candidate=False):
                     continue
                 state = F.normalize(torch.tensor(row["state"]), dim=0)
                 logits = {arm: row["base_logit"] + w[0] + state @ w[1:] for arm, w in weights.items()}
+                if source_count_candidate:
+                    logits["source_count"] = logits["anchor"] + intercept + slope * math.log1p(row["source_item_count"])
                 actions = {arm: logit.item() >= 0 for arm, logit in logits.items()}
                 probabilities = {arm: logit.sigmoid().item() for arm, logit in logits.items()}
                 actions.update(always=True, plain=False)
@@ -117,12 +129,16 @@ def compare(study, *, centered_candidate=False):
             "unique_questions": len({(r["dialogue"], r["question"]) for r in records}),
             "mean_link_f1": means, "anchor_minus": differences,
             "single_decision_expectation": expectation, "records": records}
-    if centered_candidate:
+    for candidate_name, enabled in (("centered", centered_candidate), ("source_count", source_count_candidate)):
+        if not enabled:
+            continue
         required = ("expected_f1", "placement_delta")
-        contrasts = {a: {k: expectation["arms"]["centered"][k] - expectation["arms"][a][k] for k in required}
+        contrasts = {a: {k: expectation["arms"][candidate_name][k] - expectation["arms"][a][k] for k in required}
                      for a in ("anchor", "rate")}
-        report["centered_training_screen"] = {"differences": contrasts,
-                                               "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
+        report[candidate_name + "_training_screen"] = {"differences": contrasts,
+                "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
+    if source_count_candidate:
+        report["source_count_training_screen"]["training_fits_by_held_dialogue"] = source_fits
     return report
 
 
@@ -131,5 +147,8 @@ if __name__ == "__main__":
     parser.add_argument("study", type=Path)
     parser.add_argument("--centered-candidate", action="store_true",
                         help="Test a centered, dispersion-scaled credit correction at the original training mean probability")
+    parser.add_argument("--source-count-candidate", action="store_true",
+                        help="Learn a correction from the number of source items available before choosing the skill")
     args = parser.parse_args()
-    print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate), indent=2))
+    print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate,
+                             source_count_candidate=args.source_count_candidate), indent=2))

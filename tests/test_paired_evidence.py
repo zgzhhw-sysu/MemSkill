@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+import torch
 from itertools import permutations
 from statistics import mean
 from types import SimpleNamespace
@@ -8,11 +9,28 @@ from types import SimpleNamespace
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from experiments.controller.probe_omitted import check_responses, omitted_final_indices
 from experiments.controller.audit_training_replays import probability_placement
+from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
 from experiments.controller.transfer_grounding import external_histories
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_conditional_placement_removes_the_probability_of_using_two_or_zero_pairs(self):
+        logits = torch.tensor([1.5, -.3], dtype=torch.float64)
+        scores = {"00": .2, "10": .8, "01": .1, "11": .4}
+        result = measured_return(logits, scores)
+        p, q = result["probabilities"]
+        one = p*(1-q) + (1-p)*q
+        self.assertAlmostEqual(result["given_one_f1"], (.8*p*(1-q) + .1*(1-p)*q) / one)
+        self.assertAlmostEqual(result["unconditional_f1"], one*result["given_one_f1"] + .2*(1-p)*(1-q) + .4*p*q)
+        windows = [{"dialogue": str(i), "start": j, "n": i+2, "state": [[v], [-v]],
+                    "f1": dict(scores, **{"10": .8 if v > 0 else .1, "01": .1 if v > 0 else .8})}
+                   for i in range(6) for j, v in ((1, 1.), (3, -1.))]
+        study = compare_granularity(windows)
+        self.assertTrue(study["advance_to_full_writer_probes"])
+        self.assertEqual(study["positive_conditional_folds_vs_uniform"], 6)
+        self.assertAlmostEqual(study["aggregate"]["slot"]["given_one_f1"], .45)
+
     def test_external_validation_requires_separate_question_families_and_complete_histories(self):
         def sample(sid):
             return {"question_id": sid, "question_type": "temporal", "haystack_sessions": [[], []]}
