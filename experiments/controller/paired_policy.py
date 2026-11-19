@@ -61,11 +61,15 @@ class PairedPolicy(nn.Module):
             return selected, math.log(max(probability, 1e-30)), float(self.native.get_value(h).item())
 
 
+def _training_states(rows):
+    states = torch.tensor([r["state"] for r in rows], dtype=torch.float64)
+    features = torch.cat((torch.ones_like(states[:, :1]), F.normalize(states, dim=1)), dim=1)
+    return features, torch.tensor([r["base_logit"] for r in rows], dtype=states.dtype)
+
+
 def fit_policy(rows, credit_weight):
     """Fit a regularized logistic actor on balanced exploration, using the sampled action."""
-    states = torch.tensor([r["state"] for r in rows], dtype=torch.float64)
-    x = torch.cat((torch.ones_like(states[:, :1]), F.normalize(states, dim=1)), dim=1)
-    offset = torch.tensor([r["base_logit"] for r in rows], dtype=x.dtype)
+    x, offset = _training_states(rows)
     sign = torch.tensor([1 if r["use"] else -1 for r in rows], dtype=x.dtype)
     epi = {r["episode"]: r["terminal"] for r in rows}
     if len(epi) < 2:
@@ -93,11 +97,38 @@ def fit_policy(rows, credit_weight):
     return theta.detach().float()
 
 
+def fit_anchored_credit(rows, terminal):
+    """Update a frozen terminal actor from verified outcomes, preserving its probabilities on abstentions."""
+    features, offset = _training_states(rows)
+    baseline = offset + features @ terminal.double()
+    effects = torch.tensor([(1 if row["use"] else -1) * max(-0.5, min(0.5, row["delta"]))
+                            for row in rows], dtype=features.dtype)
+    verified = effects != 0
+    if not verified.any():
+        return terminal.clone()
+    local = effects[verified]
+    abstained = ~verified
+    target = baseline[abstained].sigmoid()
+    change = torch.zeros_like(terminal, dtype=features.dtype, requires_grad=True)
+    optimizer = torch.optim.LBFGS([change], max_iter=100, line_search_fn="strong_wolfe",
+                                  tolerance_grad=1e-9, tolerance_change=1e-12)
+
+    def closure():
+        optimizer.zero_grad()
+        logit = baseline + features @ change
+        loss = (local.abs() * F.softplus(-local.sign() * logit[verified])).mean() + 0.01 * change.square().sum()
+        if abstained.any():
+            loss = loss + F.binary_cross_entropy_with_logits(logit[abstained], target)
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    return terminal + change.detach().float()
+
+
 def match_training_probability(rows, terminal, credit):
     """Shift only the terminal intercept to match the credit policy's mean training probability."""
-    states = torch.tensor([row["state"] for row in rows], dtype=torch.float64)
-    features = torch.cat((torch.ones_like(states[:, :1]), F.normalize(states, dim=1)), dim=1)
-    offset = torch.tensor([row["base_logit"] for row in rows], dtype=states.dtype)
+    features, offset = _training_states(rows)
     base = offset + features @ terminal.double()
     extra = features @ (credit.double() - terminal.double())
     target = (base + extra).sigmoid().mean()

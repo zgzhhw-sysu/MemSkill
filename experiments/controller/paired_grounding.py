@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 import torch
 
-from experiments.controller.paired_policy import PairedPolicy, fit_policy, match_training_probability
+from experiments.controller.paired_policy import PairedPolicy, fit_policy, fit_anchored_credit, match_training_probability
 from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix, save
 from src.cli import set_seed
@@ -167,6 +167,8 @@ def main():
                         help="Use the first 4 or 8 sessions of each training dialogue, in disjoint pairs")
     parser.add_argument("--study-deployment-writer", action="store_true",
                         help="Use evaluation-time writer prompts in training and counterfactual branches")
+    parser.add_argument("--study-anchor-abstentions", action="store_true",
+                        help="Penalize probability changes at training states with no verified local credit")
     options, remainder = parser.parse_known_args()
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
@@ -208,6 +210,8 @@ def main():
     }
     if args.span_credit_deployment_writer:
         protocol["deployment_writer"] = True
+    if options.study_anchor_abstentions or saved_protocol.get("anchor_abstentions"):
+        protocol["anchor_abstentions"] = True
     with (out / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if path.exists():
@@ -238,8 +242,9 @@ def main():
                 for row in json.loads((root / f"{c['sample_id']}_s{start}" / "rows.json").read_text())]
         with (out / "fit.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            for arm, weight in (("terminal", 0), ("credit", 1)):
-                weights = fit_policy(rows, weight)
+            terminal = fit_policy(rows, 0)
+            credit = fit_anchored_credit(rows, terminal) if protocol.get("anchor_abstentions") else fit_policy(rows, 1)
+            for arm, weights in (("terminal", terminal), ("credit", credit)):
                 with TemporaryDirectory(dir=out) as tmp:
                     temp = Path(tmp) / (arm + ".json")
                     save(temp, weights.tolist())

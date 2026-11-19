@@ -8,7 +8,7 @@ from unittest.mock import call, patch
 import torch
 
 from experiments.controller.paired_grounding import reuse_identical_choices
-from experiments.controller.paired_policy import PairedPolicy, fit_policy, match_training_probability
+from experiments.controller.paired_policy import PairedPolicy, fit_policy, fit_anchored_credit, match_training_probability
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
@@ -54,6 +54,20 @@ class PairedPolicyTest(unittest.TestCase):
         self.assertAlmostEqual(probs(rate).mean().item(), probs(credit).mean().item(), places=6)
         self.assertFalse(torch.allclose(probs(rate), probs(credit)))
         self.assertTrue(torch.equal(match_training_probability(rows, terminal, terminal), terminal))
+
+    def test_credit_anchor_preserves_the_terminal_actor_without_local_evidence(self):
+        terminal = torch.tensor([-0.5, 0.1])
+        rows = [{"use": False, "delta": 0.0, "base_logit": -0.1, "state": [x]} for x in (1., -1.)]
+        self.assertTrue(torch.equal(fit_anchored_credit(rows, terminal), terminal))
+        rows[0]["delta"] = -0.4  # Swapping the sampled plain action for the grounded action helped.
+        learned = fit_anchored_credit(rows, terminal)
+        rate = match_training_probability(rows, terminal, learned)
+        def logits(w):
+            return -0.1 + w[0] + torch.tensor([1., -1.]) * w[1]
+        shift = logits(learned) - logits(terminal)
+        self.assertGreater(shift[0].item(), 0.0)
+        self.assertLess(abs(shift[1].item()), abs((logits(rate) - logits(terminal))[1].item()))
+        self.assertAlmostEqual(logits(learned).sigmoid().mean().item(), logits(rate).sigmoid().mean().item(), places=6)
 
     def test_signed_gains_and_abstentions(self):
         def example(i, use, delta):
