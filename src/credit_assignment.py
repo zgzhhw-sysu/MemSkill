@@ -144,7 +144,7 @@ def _answer(trainer, qa, memories):
             "ok": bool(ok), "tokens": list(tokens)}
 
 
-def _write_branch(trainer, events, start, operations, queries, quotes=()):
+def _write_branch(trainer, events, start, operations, queries, quotes=(), *, include_contents=False):
     from .executor import ExecutionResult, deployment_operations
     event = events[start]
     aligned = getattr(trainer.args, "span_credit_deployment_writer", False)
@@ -194,6 +194,8 @@ def _write_branch(trainer, events, start, operations, queries, quotes=()):
         return result
     contents = bank.get_all_contents()
     result["bank_hash"] = _digest(contents)
+    if include_contents:
+        result["contents"] = contents
     result["qa"] = {}
     for idx, (qa, embedding) in queries.items():
         memories, indices = bank.retrieve(embedding)
@@ -215,20 +217,27 @@ def _same_branch(a, b):
             and all(q["ok"] for q in a["qa"].values()))
 
 
-def _retrieval_probe(trainer, qa, row, live, turns, versions):
-    """Replace one slot with an omitted live memory. Selection never reads the answer."""
-    refs = [mid for mid, _ in row["refs"]]
+def hidden_retrieval_candidate(qa, turns, refs, live):
+    """Select an omitted live memory from the query and source evidence."""
     visible_texts = {live[mid] for mid in refs}
     hidden = [mid for mid, text in live.items() if text not in visible_texts]
     if not hidden or not refs:
-        return False, None
+        return None
     def words(value):
         return set(re.findall(r"\w+", value.lower()))
     query = words(" ".join([qa["question"], *(t["text"] for t in turns)]))
     def overlap(mid):
         tokens = words(live[mid])
         return len(query & tokens) / max(1, len(query | tokens))
-    mid = max(hidden, key=overlap)
+    return max(hidden, key=overlap)
+
+
+def _retrieval_probe(trainer, qa, row, live, turns, versions):
+    """Replace one slot with an omitted live memory. Selection never reads the answer."""
+    refs = [mid for mid, _ in row["refs"]]
+    mid = hidden_retrieval_candidate(qa, turns, refs, live)
+    if mid is None:
+        return False, None
     memories = [live[m] for m in refs[:-1]] + [live[mid]]
     reply = _answer(trainer, qa, memories)
     record = {"inserted_ref": [mid, versions[mid][0]], "written_at": versions[mid][1],

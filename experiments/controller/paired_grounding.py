@@ -203,7 +203,9 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker"])
+    parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
+                        help="Last session of the completed training panel for the weaker-branch audit")
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
@@ -272,12 +274,20 @@ def main():
         locked = json.loads((Path(__file__).with_name("protocols") / "paired_grounding_cohort.json").read_text())["primary"]
         if protocol["input_sha256"] != locked["file_sha256"] or protocol["test"] != locked["ids"]:
             raise ValueError("Test inputs differ from the locked LoCoMo cohort")
-    if options.study_phase == "probe-omitted":
-        from experiments.controller.probe_omitted import probe_training_windows
+    if options.study_phase in ("probe-omitted", "probe-weaker"):
         samples = {c["sample_id"]: c for c in train}
+        through = options.study_probe_through if options.study_phase == "probe-weaker" else None
+        through = train_windows[-1][1] if through is None else through
+        if through not in {end for _, end in train_windows}:
+            raise ValueError("Requested panel exceeds the training protocol")
         windows = ((window(samples[sid], start, end - start + 1), out / "train" / f"{sid}_s{start}")
-                   for start, end in train_windows for sid in protocol["train"])
-        probe_training_windows(trainer, out, windows)
+                   for start, end in train_windows if end <= through for sid in protocol["train"])
+        if options.study_phase == "probe-weaker":
+            from experiments.controller.probe_weaker import probe_weaker_windows
+            probe_weaker_windows(trainer, out, windows, through)
+        else:
+            from experiments.controller.probe_omitted import probe_training_windows
+            probe_training_windows(trainer, out, windows)
         return
     if options.study_phase == "train":
         root = out / "train"
