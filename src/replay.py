@@ -117,6 +117,7 @@ def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None,
     id_to_index = {mid: index for index, mid in enumerate(prefix)}
     indices = [id_to_index[mid] for mid, _ in event["refs"]]
     actions = first_actions
+    aligned = getattr(trainer.args, "span_credit_deployment_writer", False)
     for i in range(start, len(events)):
         current = events[i]
         if i != start:
@@ -127,13 +128,18 @@ def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None,
             else:
                 old, indices, memory_embs = bank.retrieve(emb.reshape(-1), use_state_encoder=True, return_embeddings=True)
                 ops = select_suffix(current, emb.reshape(-1), old, memory_embs)
-            writer_ops = deployment_operations(ops) if getattr(trainer.args, "span_credit_deployment_writer", False) else ops
-            actions = trainer.executor.execute_operation(writer_ops, current["source"], old)
+            writer_ops = deployment_operations(ops) if aligned else ops
+            audit_args = {"audit": []} if aligned and observe_suffix else {}
+            actions = trainer.executor.execute_operation(writer_ops, current["source"], old, **audit_args)
         if not actions or not all(a.success for a in actions):
             return None, current["span_id"]
         success = trainer.executor.apply_to_memory_bank(actions, bank, indices)
         if i != start and observe_suffix is not None:
-            observe_suffix(current, old, ops, actions, success)
+            if aligned:
+                observe_suffix(current, old, ops, actions, success,
+                               writer_prompt_hashes=[a["prompt_sha256"] for a in audit_args["audit"]])
+            else:
+                observe_suffix(current, old, ops, actions, success)
         if not success:
             return None, current["span_id"]
         bank.step()

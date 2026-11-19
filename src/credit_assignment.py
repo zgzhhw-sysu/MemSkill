@@ -150,7 +150,8 @@ def _write_branch(trainer, events, start, operations, queries, quotes=()):
     aligned = getattr(trainer.args, "span_credit_deployment_writer", False)
     selected = [SimpleNamespace(**s) for s in operations]
     writer_ops = deployment_operations(selected) if aligned else selected
-    actions = trainer.executor.execute_operation(writer_ops, event["source"], event["retrieved"])
+    audit_args = {"audit": []} if aligned else {}
+    actions = trainer.executor.execute_operation(writer_ops, event["source"], event["retrieved"], **audit_args)
     parsed = [vars(a).copy() for a in actions]
     if quotes:
         written = set(event["retrieved"]) | {a.memory_content for a in actions}
@@ -168,7 +169,7 @@ def _write_branch(trainer, events, start, operations, queries, quotes=()):
                                             new_op_mask=current["new_op_mask"], replay_noise=current["sampling_noise"])
         return [candidates[i] for i in (idx if isinstance(idx, list) else [idx])]
     suffix = []
-    def observe(current, old, ops, results, success):
+    def observe(current, old, ops, results, success, writer_prompt_hashes=None):
         chosen = [skill_spec(op) for op in ops]
         actual = [vars(a).copy() for a in results]
         executed = [skill_spec(op) for op in deployment_operations(ops)] if aligned else chosen
@@ -178,12 +179,17 @@ def _write_branch(trainer, events, start, operations, queries, quotes=()):
                                            and executed == current["skills"] and old == current["retrieved"]
                                            and actual == current["parsed_actions"] and success == current["applied"]),
                        "fault": execution_fault(actual, success, executed)})
+        if aligned:
+            suffix[-1]["writer_prompt_hashes"] = writer_prompt_hashes
+            observed_hashes = [r["prompt_sha256"] for r in current["executor_responses"]]
+            suffix[-1]["matches_rollout"] &= writer_prompt_hashes == observed_hashes
     bank, failed = rebuild_suffix(trainer, events, start, actions, select_suffix=select_suffix, observe_suffix=observe)
     executed = [skill_spec(op) for op in writer_ops] if aligned else operations
     result = {"actions": parsed, "failed_span": failed, "suffix": suffix,
               "contract_fault": execution_fault(parsed, True, executed) or next((s["fault"] for s in suffix if s["fault"]), None)}
     if aligned:
         result["writer_skills"] = executed
+        result["writer_prompt_hashes"] = [r["prompt_sha256"] for r in audit_args["audit"]]
     if bank is None:
         return result
     contents = bank.get_all_contents()
@@ -204,6 +210,7 @@ def _same_branch(a, b):
     if "qa" not in a or "qa" not in b:
         return False
     return (a["actions"] == b["actions"] and a.get("suffix") == b.get("suffix")
+            and a.get("writer_prompt_hashes") == b.get("writer_prompt_hashes")
             and a["bank_hash"] == b["bank_hash"] and a["qa"] == b["qa"]
             and all(q["ok"] for q in a["qa"].values()))
 
@@ -295,6 +302,9 @@ def diagnose_episode(trainer, conversation, trace, steps):
         record.update(control=control, alternative=alternative, status="probed")
         historical = (control.get("bank_hash") == expected_hash and control["actions"] == event["parsed_actions"]
                       and all(s["matches_rollout"] for s in control.get("suffix", [])))
+        if getattr(trainer.args, "span_credit_deployment_writer", False):
+            historical = historical and control["writer_prompt_hashes"] == [
+                call["prompt_sha256"] for call in event["executor_responses"]]
         swap = None
         if historical and alternative is not None and not (fault or control["contract_fault"]):
             a = _write_branch(trainer, events, start, alternative, queries)

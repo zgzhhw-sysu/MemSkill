@@ -116,7 +116,7 @@ def audit(directory, dataset_file, phase, arms):
                 index = r["qa_index"]
                 q = refs[index]
                 key = sid, ids[index]
-                f1 = ev.compute_f1(r["prediction"], ev.get_ground_truth(q), q)
+                f1 = float(ev.compute_f1(r["prediction"], ev.get_ground_truth(q), q))
                 if (key in scored or r["sample_id"] != sid or min(r["tokens"]) < 1
                         or not math.isclose(f1, r["f1"], abs_tol=1e-9)):
                     raise ValueError(f"Invalid score for {key}")

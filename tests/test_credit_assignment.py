@@ -26,8 +26,10 @@ class SpanCreditTest(unittest.TestCase):
                                retrieve=lambda *args, **kwargs: ([], [], []))
         for aligned in (False, True):
             calls = []
-            def execute(selected, text, retrieved):
+            def execute(selected, text, retrieved, audit=None):
                 calls.append([op.name for op in selected])
+                if audit is not None:
+                    audit.append({"prompt_sha256": "example-prompt"})
                 return [action]
             trainer = SimpleNamespace(args=SimpleNamespace(span_credit_deployment_writer=aligned), device="cpu",
                 operation_bank=SimpleNamespace(get_candidate_operations=lambda: ops),
@@ -40,6 +42,7 @@ class SpanCreditTest(unittest.TestCase):
                          applied=True, sampling_noise={}, new_op_mask=None, candidate_versions=[s["version"] for s in specs])
             if aligned:
                 event["selected_skills"] = specs
+                event["executor_responses"] = [{"prompt_sha256": "example-prompt"}]
             out = _write_branch(trainer, [dict(event, span_id=i) for i in range(2)], 0, specs, {})
             self.assertEqual(calls, [[s["name"] for s in effective]] * 2)
             self.assertTrue(out["suffix"][0]["matches_rollout"])
@@ -47,6 +50,10 @@ class SpanCreditTest(unittest.TestCase):
             self.assertIsNone(out["contract_fault"])
             if aligned:
                 self.assertEqual(out["writer_skills"], effective)
+                self.assertEqual(out["writer_prompt_hashes"], ["example-prompt"])
+                event["executor_responses"] = [{"prompt_sha256": "wrong-prompt"}]
+                changed = _write_branch(trainer, [dict(event, span_id=i) for i in range(2)], 0, specs, {})
+                self.assertFalse(changed["suffix"][0]["matches_rollout"])
 
     def test_disabled_native_episode_has_identical_transitions_and_no_probes(self):
         def run(weight):
