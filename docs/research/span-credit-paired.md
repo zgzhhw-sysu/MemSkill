@@ -167,3 +167,13 @@ python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" l
 ```bash
 python -m experiments.controller.writer_granularity "$STUDY_DIR" "$LOCOMO_DATA" "$RESULT_DIR"
 ```
+
+`--repair-multiline` 检查同一技能在格式处理时漏掉的发言。先从带说话人和图片描述的原始 turn 重建已记录的 session 输入，再找出分行时丢失、合并行后可以完整恢复的原话。把所有这样的原话加回已执行过该技能的最终记忆库后，才根据证据编号选择受影响的训练题。两组均读取前五条记忆，每条提示分别生成两次，记录检索证据和两次用量。使用独立的输出目录。
+
+```bash
+python -m experiments.controller.writer_granularity "$STUDY_DIR" "$LOCOMO_DATA" "$REPAIR_DIR" --repair-multiline
+```
+
+六条完整训练对话的 3,435 条发言中，17 条在旧的发言分组中漏失，关联 8 道可评分题。第一轮 12 个窗口覆盖 535 条发言，其中 5 条漏失。限制到最后一个 span 已实际执行过该技能且问题证据落在遗漏发言上时，只剩 `conv-43` 的第 15 和 85 题，两题的原始选择反馈均为零。
+
+在 251 的 BF16 读者上，补回 `D4:8` 后两题的前五条检索均含这条发言。第 85 题问 John 和 Anthony 在慈善活动中玩了什么，回答从未提及 Anthony 变为 “Harry Potter trivia contest.”，F1 从 0 升至 0.8889。第 15 题问 Anthony 是谁，回答仅恢复了两人一同参加活动的事实，F1 从 0 升至 0.1333。两组独立重复的回答和 token 数均逐题一致。CPU 重建的原始前五条及次序在第 15 题与历史完全相同，第 85 题存在差异，第 85 题的原始记录与 CPU 对照均为 0 分。这里比较的是同一次写入下的 CPU 对照与修复结果，两题均保留零选择反馈。

@@ -3,6 +3,7 @@ import json
 import unittest
 import torch
 from itertools import permutations
+from unittest.mock import patch
 from statistics import mean
 from types import SimpleNamespace
 
@@ -12,11 +13,25 @@ from experiments.controller.probe_omitted import check_responses, omitted_final_
 from experiments.controller.audit_training_replays import probability_placement
 from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
 from experiments.controller.transfer_grounding import external_histories
-from experiments.controller.writer_granularity import source_variants
+from experiments.controller.writer_granularity import missing_multiline_turns, source_variants
+from src.data_processing.locomo import LoCoMoProcessor
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_multiline_repair_preserves_the_omitted_speaker_date_and_image(self):
+        with patch("src.data_processing.locomo.tiktoken.get_encoding"):
+            processor = LoCoMoProcessor(chunk_mode="full-session")
+        date = "10:12 am on 8 May, 2023"
+        turns = [{"dia_id": "D1:1", "speaker": "Bo", "text": "A complete line."},
+                 {"dia_id": "D1:2", "speaker": "Ada", "text": "We played trivia.\n",
+                  "blip_caption": "a photo of a prize"}]
+        source, = processor._extract_session_chunks(turns, date)
+        self.assertEqual(missing_multiline_turns(processor, turns, date, source),
+                         {"D1:2": date + " | Ada: We played trivia. [shared a photo of a prize.]"})
+        with self.assertRaises(ValueError):
+            missing_multiline_turns(processor, turns, date, source + "different")
+
     def test_split_only_the_source_pairs_actually_written(self):
         date = "8 May, 2023"
         pair = date + " | Bo: Your plan? Ada: Travel."
