@@ -8,14 +8,55 @@ from unittest.mock import call, patch
 import torch
 
 from experiments.controller.audit_paired import audit_rate_control
+from experiments.controller.audit_trajectory_return import policy_value
+from experiments.controller.evaluate_last_switches import final_switches
 from experiments.controller.paired_grounding import load_arm_weights, reuse_identical_choices
-from experiments.controller.paired_policy import PairedPolicy, count_schedule, fit_policy, fit_anchored_credit, fit_source_count_correction, match_training_probability
+from experiments.controller.paired_policy import (PairedPolicy, count_schedule, fit_policy, fit_anchored_credit,
+    fit_memory_novelty, fit_source_count_correction, match_training_probability, memory_novelty, novelty_logit_shift)
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_final_switch_marks_whether_both_policies_reached_the_observed_prefix(self):
+        arms = {"credit": [.8, .6], "credit_rate": [.1, .55], "anchor": [.6, .49],
+                "anchor_rate": [.7, .5], "novelty": [.2, .7]}
+        episode = {"uses": [True, False], "probabilities": arms}
+        switched = final_switches(episode)
+        self.assertEqual(set(switched), {"anchor", "novelty"})
+        self.assertEqual(switched["anchor"]["probabilities"], [.49, .5])
+        self.assertTrue(switched["anchor"]["both_follow_recorded_prefix"])
+        self.assertFalse(switched["novelty"]["both_follow_recorded_prefix"])
+        episode["uses"][0] = False
+        self.assertFalse(final_switches(episode)["anchor"]["both_follow_recorded_prefix"])
+
+    def test_trajectory_estimate_recovers_exact_adaptive_two_step_return(self):
+        episodes = []
+        for first in (False, True):
+            for second in (False, True):
+                # Only the real history with first=1 and second=0 pays a reward.
+                episodes.append({"uses": [first, second], "probabilities": {"target": [.8, .25 if first else .9]},
+                                 "questions": 5, "return": float(first and not second), "baseline": .4})
+        estimates = policy_value(episodes, "target")
+        for key in ("baseline_adjusted_f1", "ordinary_is_f1", "self_normalized_f1"):
+            self.assertAlmostEqual(estimates[key], .8 * .75)
+        short = [dict(episodes[0], probabilities={"target": [1., 1.]})]
+        self.assertIsNone(policy_value(short, "target")["self_normalized_f1"])
+
+    def test_novelty_uses_only_pre_action_memory_and_preserves_mean_probability(self):
+        states = [[1., 0., 0., 0.], [1., 0., 2., 0.], [1., 0., 0., 2.], [1., 0., -2., 0.]]
+        rows = [dict(state=x, base_logit=-.2, use=True, delta=d) for x, d in zip(states, [0., -.4, 0., .4])]
+        fit = fit_memory_novelty(rows, torch.zeros(5))
+        self.assertIsNone(memory_novelty(states[0]))
+        self.assertEqual([memory_novelty(s) for s in states[1:]], [0., 1., 2.])
+        shifts = [novelty_logit_shift(s, fit) for s in states]
+        self.assertEqual(shifts[0], fit["intercept"])
+        self.assertLess(shifts[1], shifts[3])
+        base = torch.full((4,), -.2, dtype=torch.float64)
+        self.assertAlmostEqual(float((base + torch.tensor(shifts)).sigmoid().mean()), float(base.sigmoid().mean()), 7)
+        self.assertEqual(fit_memory_novelty([rows[0]], torch.zeros(5))["slope"], 0.)
+
     def test_source_count_can_change_order_while_preserving_training_propensity(self):
         anchor = torch.tensor([-.35, 0.])
         rows = [dict(state=[1.], base_logit=i/10, use=True, delta=delta, source_item_count=n)

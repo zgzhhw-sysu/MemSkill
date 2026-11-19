@@ -9,7 +9,8 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.paired_policy import fit_anchored_credit, fit_policy, fit_source_count_correction, match_training_probability
+from experiments.controller.paired_policy import (fit_anchored_credit, fit_memory_novelty, fit_policy,
+                                                  fit_source_count_correction, match_training_probability, novelty_logit_shift)
 from experiments.controller.resume_status import load_episode
 from src.replay import attributed_turn_pairs
 
@@ -58,16 +59,22 @@ def probability_placement(records):
     n = len(grouped)
     aggregate = {arm: {key: sum(d["spans"] * d["arms"][arm][key] for d in by_dialogue.values()) / n
                        for key in metrics} for arm, metrics in next(iter(by_dialogue.values()))["arms"].items()}
+    paired = [(plain, gain) for spans in dialogues.values() for _, plain, gain in spans]
+    upper_bound = {"always_grounded_f1": mean(plain + gain for plain, gain in paired),
+                   "best_measured_action_f1": mean(plain + max(0., gain) for plain, gain in paired),
+                   "grounded_better_spans": sum(gain > 1e-12 for _, gain in paired),
+                   "plain_better_spans": sum(gain < -1e-12 for _, gain in paired),
+                   "tied_spans": sum(abs(gain) <= 1e-12 for _, gain in paired)}
     return {"weighting": "equal spans; average observed linked questions within each span",
             "permutation": "all permutations of the same probabilities among covered spans within each held dialogue",
-            "spans": n, "dialogues": by_dialogue, "arms": aggregate}
+            "spans": n, "dialogues": by_dialogue, "arms": aggregate, "measured_action_upper_bound": upper_bound}
 
 
-def compare(study, *, centered_candidate=False, source_count_candidate=False, duration_references=None):
+def compare(study, *, centered_candidate=False, source_count_candidate=False, duration_references=None, novelty_candidate=False):
     protocol = json.loads((study / "protocol.json").read_text())
     windows = read_windows(study, protocol, source_counts=source_count_candidate)
     counts = Counter()
-    source_fits = {}
+    source_fits, novelty_fits = {}, {}
     if duration_references is not None:
         from experiments.controller.audit_duration_credit import audit
         duration_report, corrected = audit(study, duration_references)
@@ -77,6 +84,8 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False, du
         terminal = fit_policy(train, 0)
         anchor = fit_anchored_credit(train, terminal)
         weights = {"terminal": terminal, "anchor": anchor, "rate": match_training_probability(train, terminal, anchor)}
+        if novelty_candidate:
+            novelty_fits[held] = fit_memory_novelty(train, anchor)
         if centered_candidate:
             candidate = fit_anchored_credit(train, terminal, center_states=True)
             weights["centered"] = match_training_probability(train, candidate, anchor)
@@ -100,6 +109,8 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False, du
                     continue
                 state = F.normalize(torch.tensor(row["state"]), dim=0)
                 logits = {arm: row["base_logit"] + w[0] + state @ w[1:] for arm, w in weights.items()}
+                if novelty_candidate:
+                    logits["novelty"] = logits["anchor"] + novelty_logit_shift(row["state"], novelty_fits[held])
                 if source_count_candidate:
                     logits["source_count"] = logits["anchor"] + intercept + slope * math.log1p(row["source_item_count"])
                 actions = {arm: logit.item() >= 0 for arm, logit in logits.items()}
@@ -137,6 +148,7 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False, du
             "mean_link_f1": means, "anchor_minus": differences,
             "single_decision_expectation": expectation, "records": records}
     for candidate_name, enabled in (("centered", centered_candidate), ("source_count", source_count_candidate),
+                                    ("novelty", novelty_candidate),
                                     ("duration_checked", duration_references is not None)):
         if not enabled:
             continue
@@ -145,6 +157,8 @@ def compare(study, *, centered_candidate=False, source_count_candidate=False, du
                      for a in ("anchor", "rate")}
         report[candidate_name + "_training_screen"] = {"differences": contrasts,
                 "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
+    if novelty_candidate:
+        report["novelty_training_screen"]["fits_by_held_dialogue"] = novelty_fits
     if source_count_candidate:
         report["source_count_training_screen"]["training_fits_by_held_dialogue"] = source_fits
     if duration_references is not None:
@@ -159,8 +173,10 @@ if __name__ == "__main__":
                         help="Test a centered, dispersion-scaled credit correction at the original training mean probability")
     parser.add_argument("--source-count-candidate", action="store_true",
                         help="Learn a correction from the number of source items available before choosing the skill")
+    parser.add_argument("--novelty-candidate", action="store_true",
+                        help="Fit credit versus session-to-memory cosine distance at the anchor training probability")
     parser.add_argument("--duration-references", type=Path, help="LoCoMo corpus for a training-only duration-alias correction")
     args = parser.parse_args()
     print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate,
-                             source_count_candidate=args.source_count_candidate,
+                             source_count_candidate=args.source_count_candidate, novelty_candidate=args.novelty_candidate,
                              duration_references=args.duration_references), indent=2))

@@ -195,3 +195,38 @@ def fit_source_count_correction(rows, anchor):
     extra = counts * slope
     intercept = _shift_for_mean_probability(baseline + extra, -extra)
     return intercept, slope
+
+
+def memory_novelty(state):
+    """Cosine distance between the session and fused retrieved memory, undefined for an empty bank."""
+    vector = torch.as_tensor(state, dtype=torch.float64)
+    if vector.ndim != 1 or vector.numel() == 0 or vector.numel() % 2:
+        raise ValueError("Expected concatenated session and retrieved-memory embeddings")
+    session, memory = vector.chunk(2)
+    if memory.norm() == 0 or session.norm() == 0:
+        return None
+    return 1. - float(F.cosine_similarity(session, memory, dim=0))
+
+
+def novelty_logit_shift(state, fit):
+    value = memory_novelty(state)
+    return fit["intercept"] + (0. if value is None else fit["slope"] * (value - fit["center"]))
+
+
+def fit_memory_novelty(rows, anchor):
+    """Fit selection-only credit versus semantic redundancy at the anchor's training mean probability."""
+    features, offset = _training_states(rows)
+    baseline = offset + features @ anchor.double()
+    values = [memory_novelty(r["state"]) for r in rows]
+    present = [v for v in values if v is not None]
+    center = sum(present) / len(present) if present else 0.
+    deviations = baseline.new_tensor([0. if v is None else v - center for v in values])
+    scale = deviations.std(unbiased=False)
+    if scale <= 1e-8:
+        return {"center": center, "slope": 0., "intercept": 0.}
+    inputs = torch.stack((torch.ones_like(deviations), deviations / scale), dim=1)
+    correction = _fit_credit_correction(rows, inputs, baseline)
+    slope = float(correction[1] / scale)
+    extra = deviations * slope
+    intercept = _shift_for_mean_probability(baseline + extra, -extra)
+    return {"center": center, "slope": slope, "intercept": intercept}
