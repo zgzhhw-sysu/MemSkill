@@ -1,14 +1,37 @@
 import hashlib
 import json
 import unittest
+from itertools import permutations
+from statistics import mean
 from types import SimpleNamespace
 
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from experiments.controller.probe_omitted import check_responses, omitted_final_indices
+from experiments.controller.audit_training_replays import probability_placement
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_probability_placement_preserves_dialogue_rates_and_weights_spans_equally(self):
+        def link(dialogue, span, p, plain, grounded):
+            return {"dialogue": dialogue, "span": span, "window": 1, "probabilities": {"actor": p},
+                    "scores": {"plain": plain, "always": grounded}}
+        a = link("a", 0, .9, .1, .8)
+        b = link("a", 1, .2, .7, .2)
+        c = link("a", 2, .5, .4, .4)
+        d = link("b", 0, .3, 0., 1.)
+        report = probability_placement([a, a, b, c, d])
+        metrics = report["arms"]["actor"]
+        def expected(ps):
+            return mean(r["scores"]["plain"] + p * (r["scores"]["always"] - r["scores"]["plain"])
+                        for r, p in zip((a, b, c, d), (*ps, .3), strict=True))
+        self.assertEqual(report["spans"], 4)
+        self.assertAlmostEqual(metrics["expected_f1"], expected((.9, .2, .5)))
+        self.assertAlmostEqual(metrics["permuted_expected_f1"], mean(expected(ps) for ps in permutations((.9, .2, .5))))
+        self.assertAlmostEqual(report["dialogues"]["b"]["arms"]["actor"]["placement_delta"], 0.)
+        with self.assertRaises(ValueError):
+            probability_placement([a, dict(a, probabilities={"actor": .3})])
+
     def test_final_training_probe_requires_observed_unexamined_questions_linked_to_the_last_span(self):
         spans = [{"source_turns": ["D1:1"]}, {"source_turns": ["D2:1", "D2:2"]}]
         questions = [{"evidence": ev} for ev in (["D1:1"], ["D2:1"], ["D1:1", "D2:2"], ["D2:2"], [])]
