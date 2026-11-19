@@ -41,3 +41,5 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 `memskill-251-anchor.service` 从第一轮十二个经过校验的训练窗口重新拟合策略，断点在 `~/memskill-work/study-anchor/`。五个验证组都用 CPU 编码，以及同一个 18752 端口的限载 BF16 生成服务。首次发生选技分歧后，各组按实际写入独立运行。查看 `~/memskill-work/runs/paired-251-anchor/validation-credit.log` 可跟踪信用组，五组完成后的逐题核对和选择决定在 `study-anchor/validation/selection.json`。
 
 在 `conv-47` 上，CPU 编码的信用组前三次实际选择活动细节技能，第四次切换到时间上下文技能。原 GPU 后端在已保存的固定策略轨迹上预计第三次就会切换。`memskill-251-anchor-gpu.service` 已校验两个基线的原始轨迹、回答和冻结权重，并等待扩充训练释放 4、7 号卡，再用原编码配置复核。该组使用 `~/memskill-work/study-anchor-gpu/` 和 `~/memskill-work/runs/paired-251-anchor-gpu/`，生成服务使用端口 18754，限载设置与 18752 相同。
+
+正式测试的候选顺序在三组验证决定产生之前固定。先考虑扩充到八个 session 的策略，其次是原 GPU 编码环境下的零信用约束策略，最后是训练写入提示与部署一致的策略。选取顺序中第一个通过五组验证标准的候选。`memskill-251-official.service` 在等待期间只使用 CPU。选定后，`~/memskill-work/runs/official-251/selected.json` 记录验证决定及冻结权重的指纹。完整评估沿用该候选的模型、编码和限载配置，按历史补齐六组结果，包括在每条历史保持技能使用次数相同的对照。每个基准的逐题结果和中断恢复入口见[服务器交接文档](server-handoff.md)。
