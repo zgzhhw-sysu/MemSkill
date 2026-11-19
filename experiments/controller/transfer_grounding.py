@@ -1,6 +1,7 @@
 """Zero-shot LongMemEval-S transfer of a frozen LoCoMo span-credit gate."""
 import argparse
 from collections import Counter
+from contextlib import nullcontext
 import fcntl
 import hashlib
 import json
@@ -13,6 +14,7 @@ from src.cli import set_seed
 from src.data_processing.datasets import load_dataset
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.episode_trace import skill_spec
+from src.evaluation_cache import history_embeddings
 from src.trainer import get_trainer
 
 
@@ -87,12 +89,15 @@ def main():
         sid = str(c["question_id"])
         if Path(sid).name != sid:
             raise ValueError("Invalid dataset ID")
-        for arm in arms:
-            dest = out / phase / arm
-            dest.mkdir(exist_ok=True, parents=True)
-            with (dest / (sid + ".lock")).open("a") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                score(trainer, c, dest / sid, arm, weights[arm])
+        with (history_embeddings() if len(arms) > 1 else nullcontext()) as stats:
+            for arm in arms:
+                dest = out / phase / arm
+                dest.mkdir(exist_ok=True, parents=True)
+                with (dest / (sid + ".lock")).open("a") as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    score(trainer, c, dest / sid, arm, weights[arm])
+            if stats is not None:
+                print(sid, "encoder batches", stats(), flush=True)
 
 
 if __name__ == "__main__":

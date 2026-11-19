@@ -12,10 +12,29 @@ from experiments.controller.probe_omitted import check_responses, omitted_final_
 from experiments.controller.audit_training_replays import probability_placement
 from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
 from experiments.controller.transfer_grounding import external_histories
+from experiments.controller.writer_granularity import source_variants
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_split_only_the_source_pairs_actually_written(self):
+        date = "8 May, 2023"
+        pair = date + " | Bo: Your plan? Ada: Travel."
+        written = "The writer summary."
+        source = ('DATE: ' + date + '\nBo said, "Hi."\nAda said, "Hi."'
+                  '\nBo said, "Your plan?"\nAda said, "Travel."')
+        last = {"source": source, "parsed_actions": [{"success": True, "reasoning": "attributed_turn_pairs",
+                "memory_content": pair}], "changes": [
+                {"action": "INSERT", "version": 1, "memory_id": i, "before": None, "after": text}
+                for i, text in enumerate([written, pair])], "refs": [], "retrieved": []}
+        live, fixed, tails = source_variants([last])
+        self.assertEqual(list(live.values()), [written, pair])
+        self.assertEqual(fixed, [written])
+        self.assertEqual(tails, {"pair": [pair], "single": [date + " | Bo: Your plan?", date + " | Ada: Travel."]})
+        self.assertIsNone(source_variants([dict(last, parsed_actions=[])]))
+        with self.assertRaises(ValueError):
+            source_variants([dict(last, changes=last["changes"][::-1])])
+
     def test_equivalent_numeral_and_spelled_duration_is_separate_from_fact_recovery(self):
         correct = "Three years."
         self.assertTrue(duration_alias("Nate has had his first two turtles for 3 years.", correct, "three years"))

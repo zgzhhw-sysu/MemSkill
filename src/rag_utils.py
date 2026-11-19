@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 
-
+from src.evaluation_cache import encode_batch
 
 
 try:
@@ -303,12 +303,7 @@ def get_embeddings(retriever: str,
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if _is_qwen_embedding_retriever(retriever):
-        return encoder.encode(
-            inputs,
-            convert_to_numpy=True,
-            batch_size=batch_size,
-            normalize_embeddings=True,
-        )
+        return encode_batch(encoder, inputs, batch_size, normalize=True)
 
     with torch.no_grad():
         for i in tqdm(range(0, len(inputs), batch_size), desc="GET EMBEDDINGS", leave=False):

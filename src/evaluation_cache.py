@@ -1,10 +1,44 @@
-"""Content-addressed responses for deterministic, local paired evaluation."""
+"""Reuse measured model outputs during deterministic paired evaluation."""
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import lru_cache
 import hashlib
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
+
+
+_embedding_batches = ContextVar("paired_history_embedding_batches", default=None)
+
+
+def _encode(model, texts, batch_size, normalize):
+    options = {"normalize_embeddings": True} if normalize else {}
+    return model.encode(texts, convert_to_numpy=True, batch_size=batch_size, **options)
+
+
+@contextmanager
+def history_embeddings():
+    """Reuse exact ordered batches within one history and frozen encoder instance."""
+    @lru_cache(maxsize=384)
+    def measured(model, texts, batch_size, normalize):
+        return _encode(model, list(texts), batch_size, normalize)
+
+    token = _embedding_batches.set(measured)
+    try:
+        yield measured.cache_info
+    finally:
+        _embedding_batches.reset(token)
+        measured.cache_clear()
+
+
+def encode_batch(model, texts, batch_size, *, normalize=False):
+    measured = _embedding_batches.get()
+    if measured is None or not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+        return _encode(model, texts, batch_size, normalize)
+    # Callers may keep or mutate their own vectors when assembling the memory bank.
+    return measured(model, tuple(texts), batch_size, normalize).copy()
 
 
 def digest(value):
