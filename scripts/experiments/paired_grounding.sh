@@ -18,6 +18,9 @@ unset MEMSKILL_GREEDY_EVAL_CACHE
 if [[ "$phase" == validation || "$phase" == test || "$phase" == transfer || "$phase" == transfer-validation ]]; then
     export MEMSKILL_GREEDY_EVAL_CACHE="$STUDY_DIR/response-cache/${phase/transfer/longmemeval}"
 fi
+if [[ $phase == replay-validation-choices ]]; then
+    export MEMSKILL_GREEDY_EVAL_CACHE="$STUDY_DIR/response-cache/validation"
+fi
 if [[ $phase == transfer || $phase == transfer-validation ]]; then
     module=experiments.controller.transfer_grounding
     dataset=longmemeval

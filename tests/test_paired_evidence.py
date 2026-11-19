@@ -3,12 +3,15 @@ import json
 import unittest
 import torch
 from itertools import permutations
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from statistics import mean
 from types import SimpleNamespace
 
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from experiments.controller.audit_duration_credit import duration_alias
+from experiments.controller.replay_validation_choices import verified_schedule
 from experiments.controller.probe_omitted import check_responses, omitted_final_indices
 from experiments.controller.audit_training_replays import probability_placement
 from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
@@ -181,3 +184,17 @@ class ReaderEvidenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             reader_inputs([write, rewrite, dict(snapshot, memory_refs=[[0, 1], [1, 1]]), query],
                           [row], {0: qa}, evaluator)
+
+    def test_external_schedule_must_match_its_recorded_policy(self):
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            path = directory / "decisions.json"
+            row = {"use": True, "prob": .5, "base_logit": 0., "state": [1.]}
+            path.write_text(json.dumps([row]))
+            self.assertEqual(verified_schedule(directory, [0., 0.], 1), [True])
+            for weights, steps in (([1., 0.], 1), ([0., 0.], 2)):
+                with self.assertRaises(ValueError):
+                    verified_schedule(directory, weights, steps)
+            path.write_text(json.dumps([dict(row, use=False)]))
+            with self.assertRaises(ValueError):
+                verified_schedule(directory, [0., 0.], 1)

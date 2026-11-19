@@ -77,7 +77,7 @@ def dated_turn_groups(source, group_size):
     header, _, body = source.partition("\n")
     if header.startswith("Session Date: "):
         date = header.removeprefix("Session Date: ")
-        parts = re.split(r"(?:^|\n\n)(user|assistant): ", body.strip())
+        parts = re.split(r"(?:^|\n\n)(user|assistant): ", body.removeprefix("\n"))
         turns = [f"{role}: {text.strip()}" for role, text in zip(parts[1::2], parts[2::2], strict=True)]
     elif header.startswith("DATE: "):
         date = header.removeprefix("DATE: ")

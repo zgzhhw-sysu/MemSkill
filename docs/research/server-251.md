@@ -90,3 +90,12 @@ tail -c 1200 "$work/runs/paired-251-equal-sources/train.log"
 已经通过 LoCoMo 开发筛选的 CPU 编码策略，在固定的 17 条 LongMemEval-S 开发历史上复核。运行 `MEMSKILL_EXTERNAL_WORKERS=2 bash scripts/experiments/paired_transfer_validation.sh` 可在同一个限载服务前使用两个 CPU 客户端。固定清单按从零开始的序号分配，偶数组含 9 条历史、453 个 session，奇数组含 8 条历史、363 个 session。每个进程都在同一历史上跑齐所有策略，全部结束后统一复核 17 条历史的逐题结果。默认使用一个客户端。日志在 `$STUDY_DIR/longmemeval-validation/worker-even.log` 和 `worker-odd.log`。
 
 251 的原 GPU 编码候选完成 75 题及等次数对照后，信用组为 0.28743，等次数组为 0.29407，固定活动技能组为 0.32039。该候选及优先级更高的扩充候选均已记录 `advance=false`。剩余正式候选只需 3、5、6 号卡，外部验证因此可在 7 号卡上申请独立租约，通过 18757 端口使用 40% 占空比生成服务。此次交接沿用已冻结的协议、权重与逐请求缓存。已启动的主进程按原清单顺序运行，一个补充进程先处理奇数序号的历史，每个完成的策略与历史组合按锁和输入指纹复用。
+### 跨编码配置重放开发动作
+
+`memskill-251-encoder-schedule-cross` 依次在两个编码环境执行另一个环境的信用组选技。GPU 方向只在建库和问答期间申请 4 号编码卡，两边的 Llama 请求都经 7 号卡已有的 18757 限载服务。逐向日志保存在 `~/memskill-work/runs/paired-251/encoder-schedule-cross/`。固定检查点技能向量的训练分析只需 CPU。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 "$MEMSKILL_PYTHON" -m experiments.controller.audit_skill_embeddings \
+    "$work/study-eight" "$CONTROLLER_CHECKPOINT" --development "$work/study-anchor" "$work/study-anchor-gpu"
+```

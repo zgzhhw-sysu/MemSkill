@@ -220,7 +220,8 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices"])
+    parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
                         help="Last session of the completed training panel for the weaker-branch audit")
     parser.add_argument("--study-weaker-omitted", action="store_true",
@@ -290,6 +291,15 @@ def main():
                 temporary.replace(path)
         else:
             raise ValueError("Run training first")
+    if options.study_phase == "replay-validation-choices":
+        from experiments.controller.replay_validation_choices import replay
+        if options.study_reference is None:
+            parser.error("replay-validation-choices requires --study-reference")
+        with (out / "validation-schedule.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            replay(trainer, out, options.study_reference, [prefix(c, protocol["validation_sessions"]) for c in val],
+                   load_arm_weights(out, "credit"))
+        return
     if options.study_phase == "test":
         locked = json.loads((Path(__file__).with_name("protocols") / "paired_grounding_cohort.json").read_text())["primary"]
         if protocol["input_sha256"] != locked["file_sha256"] or protocol["test"] != locked["ids"]:
