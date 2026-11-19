@@ -206,6 +206,8 @@ def main():
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker"])
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
                         help="Last session of the completed training panel for the weaker-branch audit")
+    parser.add_argument("--study-weaker-omitted", action="store_true",
+                        help="Audit positive sampled-action credit in completed omitted-final question receipts")
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
@@ -284,7 +286,7 @@ def main():
                    for start, end in train_windows if end <= through for sid in protocol["train"])
         if options.study_phase == "probe-weaker":
             from experiments.controller.probe_weaker import probe_weaker_windows
-            probe_weaker_windows(trainer, out, windows, through)
+            probe_weaker_windows(trainer, out, windows, through, omitted=options.study_weaker_omitted)
         else:
             from experiments.controller.probe_omitted import probe_training_windows
             probe_training_windows(trainer, out, windows)

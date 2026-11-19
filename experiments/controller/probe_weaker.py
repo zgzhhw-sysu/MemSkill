@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 
-from experiments.controller.probe_omitted import atomic_json, check_responses
+from experiments.controller.probe_omitted import atomic_json, check_responses, omitted_final_indices
 from experiments.controller.resume_status import load_episode
 from src.credit_assignment import _answer, _digest, _same_branch, _write_branch, hidden_retrieval_candidate, possible_recovery
 from src.episode_trace import evidence_turns
@@ -100,9 +100,35 @@ def check_weaker_span(trainer, conversation, spans, diagnosis):
     return report
 
 
-def probe_weaker_windows(trainer, study, windows, through):
+def supplementary_diagnoses(source, episode, spans, convo, events, trace_hash, backend):
+    supplement = json.loads((source / (episode.name + ".json")).read_text())
+    original = [e["diagnosis"] for e in events if e["kind"] == "span_credit"][-1]
+    observed = {int(e["query_id"].rsplit("_", 1)[1]) for e in events if e["kind"] == "qa" and e["success"]}
+    indices = omitted_final_indices(spans, convo["qa"], observed, original)
+    signature = {"backend": backend, "episode": episode.name, "trace_sha256": trace_hash,
+                 "span": len(spans)-1, "original_question_ids": [convo["qa"][i]["original_index"] for i in indices],
+                 "rule": 2}
+    if supplement["inputs"] != signature:
+        raise ValueError("Omitted-question receipt does not belong to this episode and backend")
+    diagnosis = supplement["diagnosis"]
+    if not indices and diagnosis is None:
+        return []
+    if not indices or not diagnosis or [q["qa_index"] for q in diagnosis["questions"]] != indices:
+        raise ValueError("Unexpected question coverage in the supplementary receipt")
+    if (diagnosis["span_id"] != original["span_id"] or diagnosis["sampled_skills"] != original["sampled_skills"]
+            or diagnosis["candidate_versions"] != original["candidate_versions"]):
+        raise ValueError("Supplementary probe describes a different training action")
+    check_responses(diagnosis)
+    return [diagnosis]
+
+
+def probe_weaker_windows(trainer, study, windows, through, *, omitted=False):
     backend = os.environ.get("MEMSKILL_BACKEND_ID", trainer.args.api_base)
-    root = study / "diagnostics" / "weaker-branch" / hashlib.sha256(backend.encode()).hexdigest()[:16]
+    key = hashlib.sha256(backend.encode()).hexdigest()[:16]
+    source = study / "diagnostics" / "omitted-final" / key
+    root = study / "diagnostics" / "weaker-branch" / key
+    if omitted:
+        root = root / "omitted-final"
     root.mkdir(parents=True, exist_ok=True)
     jobs = []
     counts = Counter()
@@ -114,17 +140,19 @@ def probe_weaker_windows(trainer, study, windows, through):
         ids = [q["original_index"] for q in convo["qa"]]
         load_episode(episode, convo["sample_id"], len(spans), ids, deployment_writer=trainer.args.span_credit_deployment_writer)
         counts["windows"] += 1
-        for event in events:
-            if event["kind"] != "span_credit":
-                continue
-            d = event["diagnosis"]
+        trace_hash = hashlib.sha256(raw).hexdigest()
+        records = (supplementary_diagnoses(source, episode, spans, convo, events, trace_hash, backend) if omitted else
+                   [e["diagnosis"] for e in events if e["kind"] == "span_credit"])
+        for d in records:
             counts["sampled_losses_checked_by_original_rule"] += sum(q["controller_delta"] < 0 for q in d["questions"])
             positives = [q for q in d["questions"] if q["controller_delta"] > 0]
             if positives:
                 if d["evidence_rule_version"] != 2 or any(q["cause"] != "selection" for q in positives):
                     raise ValueError("Expected selection-only rule-2 training credits")
-                signature = {"episode": episode.name, "trace_sha256": hashlib.sha256(raw).hexdigest(), "backend": backend,
+                signature = {"episode": episode.name, "trace_sha256": trace_hash, "backend": backend,
                              "span": d["span_id"], "positive_question_ids": [q["original_index"] for q in positives]}
+                if omitted:
+                    signature["supplement_sha256"] = hashlib.sha256((source / (episode.name + ".json")).read_bytes()).hexdigest()
                 jobs.append((convo, spans, d, signature))
     # End-of-window swaps can be checked before the more expensive suffix replays.
     jobs.sort(key=lambda job: (len(job[1]) - job[2]["span_id"], job[3]["episode"]))

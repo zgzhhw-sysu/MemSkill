@@ -45,3 +45,13 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 在 `conv-47` 上，CPU 编码的信用组前三次实际选择活动细节技能，第四次切换到时间上下文技能。原 GPU 后端在已保存的固定策略轨迹上预计第三次就会切换。`memskill-251-anchor-gpu.service` 已校验两个基线的原始轨迹、回答和冻结权重，并等待扩充训练释放 4、7 号卡，再用原编码配置复核。该组使用 `~/memskill-work/study-anchor-gpu/` 和 `~/memskill-work/runs/paired-251-anchor-gpu/`，生成服务使用端口 18754，限载设置与 18752 相同。
 
 正式测试的候选顺序在三组验证决定产生之前固定。先考虑扩充到八个 session 的策略，其次是原 GPU 编码环境下的零信用约束策略，最后是训练写入提示与部署一致的策略。选取顺序中第一个通过五组验证标准的候选。`memskill-251-official.service` 在等待期间只使用 CPU。选定后，`~/memskill-work/runs/official-251/selected.json` 记录验证决定及冻结权重的指纹。完整评估沿用该候选的模型、编码和限载配置，按历史补齐六组结果，包括在每条历史保持技能使用次数相同的对照。每个基准的逐题结果和中断恢复入口见[服务器交接文档](server-handoff.md)。
+
+训练归因的补充任务可用以下命令查看。原始训练窗口、各项探查与完整历史评估分别写入各自目录。前三个写入粒度窗口的逐题回答、等来源发言数量复核和第 85 题较差分支的两种修复记录都在 `~/memskill-work/runs/paired-251/` 下。
+
+```bash
+systemctl --user status memskill-251-weaker-six memskill-251-omitted-strict memskill-251-omitted-weaker --no-pager
+systemctl --user status memskill-251-granularity-placement memskill-251-duration-aligned --no-pager
+systemctl --user status memskill-251-transfer-validation memskill-251-official --no-pager
+```
+
+`memskill-251-omitted-weaker` 等待遗漏题记录收齐后，用同一限载后端逐条复核较差分支。`memskill-251-duration-aligned` 等待十二个对齐写入窗口全部完成，再用 CPU 重新计算排除数词写法影响后的留一对话结果。

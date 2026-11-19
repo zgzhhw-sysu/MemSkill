@@ -7,6 +7,7 @@ from statistics import mean
 from types import SimpleNamespace
 
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
+from experiments.controller.audit_duration_credit import duration_alias
 from experiments.controller.probe_omitted import check_responses, omitted_final_indices
 from experiments.controller.audit_training_replays import probability_placement
 from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
@@ -15,6 +16,15 @@ from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_equivalent_numeral_and_spelled_duration_is_separate_from_fact_recovery(self):
+        correct = "Three years."
+        self.assertTrue(duration_alias("Nate has had his first two turtles for 3 years.", correct, "three years"))
+        self.assertTrue(duration_alias(correct, "3 years", "3 years"))
+        for old in ("For 13 years.", "For 3.5 years.", "For 3 months.", "Not for 3 years.",
+                    "For twenty-three years.", "For almost 3 years.", "He might keep them for 3 years."):
+            self.assertFalse(duration_alias(old, correct, "three years"))
+        self.assertFalse(duration_alias("For 3 years.", correct, "three years in Boston"))
+
     def test_conditional_placement_removes_the_probability_of_using_two_or_zero_pairs(self):
         logits = torch.tensor([1.5, -.3], dtype=torch.float64)
         scores = {"00": .2, "10": .8, "01": .1, "11": .4}
