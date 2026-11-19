@@ -12,13 +12,59 @@ from experiments.controller.audit_trajectory_return import policy_value
 from experiments.controller.evaluate_last_switches import final_switches
 from experiments.controller.paired_grounding import load_arm_weights, reuse_identical_choices
 from experiments.controller.paired_policy import (PairedPolicy, count_schedule, fit_policy, fit_anchored_credit,
-    fit_memory_novelty, fit_source_count_correction, match_training_probability, memory_novelty, novelty_logit_shift)
+    fit_constrained_placement, fit_memory_novelty, fit_source_count_correction, match_training_probability, memory_novelty, novelty_logit_shift)
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
-from src.replay import attributed_turn_pairs
+from src.replay import attributed_turn_pairs, dated_turn_groups
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_equal_source_arms_keep_identical_words_on_multiline_locomo_and_longmem(self):
+        src = ('DATE: Thursday on 1 June, 2023\nCONVERSATION:\nTim said, "First line\nsecond yesterday."\n'
+               'John said, "I have a picture" and shared a photo.\nTim said, "Thanks!"')
+        singles = dated_turn_groups(src, 1)
+        self.assertEqual(len(singles), 3)
+        self.assertIn("second yesterday (31 May 2023).", singles[0])
+        self.assertIn("[shared a photo.]", singles[1])
+        long = "Session Date: 2023-01-01\n\nuser: " + "long " * 145 + "\n\nassistant: First line\nsecond line."
+        for source in (src, long):
+            texts = [[" ".join(x.partition(" | ")[2].split()) for x in dated_turn_groups(source, k)] for k in (1, 2)]
+            self.assertEqual(" ".join(texts[0]), " ".join(texts[1]))
+            self.assertTrue(all(len(part.split()) <= 96 for group in texts for part in group))
+        self.assertEqual(len(dated_turn_groups(src, 2)), 2)
+
+    def test_fixed_pair_retains_native_common_skills_and_exactly_one_source_rule(self):
+        torch.manual_seed(73)
+        native = PPOController(state_dim=5, op_dim=4, hidden_dim=8, action_top_k=3, device="cpu")
+        state, ops = torch.randn(5), torch.randn(6, 4)
+        logits = native.get_action_logits(native.encode_state(state[None]), native.encode_ops(ops[None]))[0]
+        ordered = logits.argsort(descending=True).tolist()
+        for target, other in ((ordered[0], ordered[1]), (ordered[-1], ordered[-2])):
+            p = PairedPolicy(native, target, other)
+            common = [i for i in ordered if i not in (target, other)][:2]
+            for mode, chosen, prob in (("plain", other, 0.), ("always", target, 1.)):
+                p.mode = mode
+                self.assertEqual(p(state, ops, deterministic=True)[0], common + [chosen])
+                self.assertEqual(p.decisions[-1]["prob"], prob)
+            p.mode = "explore"
+            noise = {}
+            actions, _, _ = p(state, ops, record_noise=noise)
+            self.assertEqual(actions[:2], noise["paired_alternative"][:2])
+            self.assertEqual({actions[-1], noise["paired_alternative"][-1]}, {target, other})
+
+    def test_constrained_credit_redirects_a_fixed_training_rate_and_kl(self):
+        rows = [dict(state=[x, 0.], base_logit=0., use=True, delta=.4*x) for x in (-1., 1.)]
+        rate, anchor = torch.zeros(3), torch.tensor([0., -.8, 0.])
+        w, fit = fit_constrained_placement(rows, rate, anchor)
+        self.assertGreater(w[1], 0.)
+        self.assertAlmostEqual(fit["achieved_rate"], .5, places=6)
+        self.assertAlmostEqual(fit["achieved_kl"], fit["target_kl"], places=7)
+        with self.assertRaises(ValueError):
+            fit_constrained_placement(rows, torch.tensor([1., 0., 0.]), anchor)
+        fallback, info = fit_constrained_placement([dict(r, delta=0.) for r in rows], rate, anchor)
+        self.assertTrue(torch.equal(fallback, anchor))
+        self.assertEqual(info["fit"], "anchor")
+
     def test_final_switch_marks_whether_both_policies_reached_the_observed_prefix(self):
         arms = {"credit": [.8, .6], "credit_rate": [.1, .55], "anchor": [.6, .49],
                 "anchor_rate": [.7, .5], "novelty": [.2, .7]}

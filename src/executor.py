@@ -187,10 +187,12 @@ class Executor:
                 reasoning="No executor results produced"
             )]
         if all(r.success for r in all_results):
-            from .replay import attributed_turn_pairs, dated_relative_turns
+            from .replay import attributed_turn_pairs, dated_relative_turns, dated_turn_groups
             rules = {getattr(op, "source_rule", None) for op in operations if op.update_type.lower() == "insert"}
             seen = set(retrieved_memories) | {r.memory_content for r in all_results}
-            for name, extract in (("dated_relative_turns", dated_relative_turns), ("attributed_turn_pairs", attributed_turn_pairs)):
+            for name, extract in (("dated_relative_turns", dated_relative_turns), ("attributed_turn_pairs", attributed_turn_pairs),
+                                  ("dated_single_turns", lambda text: dated_turn_groups(text, 1)),
+                                  ("dated_adjacent_turns", lambda text: dated_turn_groups(text, 2))):
                 if name in rules:
                     for item in extract(session_text):
                         if item not in seen:

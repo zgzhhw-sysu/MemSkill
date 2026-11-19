@@ -12,7 +12,7 @@ from scipy.special import expit, logit
 
 from experiments.controller.audit_paired import probability
 from experiments.controller.paired_grounding import window
-from experiments.controller.paired_policy import (fit_anchored_credit, fit_memory_novelty, fit_policy,
+from experiments.controller.paired_policy import (fit_anchored_credit, fit_constrained_placement, fit_memory_novelty, fit_policy,
                                                   match_training_probability, novelty_logit_shift)
 from experiments.controller.resume_status import load_episode
 from src.eval import get_evaluator
@@ -68,6 +68,8 @@ def contrasts(episodes):
     compared = {}
     comparators = {"credit": ("terminal", "credit_rate"), "anchor": ("terminal", "anchor_rate"),
                    "novelty": ("anchor", "anchor_rate")}
+    if "constrained" in values:
+        comparators["constrained"] = ("anchor", "anchor_rate")
     for arm, controls in comparators.items():
         result = {}
         for baseline in controls:
@@ -84,7 +86,7 @@ def contrasts(episodes):
             "values": values, "differences": compared}
 
 
-def audit(study, locomo, *, progress=False):
+def audit(study, locomo, *, progress=False, constrained_candidate=False):
     protocol = json.loads((study / "protocol.json").read_text())
     starts = [1, 3, 5, 7]
     if protocol["train_sessions"] != [[s, s+1] for s in starts]:
@@ -117,6 +119,8 @@ def audit(study, locomo, *, progress=False):
         weights = {"terminal": terminal, "credit": credit, "anchor": anchor,
                    "credit_rate": match_training_probability(fit, terminal, credit),
                    "anchor_rate": match_training_probability(fit, terminal, anchor)}
+        if constrained_candidate:
+            weights["constrained"], _ = fit_constrained_placement(fit, weights["anchor_rate"], anchor)
         rows = target["rows"]
         probabilities = {arm: [probability(row, w.numpy()) for row in rows] for arm, w in weights.items()}
         novelty = fit_memory_novelty(fit, anchor)
@@ -139,5 +143,6 @@ if __name__ == "__main__":
     parser.add_argument("study", type=Path)
     parser.add_argument("locomo", type=Path)
     parser.add_argument("--progress", action="store_true", help="Include only atomically completed session 7–8 windows")
+    parser.add_argument("--constrained-candidate", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(audit(args.study, args.locomo, progress=args.progress), indent=2))
+    print(json.dumps(audit(args.study, args.locomo, progress=args.progress, constrained_candidate=args.constrained_candidate), indent=2))

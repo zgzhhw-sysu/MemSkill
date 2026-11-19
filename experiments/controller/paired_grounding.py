@@ -25,6 +25,20 @@ from src.revision_validation import evaluate_bank
 from src.trainer import get_trainer
 
 
+def configure_policy(trainer, equal_sources):
+    bank = trainer.operation_bank
+    target = "capture_activity_details"
+    alternative = "capture_temporal_context"
+    bank.get_operation(target).source_rule = "dated_adjacent_turns" if equal_sources else "attributed_turn_pairs"
+    if equal_sources:
+        bank.get_operation(alternative).source_rule = "dated_single_turns"
+    specs = [skill_spec(op) for op in bank.get_candidate_operations()]
+    names = [spec["name"] for spec in specs]
+    trainer.controller = PairedPolicy(trainer.controller, names.index(target),
+                                      names.index(alternative) if equal_sources else None)
+    return specs
+
+
 def window(conversation, start, length):
     subset = prefix(conversation, start + length - 1)
     keys = [f"session_{i}" for i in range(start, start + length)]
@@ -96,12 +110,15 @@ def reuse_identical_choices(dest, arm, weights, signature):
                 state = torch.tensor(row["state"], dtype=weights.dtype)
                 vector = torch.cat((state.new_ones(1), torch.nn.functional.normalize(state, dim=0)))
                 logit += float(vector @ weights)
-            use = arm == "always" or logit >= 0
-            probability = 1.0 if arm == "always" else float(torch.sigmoid(torch.tensor(logit)))
+            use = logit >= 0
+            probability = float(torch.sigmoid(torch.tensor(logit)))
+            if arm in ("always", "plain"):
+                use = arm == "always"
+                probability = float(use)
             if schedule is not None:
                 use = schedule[index]
                 probability = float(use)
-            if use != row["use"] or (arm not in ("always", "count") and abs(logit) < 1e-5):
+            if use != row["use"] or (arm not in ("always", "plain", "count") and abs(logit) < 1e-5):
                 break
             revised.append(dict(row, prob=probability))
         if len(revised) != len(decisions):
@@ -183,7 +200,7 @@ def score(trainer, conversation, dest, arm, weights):
 
 
 def load_arm_weights(study, arm):
-    if arm in ("native", "always", "count"):
+    if arm in ("native", "always", "plain", "count"):
         return None
     path = study / (arm + ".json")
     if arm == "rate" and not path.exists():
@@ -209,10 +226,12 @@ def main():
     parser.add_argument("--study-weaker-omitted", action="store_true",
                         help="Audit positive sampled-action credit in completed omitted-final question receipts")
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "count", "all"], default="all")
+    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "plain", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
     parser.add_argument("--study-train-sessions", type=int, choices=(4, 8),
                         help="Use the first 4 or 8 sessions of each training dialogue, in disjoint pairs")
+    parser.add_argument("--study-equal-sources", action="store_true",
+                        help="Compare the activity and temporal skills with paired and single source turns in slot three")
     parser.add_argument("--study-deployment-writer", action="store_true",
                         help="Use evaluation-time writer prompts in training and counterfactual branches")
     parser.add_argument("--study-anchor-abstentions", action="store_true",
@@ -237,11 +256,8 @@ def main():
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
     trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
-    bank = trainer.operation_bank
-    target = "capture_activity_details"
-    bank.get_operation(target).source_rule = "attributed_turn_pairs"
-    specs = [skill_spec(op) for op in bank.get_candidate_operations()]
-    trainer.controller = PairedPolicy(trainer.controller, [s["name"] for s in specs].index(target))
+    equal_sources = options.study_equal_sources or saved_protocol.get("equal_sources", False)
+    specs = configure_policy(trainer, equal_sources)
     train, val, test = split_data(load_dataset(args.data_file, "locomo"), "locomo")
     protocol = {
         "input_sha256": hashlib.sha256(Path(args.data_file).read_bytes()).hexdigest(),
@@ -256,6 +272,8 @@ def main():
         "target": "at least +0.02 micro mean per-question F1 vs terminal and native, positive on each independent test dialogue",
         "weight": 1, "ridge": 0.01, "rule": 2, "span_budget": args.span_credit_spans, "question_budget": args.span_credit_questions,
     }
+    if equal_sources:
+        protocol["equal_sources"] = True
     if args.span_credit_deployment_writer:
         protocol["deployment_writer"] = True
     if options.study_anchor_abstentions or saved_protocol.get("anchor_abstentions"):
@@ -301,8 +319,9 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 batch = collect(trainer, window(c, start, 2), args.seed + i*100 + start, dest)
             print(dest.name, [(r["use"], r["delta"]) for r in batch], flush=True)
-        rows = [row for start, i, c in episodes
-                for row in json.loads((root / f"{c['sample_id']}_s{start}" / "rows.json").read_text())]
+        rows = [row for start, _, c in episodes
+                for row in load_episode(root / f"{c['sample_id']}_s{start}", c["sample_id"], 2,
+                                        deployment_writer=args.span_credit_deployment_writer)]
         with (out / "fit.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             terminal = fit_policy(rows, 0)
@@ -318,6 +337,8 @@ def main():
     group = [prefix(c, 6) for c in val] if options.study_phase == "validation" else test
     root = out / options.study_phase
     arms = ["native", "terminal", "credit", "always", "rate"]
+    if equal_sources:
+        arms.append("plain")
     for arm in arms if options.study_arm == "all" else [options.study_arm]:
         directory = root / arm
         directory.mkdir(parents=True, exist_ok=True)

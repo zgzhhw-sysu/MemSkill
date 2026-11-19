@@ -42,6 +42,10 @@ else:
         path.write_text(json.dumps(record, indent=2))
         os.link(path, dest)
 PY
+arms=(native always credit terminal rate count)
+if "$python_bin" -c 'import json,sys; sys.exit(not json.load(open(sys.argv[1])).get("equal_sources", False))' "$STUDY_DIR/protocol.json"; then
+    arms+=(plain)
+fi
 bash scripts/experiments/paired_grounding.sh transfer-validation --study-arm all
 "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" "$phase" \
-    --arms native terminal credit always rate count
+    --arms "${arms[@]}"

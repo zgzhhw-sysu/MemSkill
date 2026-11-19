@@ -73,3 +73,15 @@ export MEMSKILL_BACKEND_ID=251-hf-llama3-bf16-pre16-duty28-gpu56-qwen-cpu-fp16
 export MEMSKILL_API_BASE=http://127.0.0.1:18753/v1
 "$MEMSKILL_PYTHON" -m experiments.controller.writer_granularity "$STUDY_DIR" "$LOCOMO_DATA" "$run_dir/writer-granularity"
 ```
+### 等来源选技的训练与开发验证
+
+`memskill-251-equal-sources.service` 在独立工作目录运行 12 个真实训练窗口，再验证两段开发前缀。编码在 CPU 上，生成复用 5、6 号卡上占空比 28% 的 BF16 服务。该服务退出后，监督脚本等待已排定的正式任务和对齐写入任务结束，再按相同参数为这两张卡申请租约。新实验的逐窗口轨迹在 `~/memskill-work/study-equal-sources/train/`，日志位于 `~/memskill-work/runs/paired-251-equal-sources/`。目标机的启动脚本为 `~/memskill-work/deploy/run-equal-source-study.sh`。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+systemctl --user status memskill-251-equal-sources --no-pager
+"$MEMSKILL_PYTHON" -m experiments.controller.resume_status "$work/study-equal-sources"
+tail -c 1200 "$work/runs/paired-251-equal-sources/train.log"
+```
+
+迁移时拷贝原实验目录、模型、数据及脚本，并保留首轮的 `protocol.json`。另一台机器准备好同一推理后端后，将 `STUDY_DIR` 设为拷贝的研究目录。通过 `bash scripts/experiments/paired_grounding.sh train --study-equal-sources --study-deployment-writer --study-anchor-abstentions` 续跑。训练断点会复核被冻结的技能及其在两种写入中的位置。开发结果包括固定逐条记的 `plain` 组和固定两条合记的 `always` 组。

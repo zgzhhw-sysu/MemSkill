@@ -8,12 +8,10 @@ import json
 from pathlib import Path
 import sys
 
-from experiments.controller.paired_grounding import load_arm_weights, score
-from experiments.controller.paired_policy import PairedPolicy
+from experiments.controller.paired_grounding import configure_policy, load_arm_weights, score
 from src.cli import set_seed
 from src.data_processing.datasets import load_dataset
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
-from src.episode_trace import skill_spec
 from src.evaluation_cache import history_embeddings
 from src.trainer import get_trainer
 
@@ -42,7 +40,7 @@ def external_histories(data, splits, formal, validation=None):
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "rate", "count", "all"), required=True)
+    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "plain", "rate", "count", "all"), required=True)
     parser.add_argument("--study-external-validation", action="store_true")
     parser.add_argument("--study-reverse", action="store_true")
     parser.add_argument("--study-writer-tokenizer", type=Path, help="Local writer model directory for context budgeting")
@@ -76,14 +74,12 @@ def main():
     if options.study_writer_tokenizer:
         from src.writer_context import WriterContext
         trainer.executor.writer_context = WriterContext(options.study_writer_tokenizer)
-    target = "capture_activity_details"
-    trainer.operation_bank.get_operation(target).source_rule = "attributed_turn_pairs"
-    skills = [skill_spec(op) for op in trainer.operation_bank.get_candidate_operations()]
-    if skills != protocol["skills"]:
+    if configure_policy(trainer, protocol.get("equal_sources", False)) != protocol["skills"]:
         raise ValueError("Training and transfer skill libraries differ")
-    trainer.controller = PairedPolicy(trainer.controller, [s["name"] for s in skills].index(target))
     phase = "longmemeval-validation" if dev else "longmemeval"
     arms = ("credit", "count", "terminal", "rate", "always", "native") if options.study_arm == "all" else (options.study_arm,)
+    if options.study_arm == "all" and protocol.get("equal_sources"):
+        arms += ("plain",)
     weights = {arm: load_arm_weights(out, arm) for arm in arms}
     for c in reversed(held) if options.study_reverse else held:
         sid = str(c["question_id"])

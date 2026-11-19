@@ -70,6 +70,35 @@ def attributed_turn_pairs(source):
     return [date + " | " + " ".join(turns[i:i + 2]) for i in range(0, len(turns), 2)]
 
 
+def dated_turn_groups(source, group_size):
+    """Format the same dated source words as one- or two-turn items, including multiline messages."""
+    if group_size not in (1, 2):
+        raise ValueError("Expected a single turn or an adjacent pair")
+    header, _, body = source.partition("\n")
+    if header.startswith("Session Date: "):
+        date = header.removeprefix("Session Date: ")
+        parts = re.split(r"(?:^|\n\n)(user|assistant): ", body.strip())
+        turns = [f"{role}: {text.strip()}" for role, text in zip(parts[1::2], parts[2::2], strict=True)]
+    elif header.startswith("DATE: "):
+        date = header.removeprefix("DATE: ")
+        turns = []
+        body = body.removeprefix("CONVERSATION:\n")
+        for part in re.split(r'\n(?=[^"\n]+? said, ")', body):
+            match = re.fullmatch(r'([^"\n]+?) said, "(.*)"(?: and shared (.+))?', part, flags=re.S)
+            if not match:
+                raise ValueError("Malformed dated LoCoMo turn")
+            speaker, words, image = match.groups()
+            words = anchor_relative_time({"session_date": date, "text": words})
+            turns.append(f"{speaker}: {words}" + (f" [shared {image}]" if image else ""))
+    else:
+        return []
+    chunks = []
+    for start in range(0, len(turns), group_size):
+        words = " ".join(turns[start:start + group_size]).split()
+        chunks.extend(date + " | " + " ".join(words[j:j + 96]) for j in range(0, len(words), 96))
+    return chunks
+
+
 def restore_text(events):
     """Replay stable IDs including repeated updates and deletion of shifted indices."""
     live = {}
