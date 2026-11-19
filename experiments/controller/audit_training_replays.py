@@ -1,6 +1,6 @@
 """Compare frozen decisions on recorded single-span interventions in held-out training dialogues."""
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 import json
 from pathlib import Path
 from statistics import mean
@@ -26,6 +26,37 @@ def read_windows(study, protocol):
     return windows
 
 
+def probability_placement(records):
+    """Evaluate a single randomized decision using the two measured outcomes at its state."""
+    grouped = defaultdict(list)
+    for r in records:
+        grouped[r["dialogue"], r["window"], r["span"]].append(r)
+    dialogues = defaultdict(list)
+    for (dialogue, _, _), links in grouped.items():
+        probabilities = links[0]["probabilities"]
+        if any(link["probabilities"] != probabilities for link in links):
+            raise ValueError("A single span must have the same policy for every linked question")
+        plain = mean(link["scores"]["plain"] for link in links)
+        gain = mean(link["scores"]["always"] for link in links) - plain
+        dialogues[dialogue].append((probabilities, plain, gain))
+    by_dialogue = {}
+    for dialogue, spans in dialogues.items():
+        arms = {}
+        for arm in spans[0][0]:
+            mean_p = mean(p[arm] for p, _, _ in spans)
+            expected = mean(plain + p[arm] * gain for p, plain, gain in spans)
+            shuffled = mean(plain + mean_p * gain for _, plain, gain in spans)
+            arms[arm] = {"mean_probability": mean_p, "expected_f1": expected,
+                         "permuted_expected_f1": shuffled, "placement_delta": expected - shuffled}
+        by_dialogue[dialogue] = {"spans": len(spans), "arms": arms}
+    n = len(grouped)
+    aggregate = {arm: {key: sum(d["spans"] * d["arms"][arm][key] for d in by_dialogue.values()) / n
+                       for key in metrics} for arm, metrics in next(iter(by_dialogue.values()))["arms"].items()}
+    return {"weighting": "equal spans; average observed linked questions within each span",
+            "permutation": "all permutations of the same probabilities among covered spans within each held dialogue",
+            "spans": n, "dialogues": by_dialogue, "arms": aggregate}
+
+
 def compare(study):
     protocol = json.loads((study / "protocol.json").read_text())
     windows = read_windows(study, protocol)
@@ -48,7 +79,9 @@ def compare(study):
                     counts["write_fault"] += len(questions)
                     continue
                 state = F.normalize(torch.tensor(row["state"]), dim=0)
-                actions = {arm: (row["base_logit"] + w[0] + state @ w[1:]).item() >= 0 for arm, w in weights.items()}
+                logits = {arm: row["base_logit"] + w[0] + state @ w[1:] for arm, w in weights.items()}
+                actions = {arm: logit.item() >= 0 for arm, logit in logits.items()}
+                probabilities = {arm: logit.sigmoid().item() for arm, logit in logits.items()}
                 actions.update(always=True, plain=False)
                 for question in questions:
                     key = str(question["qa_index"])
@@ -64,7 +97,8 @@ def compare(study):
                     scores = {arm: (original if row["use"] == decision else other)["f1"]
                               for arm, decision in actions.items()}
                     records.append({"dialogue": sample, "window": start, "span": row["span"],
-                                    "question": question["original_index"], "actions": actions, "scores": scores})
+                                    "question": question["original_index"], "actions": actions,
+                                    "probabilities": probabilities, "scores": scores})
     if not records:
         raise ValueError("No linked questions have an observed answer for both actions")
     eligible = {(r["dialogue"], r["window"], r["span"]): r["actions"] for r in records}
@@ -77,7 +111,8 @@ def compare(study):
     return {"scope": "one decision on a held training dialogue, with the suffix exploration noise fixed",
             "coverage": dict(counts), "matched_span_question_links": len(records), "matched_spans": len(eligible),
             "unique_questions": len({(r["dialogue"], r["question"]) for r in records}),
-            "mean_link_f1": means, "anchor_minus": differences, "records": records}
+            "mean_link_f1": means, "anchor_minus": differences,
+            "single_decision_expectation": probability_placement(records), "records": records}
 
 
 if __name__ == "__main__":
