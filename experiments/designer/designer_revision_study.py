@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 
 from experiments.designer.designer_pilot import prefix, save
-from main import load_dataset, split_data, set_seed
+from src.cli import set_seed
+from src.data_processing.datasets import load_dataset, split_data
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.designer import DesignerCase
 from src.episode_trace import evidence_turns

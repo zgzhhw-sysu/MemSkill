@@ -10,7 +10,8 @@ import torch
 
 from experiments.controller.paired_grounding import score
 from experiments.controller.paired_policy import PairedPolicy
-from main import load_dataset, set_seed
+from src.cli import set_seed
+from src.data_processing.datasets import load_dataset
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.episode_trace import skill_spec
 from src.trainer import get_trainer

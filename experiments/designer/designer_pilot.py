@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 import re
 
-from main import (load_dataset, split_data, set_seed, evaluate_text_dataset_queries,
-                  _build_memory_bank_from_sessions)
+from src.cli import set_seed
+from src.data_processing.datasets import load_dataset, split_data
+from src.inference.memory import _build_memory_bank_from_sessions
+from src.inference.text import evaluate_text_dataset_queries
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.controller import PPOBuffer
 from src.designer import DesignerCase
