@@ -24,7 +24,7 @@ from src.controller import PPOController, StateEncoder, OpEncoder, PPOBuffer
 from src.memory_bank import MemoryBank
 from src.operation_bank import OperationBank
 from src.episode_trace import EpisodeTrace, local_diagnosis
-from src.executor import Executor
+from src.executor import Executor, deployment_operations
 from src.designer import Designer, DesignerCase, EvolutionSnapshotManager
 from src.data_processing import get_processor, DataProcessor
 from src.data_processing.alfworld import (
@@ -670,7 +670,8 @@ class BaseTrainer:
         step_log['value'] = value
 
         # Execute operation(s) - optionally prepend fixed initial operations
-        executor_ops = selected_ops
+        deployment_writer = getattr(self.args, "span_credit_deployment_writer", False)
+        executor_ops = deployment_operations(selected_ops) if deployment_writer else selected_ops
         audit = {} if memory_bank.trace is None else {"audit": []}
         # Executor handles the logic for single vs multiple operations internally
         exec_results = self.executor.execute_operation(
@@ -710,7 +711,8 @@ class BaseTrainer:
                 seen.add(name)
                 operation_names.append(name)
         if memory_bank.trace is not None:
-            memory_bank.trace.begin(session_idx, session_text, selected_ops, retrieved_memories, retrieved_indices)
+            memory_bank.trace.begin(session_idx, session_text, executor_ops, retrieved_memories, retrieved_indices,
+                                    selected=selected_ops if deployment_writer else None)
             memory_bank.trace.current.update(executor_responses=audit["audit"], old_log_probability=float(log_prob),
                                              value=float(value))
             if credit_enabled:

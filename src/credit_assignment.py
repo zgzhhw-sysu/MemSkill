@@ -145,10 +145,12 @@ def _answer(trainer, qa, memories):
 
 
 def _write_branch(trainer, events, start, operations, queries, quotes=()):
-    from .executor import ExecutionResult
+    from .executor import ExecutionResult, deployment_operations
     event = events[start]
-    actions = trainer.executor.execute_operation([SimpleNamespace(**s) for s in operations],
-                                                 event["source"], event["retrieved"])
+    aligned = getattr(trainer.args, "span_credit_deployment_writer", False)
+    selected = [SimpleNamespace(**s) for s in operations]
+    writer_ops = deployment_operations(selected) if aligned else selected
+    actions = trainer.executor.execute_operation(writer_ops, event["source"], event["retrieved"])
     parsed = [vars(a).copy() for a in actions]
     if quotes:
         written = set(event["retrieved"]) | {a.memory_content for a in actions}
@@ -169,14 +171,19 @@ def _write_branch(trainer, events, start, operations, queries, quotes=()):
     def observe(current, old, ops, results, success):
         chosen = [skill_spec(op) for op in ops]
         actual = [vars(a).copy() for a in results]
+        executed = [skill_spec(op) for op in deployment_operations(ops)] if aligned else chosen
         suffix.append({"span_id": current["span_id"], "selected": [s["name"] for s in chosen],
                        "retrieval_hash": _digest(old), "actions_hash": _digest(actual),
-                       "matches_rollout": (chosen == current["skills"] and old == current["retrieved"]
+                       "matches_rollout": (chosen == current.get("selected_skills", current["skills"])
+                                           and executed == current["skills"] and old == current["retrieved"]
                                            and actual == current["parsed_actions"] and success == current["applied"]),
-                       "fault": execution_fault(actual, success, chosen)})
+                       "fault": execution_fault(actual, success, executed)})
     bank, failed = rebuild_suffix(trainer, events, start, actions, select_suffix=select_suffix, observe_suffix=observe)
+    executed = [skill_spec(op) for op in writer_ops] if aligned else operations
     result = {"actions": parsed, "failed_span": failed, "suffix": suffix,
-              "contract_fault": execution_fault(parsed, True, operations) or next((s["fault"] for s in suffix if s["fault"]), None)}
+              "contract_fault": execution_fault(parsed, True, executed) or next((s["fault"] for s in suffix if s["fault"]), None)}
+    if aligned:
+        result["writer_skills"] = executed
     if bank is None:
         return result
     contents = bank.get_all_contents()
@@ -250,13 +257,13 @@ def diagnose_episode(trainer, conversation, trace, steps):
     records = []
     probed = 0
     for start, (event, step) in enumerate(zip(events, steps, strict=True)):
-        selected = event["skills"]
+        selected = event.get("selected_skills", event["skills"])
         action = step["action_idx"]
         ids = action if isinstance(action, list) else [action]
         if (candidate_versions != event["candidate_versions"] or [candidates[i] for i in ids] != selected
                 or event["old_log_probability"] != step["log_prob"] or start != event["span_id"]):
             raise ValueError("Sampled action or candidate bank changed before span credit")
-        fault = execution_fault(event["parsed_actions"], event["applied"], selected)
+        fault = execution_fault(event["parsed_actions"], event["applied"], event["skills"])
         if any("API call failed" in a.get("reasoning", "") for a in event["parsed_actions"]):
             raise RuntimeError("Observed Executor failed to reach the model; refusing an invalid rollout")
         record = {"span_id": start, "evidence_rule_version": rule_version, "sampled_skills": selected, "candidate_versions": candidate_versions,

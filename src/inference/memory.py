@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from src.executor import ExecutionResult
+from src.executor import ExecutionResult, deployment_operations
 from src.memory_bank import MemoryBank
 from src.trainer import BaseTrainer
 
@@ -46,11 +46,7 @@ def _extract_memory_actions_step(trainer: BaseTrainer,
     else:
         selected_ops = [candidate_ops[action_idx]]
 
-    executor_ops = [
-        op for op in selected_ops
-        if str(getattr(op, "name", "")).lower() != "noop"
-        and str(getattr(op, "update_type", "")).lower() != "noop"
-    ]
+    executor_ops = deployment_operations(selected_ops)
     # print([i.instruction_template for i in executor_ops])
     exec_impl = executor if executor is not None else trainer.executor
     audit = {} if memory_bank.trace is None else {"audit": []}

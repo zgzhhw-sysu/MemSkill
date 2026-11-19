@@ -9,12 +9,45 @@ import numpy as np
 import torch
 
 from src.controller import PPOBuffer, PPOController
-from src.credit_assignment import allocate, classify, diagnose_episode, execution_fault, single_swap, _digest
+from src.credit_assignment import allocate, classify, diagnose_episode, execution_fault, single_swap, _digest, _write_branch
 from src.episode_trace import skill_spec
+from src.executor import ExecutionResult
 from src.trainer import BaseTrainer
 
 
 class SpanCreditTest(unittest.TestCase):
+    def test_deployment_writer_replays_both_spans_with_the_sampled_noop_slot(self):
+        ops = [SimpleNamespace(name=n, update_type=t, description=n, instruction_template=n,
+                               embedding=np.array([1., 0.])) for n,t in
+               (("insert", "INSERT"), ("noop", "NOOP"), ("capture", "INSERT"))]
+        specs = [skill_spec(op) for op in ops]
+        action = ExecutionResult("INSERT", True, memory_content="fact")
+        bank = SimpleNamespace(get_all_contents=lambda: [], step=lambda: None,
+                               retrieve=lambda *args, **kwargs: ([], [], []))
+        for aligned in (False, True):
+            calls = []
+            def execute(selected, text, retrieved):
+                calls.append([op.name for op in selected])
+                return [action]
+            trainer = SimpleNamespace(args=SimpleNamespace(span_credit_deployment_writer=aligned), device="cpu",
+                operation_bank=SimpleNamespace(get_candidate_operations=lambda: ops),
+                _initialize_memory_bank=lambda: bank, controller=lambda *a, **k: ([0, 1, 2], 0., 0.),
+                state_encoder=SimpleNamespace(_encode_texts=lambda text: np.array([0., 1.]),
+                                              encode=lambda *a, **k: np.array([0., 1.])),
+                executor=SimpleNamespace(execute_operation=execute, apply_to_memory_bank=lambda *a: True))
+            effective = [specs[0], specs[2]] if aligned else specs
+            event = dict(source="source", refs=[], retrieved=[], skills=effective, parsed_actions=[vars(action)],
+                         applied=True, sampling_noise={}, new_op_mask=None, candidate_versions=[s["version"] for s in specs])
+            if aligned:
+                event["selected_skills"] = specs
+            out = _write_branch(trainer, [dict(event, span_id=i) for i in range(2)], 0, specs, {})
+            self.assertEqual(calls, [[s["name"] for s in effective]] * 2)
+            self.assertTrue(out["suffix"][0]["matches_rollout"])
+            self.assertEqual(out["suffix"][0]["selected"], ["insert", "noop", "capture"])
+            self.assertIsNone(out["contract_fault"])
+            if aligned:
+                self.assertEqual(out["writer_skills"], effective)
+
     def test_disabled_native_episode_has_identical_transitions_and_no_probes(self):
         def run(weight):
             args = SimpleNamespace(trace_dir=None)
