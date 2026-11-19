@@ -3,11 +3,20 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from experiments.controller.audit_paired import development_decision, reader_inputs
+from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_shortening_an_already_present_reference_is_separate_from_recovering_it(self):
+        answer = {"answer": "Python and C++.", "f1": 1., "ok": True}
+        long = {"answer": "James has worked with Python and C++.", "f1": .5, "ok": True}
+        missing = {"answer": "There is no mention of the languages.", "f1": 0., "ok": True}
+        self.assertEqual(answer_change(long, answer, ["Python and C++"]), "credit_shorter_with_shared_reference")
+        self.assertEqual(answer_change(answer, long, "Python and C++"), "control_shorter_with_shared_reference")
+        self.assertEqual(answer_change(missing, answer, "Python and C++"), "credit_recovered_reference")
+        self.assertEqual(answer_change(answer, missing, "Python and C++"), "control_recovered_reference")
+
     def test_selection_distinguishes_local_gains_from_a_global_rate_shift(self):
         gains = {"f1_change": 0.03, "control_to_credit_on_same_states": {"greedy_switches": 2},
                  "changed_question_evidence": [
