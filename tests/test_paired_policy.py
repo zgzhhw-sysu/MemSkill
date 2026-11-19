@@ -7,7 +7,7 @@ import unittest
 import torch
 
 from experiments.controller.paired_grounding import reuse_identical_choices
-from experiments.controller.paired_policy import PairedPolicy, fit_policy
+from experiments.controller.paired_policy import PairedPolicy, fit_policy, match_training_probability
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
 
@@ -31,6 +31,18 @@ class PairedPolicyTest(unittest.TestCase):
                 self.assertAlmostEqual(original[1], math.log(0.5))
                 p.mode = "native"
                 self.assertEqual(p(state, ops, deterministic=True)[0], expected)
+
+    def test_rate_control_preserves_terminal_slopes_and_matches_mean_probability(self):
+        rows = [{"state": [float(x)], "base_logit": -0.5} for x in (-1, 1, 1)]
+        terminal, credit = torch.tensor([-0.4, 0.2]), torch.tensor([1.0, -1.5])
+        rate = match_training_probability(rows, terminal, credit)
+        states = torch.tensor([-1., 1., 1.])
+        def probs(w):
+            return (-0.5 + w[0] + states*w[1]).sigmoid()
+        self.assertTrue(torch.equal(rate[1:], terminal[1:]))
+        self.assertAlmostEqual(probs(rate).mean().item(), probs(credit).mean().item(), places=6)
+        self.assertFalse(torch.allclose(probs(rate), probs(credit)))
+        self.assertTrue(torch.equal(match_training_probability(rows, terminal, terminal), terminal))
 
     def test_signed_gains_and_abstentions(self):
         def example(i, use, delta):

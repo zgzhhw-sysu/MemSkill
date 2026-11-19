@@ -86,7 +86,7 @@ def audit(directory, dataset_file, phase, arms):
         conversations = [(c["sample_id"], c) for c in group]
     if "credit" not in arms or "terminal" not in arms:
         raise ValueError("Both credit and terminal results are required")
-    weights = {arm: np.asarray(read(directory / (arm + ".json"))) for arm in ("credit", "terminal")}
+    weights = {arm: np.asarray(read(directory / (arm + ".json"))) for arm in arms if arm in ("credit", "terminal", "rate")}
     scores, probabilities, extra = {}, {}, {}
     groups, answerable = {}, {}
     choices, readers = defaultdict(dict), defaultdict(dict)
@@ -139,8 +139,10 @@ def audit(directory, dataset_file, phase, arms):
                 raise ValueError("Incomplete traced history")
             for i, (row, event) in enumerate(zip(decisions, spans, strict=True)):
                 p0, p1 = (probability(row, weights[a]) for a in ("terminal", "credit"))
-                observed = p1 if arm == "credit" else p0 if arm == "terminal" else (
-                    1.0 if arm == "always" else float(expit(row["base_logit"])))
+                if arm in weights:
+                    observed = probability(row, weights[arm])
+                else:
+                    observed = 1.0 if arm == "always" else float(expit(row["base_logit"]))
                 if not math.isclose(observed, row["prob"], abs_tol=2e-6) or row["use"] != (observed >= .5):
                     raise ValueError("Logged choice disagrees with deployed probability")
                 acts = tuple(s["name"] for s in event["selected_skills"])
@@ -150,7 +152,7 @@ def audit(directory, dataset_file, phase, arms):
                 if ("capture_activity_details" in acts) != row["use"] or len(set(acts)) != 3:
                     raise ValueError("Executor received different skills than the gate selected")
                 choices[arm][sid,i] = acts
-                probabilities[arm].append([p0, p1])
+                probabilities[arm].append([p0, p1, observed])
             if (parent / "reuse.json").is_file():
                 reuse = read(parent / "reuse.json")
                 ref = directory / phase / reuse["reference"]
@@ -188,9 +190,15 @@ def audit(directory, dataset_file, phase, arms):
                     "regressed":sum(v<0 for v in d.values()), "tied":sum(v==0 for v in d.values()),
                     "by_type":{t:mean(d[k] for k in ks) for t,ks in by_group.items()},
                     "changed_realized_tuples":sum(a != choices[arm][k] for k,a in choices["credit"].items()),
-                    "terminal_to_credit_on_same_states":{"mean_probabilities":p.mean(axis=0).tolist(),
+                    "terminal_to_credit_on_same_states":{"mean_probabilities":p[:, :2].mean(axis=0).tolist(),
                       "mean_absolute_shift":float(np.abs(p[:,1]-p[:,0]).mean()),
                       "greedy_switches":int(((p[:,0]>=.5)!=(p[:,1]>=.5)).sum()), "states":len(p)}}
+        contrast["control_to_credit_on_same_states"] = {
+            "mean_probabilities": p[:, [2, 1]].mean(axis=0).tolist(),
+            "mean_absolute_shift": float(np.abs(p[:, 1] - p[:, 2]).mean()),
+            "greedy_switches": int(((p[:, 2] >= .5) != (p[:, 1] >= .5)).sum()),
+            "states": len(p),
+        }
         changed_spans = defaultdict(set)
         for (sid, span), actions in choices["credit"].items():
             if actions != choices[arm][sid, span]:

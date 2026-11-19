@@ -25,10 +25,19 @@ def main():
     args.add_argument("--model", required=True)
     args.add_argument("--port", type=int, required=True)
     args.add_argument("--duty", type=float, default=0.40)
+    args.add_argument("--reserve-mib", type=int, default=2048,
+                      help="Keep this much currently free GPU memory outside the PyTorch allocator cap")
     args = args.parse_args()
     if not 0 < args.duty <= 0.75 or torch.cuda.device_count() != 1:
         raise ValueError("Select one physical GPU and a duty fraction in (0, 0.75]")
-    torch.cuda.set_per_process_memory_fraction(0.76)
+    if args.reserve_mib < 0:
+        raise ValueError("GPU memory reserve must be nonnegative")
+    free, total = torch.cuda.mem_get_info()
+    budget = min(int(0.76 * total), free - args.reserve_mib * 2**20)
+    if budget <= 0:
+        raise RuntimeError("Available GPU memory is below the requested reserve")
+    torch.cuda.set_per_process_memory_fraction(budget / total)
+    print(f"GPU allocator budget {budget // 2**20} MiB; free at startup {free // 2**20} MiB", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16, device_map={"": 0},
                                                  attn_implementation="sdpa", local_files_only=True).eval()
@@ -91,7 +100,11 @@ def main():
                 pass
             except RuntimeError as exc:
                 self.respond(500, {"error":str(exc)})
-    with HTTPServer(("127.0.0.1", args.port), Handler) as server:
+    class SerialServer(HTTPServer):
+        # The reader submits batches of up to 32 questions. Only the listening queue grows.
+        request_queue_size = 64
+
+    with SerialServer(("127.0.0.1", args.port), Handler) as server:
         print(f"Ready on {args.port}; duty={args.duty}; allocated={torch.cuda.memory_allocated()//2**20} MiB", flush=True)
         server.serve_forever()
 

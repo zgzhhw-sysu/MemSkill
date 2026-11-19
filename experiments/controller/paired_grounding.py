@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 import torch
 
-from experiments.controller.paired_policy import PairedPolicy, fit_policy
+from experiments.controller.paired_policy import PairedPolicy, fit_policy, match_training_probability
 from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix, save
 from src.cli import set_seed
@@ -158,7 +158,7 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test"])
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "all"], default="all")
+    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
     options, remainder = parser.parse_known_args()
     sys.argv[1:] = remainder
@@ -231,14 +231,32 @@ def main():
                     temp.replace(out / temp.name)
         print("Fitted", len(rows), "training spans;", sum(r["delta"] != 0 for r in rows), "nonzero credits", flush=True)
         return
+    if options.study_arm == "rate" and options.study_phase != "validation":
+        raise ValueError("The probability-matched control is a development-only comparison")
     group = [prefix(c, 6) for c in val] if options.study_phase == "validation" else test
     root = out / options.study_phase
-    for arm in (["native", "terminal", "credit", "always"] if options.study_arm == "all" else [options.study_arm]):
+    arms = ["native", "terminal", "credit", "always"]
+    if options.study_phase == "validation":
+        arms.append("rate")
+    for arm in arms if options.study_arm == "all" else [options.study_arm]:
         directory = root / arm
         directory.mkdir(parents=True, exist_ok=True)
         weights = torch.tensor(json.loads((out / (arm + ".json")).read_text())) if arm in ("credit", "terminal") else None
+        if arm == "rate":
+            rows = [row for start, end in protocol["train_sessions"] for sid in protocol["train"]
+                    for row in load_episode(out / "train" / f"{sid}_s{start}", sid, end - start + 1)]
+            fitted = [torch.tensor(json.loads((out / (name + ".json")).read_text()))
+                      for name in ("terminal", "credit")]
+            weights = match_training_probability(rows, *fitted)
+            with TemporaryDirectory(dir=out) as tmp:
+                path = Path(tmp) / "rate.json"
+                save(path, weights.tolist())
+                path.replace(out / path.name)
         for conversation in group:
-            score(trainer, conversation, directory / conversation["sample_id"], arm, weights)
+            dest = directory / conversation["sample_id"]
+            with (directory / (dest.name + ".lock")).open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                score(trainer, conversation, dest, arm, weights)
 
 
 if __name__ == "__main__":

@@ -91,3 +91,24 @@ def fit_policy(rows, credit_weight):
 
     opt.step(closure)
     return theta.detach().float()
+
+
+def match_training_probability(rows, terminal, credit):
+    """Shift only the terminal intercept to match the credit policy's mean training probability."""
+    states = torch.tensor([row["state"] for row in rows], dtype=torch.float64)
+    features = torch.cat((torch.ones_like(states[:, :1]), F.normalize(states, dim=1)), dim=1)
+    offset = torch.tensor([row["base_logit"] for row in rows], dtype=states.dtype)
+    base = offset + features @ terminal.double()
+    extra = features @ (credit.double() - terminal.double())
+    target = (base + extra).sigmoid().mean()
+    # A common shift at either extreme bounds the mean of the state-dependent shifts.
+    lo, hi = float(extra.min()), float(extra.max())
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if (base + mid).sigmoid().mean() < target:
+            lo = mid
+        else:
+            hi = mid
+    result = terminal.clone()
+    result[0] += (lo + hi) / 2
+    return result
