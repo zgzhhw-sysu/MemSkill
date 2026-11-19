@@ -10,7 +10,7 @@ from .operation_bank import OperationBank
 
 def evaluate_bank(trainer, bank, conversations, directory):
     # Use the same deterministic controller, memory builder, reader and F1 as --eval-only.
-    from main import _build_memory_bank_from_sessions, evaluate_text_dataset_queries
+    from main import _build_memory_bank_from_sessions, _resolve_sample_id, evaluate_text_dataset_queries
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     previous_bank = trainer.operation_bank
@@ -22,10 +22,10 @@ def evaluate_bank(trainer, bank, conversations, directory):
     trainer.controller.eval()
     try:
         memories = {}
-        for convo in conversations:
-            sid = convo["sample_id"]
+        for index, convo in enumerate(conversations):
+            sid = _resolve_sample_id(trainer, convo, index)
             sessions, _, _ = trainer._prepare_sessions(convo)
-            trace = EpisodeTrace(directory / "traces", sid, convo["conversation"])
+            trace = EpisodeTrace(directory / "traces", sid, convo.get("conversation"))
             memories[sid] = _build_memory_bank_from_sessions(trainer, sessions, trace=trace, show_progress=False)
             for event in trace.events:
                 if any("API call failed" in a["reasoning"] for a in event["parsed_actions"]):

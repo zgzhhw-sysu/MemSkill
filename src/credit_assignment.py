@@ -272,7 +272,15 @@ def diagnose_episode(trainer, conversation, trace, steps):
         questions = {i: conversation["qa"][i] for i in indices}
         vectors = get_embeddings(trainer.args.retriever, [q["question"] for q in questions.values()], "query")
         queries = {i: (questions[i], v) for i, v in zip(indices, vectors, strict=True)}
-        alternative = single_swap(candidates, selected)
+        paired = (event.get("sampling_noise") or {}).get("paired_alternative")
+        if paired is None:
+            alternative = single_swap(candidates, selected)
+        else:
+            if (len(paired) != len(ids) or len(set(paired)) != len(ids)
+                    or any(not isinstance(i, int) or not 0 <= i < len(candidates) for i in paired)
+                    or sum(a != b for a, b in zip(ids, paired)) != 1):
+                raise ValueError("Invalid paired single-slot intervention")
+            alternative = [candidates[i] for i in paired]
         turns = {i: evidence_turns(conversation["conversation"], questions[i].get("evidence")) for i in indices}
         quotes = list(dict.fromkeys(f'{t["session_date"]} | {t["speaker"]}: {t["text"]}'
                                     for group in turns.values() for t in group if t["dia_id"] in event["source_turns"]))
