@@ -2,7 +2,7 @@
 
 CPU 编码的冻结信用组另做 LongMemEval-S 独立验证。服务 `memskill-251-transfer-validation` 使用原 40% 占空比的生成服务，实时进度在 `~/memskill-work/runs/paired-251-external-validation/client.log`，历史断点在 `~/memskill-work/study-anchor/longmemeval-validation/`。正式候选选定并运行时，这组补充验证让出生成资源。17 条验证历史均按完整会话执行，首次运行前记录权重、协议、验证决定及样本清单的 SHA-256。
 
-研究工作区是 `~/memskill-work/MemSkill`，实验断点在 `~/memskill-work/study`，迁入的原始快照在 `~/span-credit-20261120`。独立环境 `~/memskill-work/venv` 使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3 和 sentence-transformers 5.6.0。248 实际使用的配对实验依赖及其传递依赖共 109 个，准确版本在目标机 `~/memskill-work/deploy/requirements-248.txt`。研究数据的口径见[配对协议](span-credit-paired.md)。
+研究工作区是 `~/memskill-work/MemSkill`，实验断点在 `~/memskill-work/study`，迁入的原始快照在 `~/span-credit-20261120`。独立环境 `~/memskill-work/venv` 使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3 和 sentence-transformers 5.6.0。248 实际使用的配对实验依赖及其传递依赖共 109 个，已核对的版本在 [109 项环境清单](../../scripts/experiments/requirements-paired-cu128.txt)，目标机副本保存在 `~/memskill-work/deploy/requirements-248.txt`。研究数据的口径见[配对协议](span-credit-paired.md)。
 
 ## GPU 占用和释放
 
@@ -45,6 +45,10 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 在 `conv-47` 上，CPU 编码的信用组前三次实际选择活动细节技能，第四次切换到时间上下文技能。原 GPU 后端在已保存的固定策略轨迹上预计第三次就会切换。`memskill-251-anchor-gpu.service` 已校验两个基线的原始轨迹、回答和冻结权重，并等待扩充训练释放 4、7 号卡，再用原编码配置复核。该组使用 `~/memskill-work/study-anchor-gpu/` 和 `~/memskill-work/runs/paired-251-anchor-gpu/`，生成服务使用端口 18754，限载设置与 18752 相同。
 
 正式测试的候选顺序在三组验证决定产生之前固定。先考虑扩充到八个 session 的策略，其次是原 GPU 编码环境下的零信用约束策略，最后是训练写入提示与部署一致的策略。选取顺序中第一个通过五组验证标准的候选。`memskill-251-official.service` 在等待期间只使用 CPU。选定后，`~/memskill-work/runs/official-251/selected.json` 记录验证决定及冻结权重的指纹。完整评估沿用该候选的模型、编码和限载配置，按历史补齐六组结果，包括在每条历史保持技能使用次数相同的对照。每个基准的逐题结果和中断恢复入口见[服务器交接文档](server-handoff.md)。
+
+扩充训练结束后由五组开发验证决定是否交接 GPU 4、7。通过时只由 `memskill-251-official` 执行六组正式测试，并优先于 `memskill-251-anchor-gpu` 使用这两张卡。旧版扩充服务在同一进程里排了四组迁移评估。本轮运行中的一次性交接服务 `memskill-251-expanded-handoff` 会核对原训练任务的 systemd 调用标识、75 道开发题的选择结果、正式服务选中的实验目录和四个冻结文件的 SHA-256，再结束该旧任务以释放租约。验证未通过时，扩充任务自行退出，原编码环境的候选接续验证。再次启动时，部署目录中的 `run-expanded.sh` 已在开发验证和冻结后结束。
+
+整窗口训练审计的结果在 `~/memskill-work/runs/paired-251/forward-stochastic.json`。同一末段两种真实写入的逐题复测保存在相邻的 `forward-last-switches/`，早期快照含 `progress`，完整快照含 `summary.json`。复测由 CPU 执行 Qwen 检索，调用 5、6 号卡上已有的 28% 占空比 Llama 生成服务。
 
 训练归因的补充任务可用以下命令查看。原始训练窗口、各项探查与完整历史评估分别写入各自目录。前三个写入粒度窗口的逐题回答、等来源发言数量复核和第 85 题较差分支的两种修复记录都在 `~/memskill-work/runs/paired-251/` 下。
 

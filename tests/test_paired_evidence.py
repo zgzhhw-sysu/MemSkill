@@ -103,6 +103,10 @@ class ReaderEvidenceTest(unittest.TestCase):
             return mean(r["scores"]["plain"] + p * (r["scores"]["always"] - r["scores"]["plain"])
                         for r, p in zip((a, b, c, d), (*ps, .3), strict=True))
         self.assertEqual(report["spans"], 4)
+        bounds = report["measured_action_upper_bound"]
+        self.assertAlmostEqual(bounds["best_measured_action_f1"], (.8 + .7 + .4 + 1.) / 4)
+        self.assertAlmostEqual(bounds["always_grounded_f1"], (.8 + .2 + .4 + 1.) / 4)
+        self.assertEqual((bounds["grounded_better_spans"], bounds["plain_better_spans"], bounds["tied_spans"]), (2, 1, 1))
         self.assertAlmostEqual(metrics["expected_f1"], expected((.9, .2, .5)))
         self.assertAlmostEqual(metrics["permuted_expected_f1"], mean(expected(ps) for ps in permutations((.9, .2, .5))))
         self.assertAlmostEqual(report["dialogues"]["b"]["arms"]["actor"]["placement_delta"], 0.)

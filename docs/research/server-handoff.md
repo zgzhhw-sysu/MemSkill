@@ -2,7 +2,7 @@
 
 251 已接续 248 的训练。两台机器的 Python 均为 3.12.12，配对实验所用的 109 个 Python 依赖逐项版本一致。目标机的代码在 `~/memskill-work/MemSkill`，训练断点和模型路径见 [251 运行说明](server-251.md)。
 
-截至 2026-11-20 04:52，第一轮 12 个训练窗口已完成，CPU 编码信用组也已完成两条开发对话的六组对照。在终局组的 12 个相同状态上，目标技能的平均概率从 0.4431 升至 0.5227。75 道题的 F1 为 0.3327，等使用次数随机安排位置的对照为 0.3092。扩充训练已完成 21/24 个窗口，训练和部署写入提示一致的实验已完成 5/12 个窗口。正式测试仍在等待按预先固定的顺序选择候选。[实验方法和开发集结果](span-credit-paired.md) · [固定测试清单](../../experiments/controller/protocols/paired_grounding_cohort.json)
+截至 2026-11-20 05:27，扩充训练已完成 24/24 个窗口，48 个 span 中有 8 个获得非零信用。该版在两个开发前缀上与始终选活动细节、只调使用率两组的 75 个逐题答案完全一致，三组 F1 都为 0.32039。按冻结流程继续补齐终局策略的真实开发轨迹。训练和部署写入提示一致的实验已完成 6/12 个窗口。此前 CPU 编码的零信用约束版本在 12 个相同状态上将平均概率从 0.4431 改为 0.5227，开发 F1 为 0.33274，等使用次数随机安排位置的对照为 0.30920。该版本在独立 LongMemEval-S 验证历史上继续运行。完整正式测试等待候选筛选。[实验方法和开发集结果](span-credit-paired.md) · [固定测试清单](../../experiments/controller/protocols/paired_grounding_cohort.json)
 
 ## 从最初的迁移包恢复
 
@@ -47,13 +47,14 @@ python3 -m experiments.controller.resume_status "$STUDY_DIR"
 
 ## 准备运行环境
 
-源机使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3、sentence-transformers 5.6.0。下例适用于驱动支持 CUDA 12.8 的目标机。其他驱动环境需安装兼容的 PyTorch，并记录实际软硬件版本。独立环境只需安装配对实验依赖。
+源机使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3、sentence-transformers 5.6.0。下例适用于驱动支持 CUDA 12.8 的目标机。其他驱动环境需安装兼容的 PyTorch，并记录实际软硬件版本。Ubuntu x86-64 上可按两台服务器实际核对过的 109 项版本安装。[251 配对实验的完整版本清单](../../scripts/experiments/requirements-paired-cu128.txt)
 
 ```bash
 python3.12 -m venv ~/memskill-work/venv
 source ~/memskill-work/venv/bin/activate
 python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.10.0
-python -m pip install -r scripts/experiments/requirements-paired.txt
+python -m pip install -r scripts/experiments/requirements-paired-cu128.txt
+python -m pip check
 export MEMSKILL_PYTHON="$(command -v python)"
 export LOCOMO_DATA="$HANDOFF_DIR/assets/locomo10.json"
 export LONGMEMEVAL_DATA="$HANDOFF_DIR/assets/longmemeval_s_cleaned.json"
