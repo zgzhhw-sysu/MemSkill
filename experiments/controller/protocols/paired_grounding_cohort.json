@@ -145,6 +145,7 @@
   },
   "coverage": "Process every session in chronological order; do not filter by gold evidence, correctness, or support for the method.",
   "comparison": "All arms share the frozen actor, nine skills, data, encoder, memory and 8B inference budget. Fit only the two compared gate corrections on training rollouts. Include always-grounded validation control.",
+  "supplementary_comparison": "Specified before held-out evaluation: deploy the always-grounded and the frozen training-probability-matched control on both benchmarks. Report their paired differences to distinguish state-dependent routing from an overall propensity change.",
   "gain_criterion": "On full LoCoMo: >=0.02 absolute mean F1 vs terminal-only and native, positive on each held-out dialogue. For a generalization claim require positive transfer with a paired CI, not only LoCoMo. Report all deltas and uncertainty.",
   "policy": "Record on identical states the probability of selecting the grounding option under both policies, actual chosen tuples, output token and memory cost. Test only after development recipe is frozen."
 }

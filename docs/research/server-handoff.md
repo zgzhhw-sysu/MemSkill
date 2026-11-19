@@ -92,19 +92,20 @@ bash scripts/experiments/paired_grounding.sh train
 python -m experiments.controller.resume_status "$STUDY_DIR"
 ```
 
-训练成功后应有 12 个窗口、24 个 span，以及 `terminal.json`、`credit.json` 两份权重。中途退出后，重启服务并重跑相同命令即可。仅发布成功的完整窗口会被复用。服务端口或后端配置发生变化时，核实客户端连接地址和后端标识。
+训练成功后应有 12 个窗口、24 个 span，以及 `terminal.json`、`credit.json` 两份策略权重，以及匹配训练平均选技概率的对照权重 `rate.json`。中途退出后，重启服务并重跑相同命令即可。仅发布成功的完整窗口会被复用。服务端口或后端配置发生变化时，核实客户端连接地址和后端标识。
 
 ## 验证、冻结与正式测试
 
-先在两段验证对话的前六个 session 比较四组。环境和工作目录沿用上文。
+先在两段验证对话的前六个 session 比较五组。环境和工作目录沿用上文。
 
 ```bash
+touch "$STUDY_DIR/require-selective-validation"
 bash scripts/experiments/paired_grounding.sh validation &&
 python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation \
-  --arms native terminal credit always
+  --select-for-test
 ```
 
-读取 `validation/comparison.json`。先比较 `credit_minus.terminal` 的同状态概率变化、贪心切换数、实际三技能组合变化和逐题 F1。再检查 `changed_question_evidence` 中两组读到的提示及记忆来源。与 `always` 相同的轨迹要单列，这种结果不足以证明策略会按 span 选择性地使用该技能。若验证退化，保留该版，用训练和验证对话继续迭代。
+读取 `validation/selection.json`。先比较 `credit_minus.terminal` 的同状态概率变化、贪心切换数、实际三技能组合变化和逐题 F1。再检查 `changed_question_evidence` 中两组读到的提示及记忆来源。与 `always` 相同的轨迹要单列，这种结果不足以证明策略会按 span 选择性地使用该技能。若验证退化，保留该版，用训练和验证对话继续迭代。
 
 选定方案后记录权重和协议指纹，再一次性跑完整留出集。以下命令使用同一组冻结权重。
 
@@ -112,18 +113,18 @@ python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" valida
 (
   set -e
   cd "$STUDY_DIR"
-  sha256sum protocol.json terminal.json credit.json > frozen.sha256
+  sha256sum protocol.json terminal.json credit.json rate.json > frozen.sha256
 )
 (
   set -e
   bash scripts/experiments/paired_grounding.sh test
   python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" test \
-    --arms native terminal credit always
-  for arm in native terminal credit always; do
+    --arms native terminal credit always rate
+  for arm in native terminal credit always rate; do
     bash scripts/experiments/paired_grounding.sh transfer --study-arm "$arm"
   done
   python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" longmemeval \
-    --arms native terminal credit always
+    --arms native terminal credit always rate
   (cd "$STUDY_DIR" && sha256sum -c frozen.sha256)
 )
 ```
