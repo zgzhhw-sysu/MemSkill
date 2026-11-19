@@ -84,6 +84,10 @@ class ReaderEvidenceTest(unittest.TestCase):
         val = {"ids": ["a", "b_abs"], "abstentions": 1, "answerable_types": {"temporal": 1}, "history_sessions": 4}
         self.assertEqual(external_histories(data, splits, formal), [data[2]])
         self.assertEqual(external_histories(data, splits, formal, val), data[:2])
+        self.assertEqual(external_histories(data, splits, formal, val, part="even"), [data[0]])
+        self.assertEqual(external_histories(data, splits, formal, val, part="odd"), [data[1]])
+        with self.assertRaisesRegex(ValueError, "external validation"):
+            external_histories(data, splits, formal, part="even")
         for bad in (dict(val, ids=["a", "a_abs"]), dict(val, ids=["a", "c_abs"]),
                     dict(val, answerable_types={"multi": 1}), dict(val, history_sessions=3)):
             with self.assertRaises(ValueError):

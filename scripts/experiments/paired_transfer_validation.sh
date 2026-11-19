@@ -46,6 +46,30 @@ arms=(native always credit terminal rate count)
 if "$python_bin" -c 'import json,sys; sys.exit(not json.load(open(sys.argv[1])).get("equal_sources", False))' "$STUDY_DIR/protocol.json"; then
     arms+=(plain)
 fi
-bash scripts/experiments/paired_grounding.sh transfer-validation --study-arm all
+runner=scripts/experiments/paired_grounding.sh
+case ${MEMSKILL_EXTERNAL_WORKERS:-1} in
+    1) bash "$runner" transfer-validation --study-arm all ;;
+    2)
+        workers=()
+        stop_workers() {
+            for pid in "${workers[@]}"; do kill -TERM "$pid" 2>/dev/null || true; done
+            wait || true
+        }
+        trap stop_workers EXIT
+        trap 'exit 143' TERM INT
+        for part in even odd; do
+            bash "$runner" transfer-validation --study-arm all --study-history-part "$part" --log-dir "$output/logs-$part" \
+                >"$output/worker-$part.log" 2>&1 &
+            workers+=("$!")
+        done
+        wait -n -p finished "${workers[@]}"
+        for pid in "${workers[@]}"; do
+            if [[ $pid != "$finished" ]]; then workers=("$pid"); wait "$pid"; fi
+        done
+        workers=()
+        trap - EXIT TERM INT
+        ;;
+    *) echo "MEMSKILL_EXTERNAL_WORKERS must be 1 or 2" >&2; exit 2 ;;
+esac
 "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" "$phase" \
     --arms "${arms[@]}"

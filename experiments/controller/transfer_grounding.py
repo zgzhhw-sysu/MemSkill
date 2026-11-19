@@ -16,7 +16,7 @@ from src.evaluation_cache import history_embeddings
 from src.trainer import get_trainer
 
 
-def external_histories(data, splits, formal, validation=None):
+def external_histories(data, splits, formal, validation=None, *, part="all"):
     if validation is None:
         rows = [data[i] for i in splits["test"]]
         if [r["question_id"] for r in rows] != formal["ids"]:
@@ -34,7 +34,11 @@ def external_histories(data, splits, formal, validation=None):
         spec = validation
     if sum(len(r["haystack_sessions"]) for r in rows) != spec["history_sessions"]:
         raise ValueError("Incomplete external histories")
-    return rows
+    if part == "all":
+        return rows
+    if validation is None or part not in ("even", "odd"):
+        raise ValueError("Only the locked external validation histories can be partitioned")
+    return rows[(0 if part == "even" else 1)::2]
 
 
 def main():
@@ -42,6 +46,8 @@ def main():
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "plain", "rate", "count", "all"), required=True)
     parser.add_argument("--study-external-validation", action="store_true")
+    parser.add_argument("--study-history-part", choices=("all", "even", "odd"), default="all",
+                        help="Partition the verified external validation manifest by zero-based history index")
     parser.add_argument("--study-reverse", action="store_true")
     parser.add_argument("--study-writer-tokenizer", type=Path, help="Local writer model directory for context budgeting")
     options, remaining = parser.parse_known_args()
@@ -62,7 +68,7 @@ def main():
         raise ValueError("Test split differs from the locked cohort")
     data = load_dataset(args.data_file, "longmemeval")
     dev = json.loads(cohort_file.with_name("paired_external_validation.json").read_text()) if options.study_external_validation else None
-    held = external_histories(data, json.loads(split.read_text()), cohort, dev)
+    held = external_histories(data, json.loads(split.read_text()), cohort, dev, part=options.study_history_part)
     assert [args.mem_top_k, args.mem_top_k_eval] == protocol["retrieval_k"]
     assert args.model == protocol["model"] and args.action_top_k == 3 and args.temperature == 0
     args.include_abstentions = True
