@@ -152,6 +152,11 @@ class PairedPolicyTest(unittest.TestCase):
             dst.parent.mkdir()
             self.assertFalse(reuse_identical_choices(dst, "credit", torch.tensor([3.,0.]), {"arm":"credit","backend":"fixed"}))
             self.assertFalse(reuse_identical_choices(dst, "credit", None, {"arm":"credit","backend":"different"}))
+            context = {"algorithm": "source-ranges-v1", "context_tokens": 8192}
+            self.assertFalse(reuse_identical_choices(dst, "credit", None, {"arm":"credit","backend":"fixed","writer_context":context}))
+            (native/"inputs.json").write_text(json.dumps({"arm":"native","backend":"fixed","writer_context":context}))
+            self.assertFalse(reuse_identical_choices(dst, "credit", None, {"arm":"credit","backend":"fixed"}))
+            (native/"inputs.json").write_text(json.dumps({"arm":"native","backend":"fixed"}))
             self.assertTrue(reuse_identical_choices(dst, "credit", torch.tensor([0.2,0.]), {"arm":"credit","backend":"fixed"}))
             self.assertEqual(json.loads((dst/"reuse.json").read_text())["checked_decisions"], 1)
             self.assertFalse(json.loads((dst/"decisions.json").read_text())[0]["use"])

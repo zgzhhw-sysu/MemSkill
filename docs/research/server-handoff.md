@@ -113,6 +113,8 @@ python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" valida
 bash scripts/experiments/paired_holdout.sh
 ```
 
+迁移运行器默认从 Qwen 编码器的同级目录 `Meta-Llama-3-8B-Instruct` 读取写入模型的 tokenizer 和 `config.json`。模型在其他位置时，设置 `MEMSKILL_WRITER_TOKENIZER_PATH` 指向实际服务端权重目录的本地副本。长 session 分多次写入并记录原文范围，各段共享一次选技和总计 256 个生成 token。六组轨迹使用相同的 tokenizer 指纹。
+
 LoCoMo 主测试含两段完整对话、55 个 session、314 道可评分题。预设目标为相对 `terminal` 和 `native` 的逐题平均 F1 均至少提高 **0.02**，且两段对话分别为正。另有 86 道无普通参考答案的对抗题按原协议单列。LongMemEval-S 迁移测试含 105 段完整历史、5,027 个 session，覆盖六类问题；101 道可回答题用于主 F1，4 道弃答题另报。报告逐类结果和按历史配对、按题型分层的 95% 区间。两个数据集分别报告，保留逐题回退和无法由选技解释的变化。
 
 六组正式报告在 `test/comparison-with-count.json` 和 `longmemeval/comparison-with-count.json`，冻结清单及运行日志在 `holdout/`。每个已完成的评估历史保存实际问题编号、分数、决策、轨迹及用量；完整历史间可续跑。实验结束后在启动服务的终端执行 `kill "$MODEL_PID"; wait "$MODEL_PID"`，并按目标机约定释放租约或恢复限量空闲守护。
