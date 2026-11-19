@@ -35,7 +35,7 @@
 | --- | --- |
 | [`src/`](src/) | Controller, Designer, Executor, memory, retrieval, data processing, and evaluation code |
 | [`experiments/designer/`](experiments/designer/) | LoCoMo pilots, fault injection, and replay of proposed skill revisions |
-| [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults |
+| [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults. [Paired study protocol](docs/research/span-credit-paired.md) |
 | [`scripts/train/`](scripts/train/) and [`scripts/eval/`](scripts/eval/) | Training and evaluation launchers for the supported datasets |
 | [`scripts/data/`](scripts/data/) | ALFWorld expert trajectory preparation |
 | [`tests/`](tests/) | Replay and credit assignment regression tests |

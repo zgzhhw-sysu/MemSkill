@@ -41,6 +41,35 @@ def dated_relative_turns(source):
     return list(dict.fromkeys(quotes))
 
 
+def attributed_turn_pairs(source):
+    """Keep adjacent source turns together so short replies retain speaker and date context."""
+    header, _, body = source.partition("\n")
+    if header.startswith("Session Date: "):
+        date = header.removeprefix("Session Date: ")
+        # LongMemEval full sessions contain multi-line messages with role headers.
+        messages = re.split(r"(?m)^(user|assistant): ", body.strip())
+        turns = []
+        for role, words in zip(messages[1::2], messages[2::2], strict=True):
+            turns.append(f"{role}: {words.strip()}")
+        chunks = []
+        for i in range(0, len(turns), 2):
+            pair = " ".join(turns[i:i + 2]).split()
+            # Bound individual retrieval items while preserving every source word.
+            chunks.extend(f"{date} | " + " ".join(pair[j:j + 96]) for j in range(0, len(pair), 96))
+        return chunks
+    if not header.startswith("DATE: "):
+        return []
+    date = header.removeprefix("DATE: ")
+    turns = []
+    for line in body.splitlines():
+        match = re.fullmatch(r'([^"\n]+?) said, "(.*)"(?: and shared (.+))?', line)
+        if match:
+            speaker, words, image = match.groups()
+            words = anchor_relative_time({"session_date": date, "text": words})
+            turns.append(f"{speaker}: {words}" + (f" [shared {image}]" if image else ""))
+    return [date + " | " + " ".join(turns[i:i + 2]) for i in range(0, len(turns), 2)]
+
+
 def restore_text(events):
     """Replay stable IDs including repeated updates and deletion of shifted indices."""
     live = {}

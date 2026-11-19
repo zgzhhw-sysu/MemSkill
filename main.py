@@ -541,7 +541,7 @@ def evaluate_text_dataset_queries(trainer: BaseTrainer,
     for conv_idx, conversation in enumerate(test_data):
         if args.dataset == "longmemeval":
             question_id = str(conversation.get("question_id", ""))
-            if question_id.endswith("_abs"):
+            if question_id.endswith("_abs") and not getattr(args, "include_abstentions", False):
                 print(f"[Eval] Skipping _abs sample question_id={question_id}.")
                 continue
         sample_id = _resolve_sample_id(trainer, conversation, conv_idx)

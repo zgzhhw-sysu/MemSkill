@@ -171,12 +171,16 @@ class Executor:
                 success=False,
                 reasoning="No executor results produced"
             )]
-        if any(getattr(op, "source_rule", None) == "dated_relative_turns" and op.update_type.lower() == "insert"
-               for op in operations) and all(r.success for r in all_results):
-            from .replay import dated_relative_turns
+        if all(r.success for r in all_results):
+            from .replay import attributed_turn_pairs, dated_relative_turns
+            rules = {getattr(op, "source_rule", None) for op in operations if op.update_type.lower() == "insert"}
             seen = set(retrieved_memories) | {r.memory_content for r in all_results}
-            all_results.extend(ExecutionResult("INSERT", True, memory_content=text, reasoning="dated_relative_turns")
-                               for text in dated_relative_turns(session_text) if text not in seen)
+            for name, extract in (("dated_relative_turns", dated_relative_turns), ("attributed_turn_pairs", attributed_turn_pairs)):
+                if name in rules:
+                    for item in extract(session_text):
+                        if item not in seen:
+                            all_results.append(ExecutionResult("INSERT", True, memory_content=item, reasoning=name))
+                            seen.add(item)
         return all_results
 
     def _parse_response(self, response: str, num_retrieved: int) -> List[ExecutionResult]:
