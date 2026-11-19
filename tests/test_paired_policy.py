@@ -109,6 +109,22 @@ class PairedPolicyTest(unittest.TestCase):
         self.assertLess(abs(shift[1].item()), abs((logits(rate) - logits(terminal))[1].item()))
         self.assertAlmostEqual(logits(learned).sigmoid().mean().item(), logits(rate).sigmoid().mean().item(), places=6)
 
+    def test_centered_credit_separates_states_at_the_reference_training_rate(self):
+        terminal = torch.tensor([-.4, .1, .2])
+        rows = [{"use": True, "delta": d, "base_logit": -.2, "state": [1., y]}
+                for d, y in [(.4, .2), (0., 0.), (0., -.2)]]
+        anchor = fit_anchored_credit(rows, terminal)
+        centered = match_training_probability(rows, fit_anchored_credit(rows, terminal, center_states=True), anchor)
+        x = torch.nn.functional.normalize(torch.tensor([r["state"] for r in rows]), dim=1)
+        def probabilities(w):
+            return (-.2 + w[0] + x @ w[1:]).sigmoid()
+        self.assertAlmostEqual(probabilities(anchor).mean().item(), probabilities(centered).mean().item(), places=6)
+        self.assertGreater(probabilities(centered)[0].item(), probabilities(centered)[-1].item())
+        self.assertFalse(torch.allclose(probabilities(anchor), probabilities(centered)))
+        identical = [dict(r, state=[1., 0.]) for r in rows]
+        self.assertTrue(torch.equal(fit_anchored_credit(identical, terminal, center_states=True),
+                                    fit_anchored_credit(identical, terminal)))
+
     def test_signed_gains_and_abstentions(self):
         def example(i, use, delta):
             return {"episode": str(i), "terminal": 0.3, "use": use, "delta": delta,
