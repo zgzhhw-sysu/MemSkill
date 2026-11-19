@@ -14,6 +14,13 @@ from src.rag_utils import get_embeddings
 from typing import List, Union
 
 
+def deployment_operations(operations):
+    """Return the selected operations that are included in the evaluation writer prompt."""
+    return [op for op in operations
+            if str(getattr(op, "name", "")).lower() != "noop"
+            and str(getattr(op, "update_type", "")).lower() != "noop"]
+
+
 class ExecutionResult:
     """Result of operation execution"""
     def __init__(self, action_type: str, success: bool,

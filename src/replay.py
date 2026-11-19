@@ -103,6 +103,7 @@ def restore_text(events):
 
 def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None, observe_suffix=None):
     """Restore the prefix and run the suffix once for any questions sharing this intervention."""
+    from .executor import deployment_operations
     from src.rag_utils import get_embeddings
     bank = trainer._initialize_memory_bank()
     prefix = restore_text(events[:start])
@@ -126,7 +127,8 @@ def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None,
             else:
                 old, indices, memory_embs = bank.retrieve(emb.reshape(-1), use_state_encoder=True, return_embeddings=True)
                 ops = select_suffix(current, emb.reshape(-1), old, memory_embs)
-            actions = trainer.executor.execute_operation(ops, current["source"], old)
+            writer_ops = deployment_operations(ops) if getattr(trainer.args, "span_credit_deployment_writer", False) else ops
+            actions = trainer.executor.execute_operation(writer_ops, current["source"], old)
         if not actions or not all(a.success for a in actions):
             return None, current["span_id"]
         success = trainer.executor.apply_to_memory_bank(actions, bank, indices)

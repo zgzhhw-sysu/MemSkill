@@ -26,8 +26,27 @@ class ResumeEpisodeTest(unittest.TestCase):
             path = directory / "rows.json"
             path.write_text(json.dumps([row]))
             self.assertEqual(load_episode(directory, "conv-26", 1, [7]), [row])
+            with self.assertRaisesRegex(ValueError, "Writer protocol differs"):
+                load_episode(directory, "conv-26", 1, [7], deployment_writer=True)
             with self.assertRaises(ValueError):
                 load_episode(directory, "conv-26", 1, [3])
+            selected = [dict(version=v, name=n, update_type=t) for v,n,t in
+                        (("c","insert","INSERT"), ("b","noop","NOOP"), ("a","capture","INSERT"))]
+            effective = [selected[0], selected[2]]
+            events[0].update(selected_skills=selected, skills=effective)
+            diagnosis = events[2]["diagnosis"]
+            diagnosis.update(sampled_skills=selected, control={"writer_skills": effective})
+            trace = directory / "traces" / "episode.jsonl"
+            trace.write_text("".join(json.dumps(dict(e, sample="conv-26")) + "\n" for e in events))
+            self.assertEqual(load_episode(directory, "conv-26", 1, [7], deployment_writer=True), [row])
+            with self.assertRaisesRegex(ValueError, "Writer protocol differs"):
+                load_episode(directory, "conv-26", 1, [7], deployment_writer=False)
+            diagnosis["control"]["writer_skills"] = selected
+            trace.write_text("".join(json.dumps(dict(e, sample="conv-26")) + "\n" for e in events))
+            with self.assertRaisesRegex(ValueError, "in control"):
+                load_episode(directory, "conv-26", 1, [7], deployment_writer=True)
+            diagnosis["control"]["writer_skills"] = effective
+            trace.write_text("".join(json.dumps(dict(e, sample="conv-26")) + "\n" for e in events))
             for wrong in [[], [dict(row, use=True)], [dict(row, delta=0.25)], [dict(row, episode="conv-26_s3")]]:
                 with self.subTest(wrong=wrong):
                     path.write_text(json.dumps(wrong))

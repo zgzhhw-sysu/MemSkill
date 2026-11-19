@@ -37,7 +37,8 @@ def collect(trainer, convo, seed, dest):
     if dest.exists():
         ids = [q["original_index"] for q in convo["qa"]]
         spans = sum(k.startswith("session_") and not k.endswith("_date_time") for k in convo["conversation"])
-        return load_episode(dest, convo["sample_id"], spans, ids)
+        return load_episode(dest, convo["sample_id"], spans, ids,
+                            deployment_writer=getattr(trainer.args, "span_credit_deployment_writer", False))
     policy = trainer.controller
     policy.mode = "explore"
     policy.decisions.clear()
@@ -164,6 +165,8 @@ def main():
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
     parser.add_argument("--study-train-sessions", type=int, choices=(4, 8),
                         help="Use the first 4 or 8 sessions of each training dialogue, in disjoint pairs")
+    parser.add_argument("--study-deployment-writer", action="store_true",
+                        help="Use evaluation-time writer prompts in training and counterfactual branches")
     options, remainder = parser.parse_known_args()
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
@@ -173,9 +176,11 @@ def main():
     out = options.study_dir.resolve()
     out.mkdir(exist_ok=True, parents=True)
     path = out / "protocol.json"
+    saved_protocol = json.loads(path.read_text()) if path.exists() else {}
+    args.span_credit_deployment_writer = options.study_deployment_writer or saved_protocol.get("deployment_writer", False)
     train_sessions = options.study_train_sessions
     if train_sessions is None:
-        train_sessions = json.loads(path.read_text())["train_sessions"][-1][-1] if path.exists() else 4
+        train_sessions = saved_protocol["train_sessions"][-1][-1] if saved_protocol else 4
     train_windows = [[start, start + 1] for start in range(1, train_sessions, 2)]
     set_seed(args.seed)
     config = AgenticMemoryConfig().update_from_args(args)
@@ -201,6 +206,8 @@ def main():
         "target": "at least +0.02 micro mean per-question F1 vs terminal and native, positive on each independent test dialogue",
         "weight": 1, "ridge": 0.01, "rule": 2, "span_budget": args.span_credit_spans, "question_budget": args.span_credit_questions,
     }
+    if args.span_credit_deployment_writer:
+        protocol["deployment_writer"] = True
     with (out / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if path.exists():
@@ -252,7 +259,8 @@ def main():
         weights = torch.tensor(json.loads((out / (arm + ".json")).read_text())) if arm in ("credit", "terminal") else None
         if arm == "rate":
             rows = [row for start, end in protocol["train_sessions"] for sid in protocol["train"]
-                    for row in load_episode(out / "train" / f"{sid}_s{start}", sid, end - start + 1)]
+                    for row in load_episode(out / "train" / f"{sid}_s{start}", sid, end - start + 1,
+                                            deployment_writer=args.span_credit_deployment_writer)]
             fitted = [torch.tensor(json.loads((out / (name + ".json")).read_text()))
                       for name in ("terminal", "credit")]
             weights = match_training_probability(rows, *fitted)
