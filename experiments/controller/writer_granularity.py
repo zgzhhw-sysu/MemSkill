@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from experiments.controller.paired_grounding import window
 from experiments.controller.probe_omitted import atomic_json
 from experiments.controller.resume_status import load_episode
+from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest
 from src.eval import get_evaluator
 from src.llm_utils import get_llm_response_via_api
@@ -36,14 +37,34 @@ def source_variants(spans):
     for i in range(0, len(singles), 2):
         turns = singles[i:i + 2]
         joined = date + " ".join(turn.removeprefix(date) for turn in turns)
-        split[joined] = turns
+        split.setdefault(joined, turns)
     if any(pair not in split for pair in pairs):
         raise ValueError("Splitting the source changed the stored speaker, date or utterance")
     fixed = list(live.values())[:-len(pairs)]
     return live, fixed, {"pair": pairs, "single": [s for pair in pairs for s in split[pair]]}
 
 
-def build_jobs(study, data_path):
+def missing_multiline_turns(processor, turns, date, recorded_source):
+    source, = processor._extract_session_chunks(turns, date)
+    if source != recorded_source:
+        raise ValueError("Structured dialogue differs from the recorded writer input")
+    missing = {}
+    for turn in turns:
+        text, = processor._extract_session_chunks([turn], date)
+        if attributed_turn_pairs(text):
+            continue
+        normalized = dict(turn)
+        for key in ("text", "blip_caption"):
+            if key in turn:
+                normalized[key] = " ".join(turn[key].splitlines())
+        clean, = processor._extract_session_chunks([normalized], date)
+        items = attributed_turn_pairs(clean)
+        if clean != text and len(items) == 1:
+            missing[turn["dia_id"]] = items[0]
+    return missing
+
+
+def build_jobs(study, data_path, *, repair_multiline=False):
     protocol = json.loads((study / "protocol.json").read_text())
     raw = data_path.read_bytes()
     train = set(protocol["train"])
@@ -51,6 +72,7 @@ def build_jobs(study, data_path):
         raise ValueError("The saved training split and input corpus must match")
     data = {c["sample_id"]: c for c in json.loads(raw) if c["sample_id"] in train}
     ev = get_evaluator("locomo", SimpleNamespace())
+    processor = LoCoMoProcessor(chunk_mode="full-session") if repair_multiline else None
     jobs, windows = [], {}
     set_retriever_flash_attn(False)
     for start, end in protocol["train_sessions"]:
@@ -62,7 +84,8 @@ def build_jobs(study, data_path):
             trace, = (episode / "traces").glob("*.jsonl")
             raw_trace = trace.read_bytes()
             events = list(map(json.loads, raw_trace.splitlines()))
-            variants = source_variants([e for e in events if e["kind"] == "span"])
+            spans = [e for e in events if e["kind"] == "span"]
+            variants = source_variants(spans)
             windows[episode.name] = {"trace": hashlib.sha256(raw_trace).hexdigest(), "source_inserted": variants is not None}
             if variants is None:
                 continue
@@ -76,10 +99,21 @@ def build_jobs(study, data_path):
             questions = ev.filter_qa_list(convo["qa"])
             if measured.keys() != {i for i, _ in questions}:
                 raise ValueError("Missing original questions")
+            missing = {}
+            if repair_multiline:
+                session = f"session_{end}"
+                missing = missing_multiline_turns(processor, convo["conversation"][session],
+                    convo["conversation"][session + "_date_time"], spans[-1]["source"])
+                windows[episode.name]["omitted_turns"] = list(missing)
+                if not any(set(q["evidence"]).intersection(missing) for _, q in questions):
+                    continue
+                present = set(live.values())
+                extras = list(dict.fromkeys(t for t in missing.values() if t not in present))
+                tails = {"pair": tails["pair"], "repair": tails["pair"] + extras}
             retriever = protocol["retriever"]
             vectors = get_embeddings(retriever, [q["question"] for _, q in questions], "query")
             # Encode each distinct memory once so both banks use the same vector for each shared entry.
-            texts = list(dict.fromkeys(fixed + tails["pair"] + tails["single"]))
+            texts = list(dict.fromkeys(fixed + [t for additions in tails.values() for t in additions]))
             embeddings = dict(zip(texts, get_embeddings(retriever, texts, "context", batch_size=8), strict=True))
             banks = {}
             for name, extra in tails.items():
@@ -88,21 +122,35 @@ def build_jobs(study, data_path):
                     bank.add_memory(t, embeddings[t])
                 banks[name] = bank
             for (i, q), vector in zip(questions, vectors, strict=True):
+                if repair_multiline and not set(q["evidence"]).intersection(missing):
+                    continue
                 if any(versions[mid] != version for mid, version in measured[i]["refs"]):
                     raise ValueError("Reader used a different memory version")
                 if measured[i]["question"] != q["question"]:
                     raise ValueError("The recorded question differs from the corpus")
                 contexts = {name: bank.retrieve(vector)[0] for name, bank in banks.items()}
                 archived = [live[mid] for mid, _ in measured[i]["refs"]]
-                jobs.append({"episode": episode.name, "original_index": ids[i], "question": q,
-                             "pair_retrieval_reproduced": archived == contexts["pair"],
-                             "prompts": {a: ev.build_prompt(q["question"], ctx, q) for a, ctx in contexts.items()}})
+                job = {"episode": episode.name, "original_index": ids[i], "question": q,
+                       "pair_retrieval_reproduced": archived == contexts["pair"],
+                       "prompts": {a: ev.build_prompt(q["question"], ctx, q) for a, ctx in contexts.items()}}
+                if repair_multiline:
+                    job["omitted_turns_retrieved"] = {a: [tid for tid, text in missing.items() if text in ctx]
+                                                     for a, ctx in contexts.items()}
+                jobs.append(job)
     return {"windows": windows, "jobs": jobs, "model": protocol["model"]}
 
 
-def run(study, data_path, output):
+def measured_answer(prompt, model, q, ev, cache):
+    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)
+    answer, n_in, n_out = get_llm_response_via_api(
+        prompt, LLM_MODEL=model, MAX_TOKENS=32, TAU=0.0, base_url=os.environ["MEMSKILL_API_BASE"],
+        api_key=os.environ.get("MEMSKILL_API_KEY", "local-only"))
+    return {"answer": answer, "tokens": [n_in, n_out], "f1": ev.compute_f1(answer, ev.get_ground_truth(q), q)}
+
+
+def run(study, data_path, output, *, repair_multiline=False):
     output.mkdir(parents=True, exist_ok=True)
-    plan = build_jobs(study, data_path)
+    plan = build_jobs(study, data_path, repair_multiline=repair_multiline)
     if not plan["jobs"]:
         raise ValueError("The saved training panel contains no eligible source writes and questions")
     backend = os.environ["MEMSKILL_BACKEND_ID"]
@@ -112,27 +160,30 @@ def run(study, data_path, output):
         raise ValueError("Previously measured panel has different inputs")
     atomic_json(manifest, signature)
     ev = get_evaluator("locomo", SimpleNamespace())
-    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(output / "responses")
     rows = []
     for job in plan["jobs"]:
         q = job["question"]
         scores = {}
         for name, prompt in job["prompts"].items():
-            answer, n_in, n_out = get_llm_response_via_api(prompt, LLM_MODEL=plan["model"], MAX_TOKENS=32, TAU=0.0,
-                base_url=os.environ["MEMSKILL_API_BASE"], api_key=os.environ.get("MEMSKILL_API_KEY", "local-only"))
-            scores[name] = {"answer": answer, "tokens": [n_in, n_out], "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-                            "f1": ev.compute_f1(answer, ev.get_ground_truth(q), q)}
-        row = {k: job[k] for k in ("episode", "original_index", "pair_retrieval_reproduced")}
+            scores[name] = measured_answer(prompt, plan["model"], q, ev, output / "responses")
+            scores[name]["prompt_sha256"] = hashlib.sha256(prompt.encode()).hexdigest()
+            if repair_multiline:
+                # An independent greedy repeat has its own measured response cache.
+                scores[name]["repeat"] = measured_answer(prompt, plan["model"], q, ev, output / "repeat-responses")
+        row = {k: v for k, v in job.items() if k not in ("question", "prompts")}
         row["scores"] = scores
         rows.append(row)
         atomic_json(output / f'{job["episode"]}-q{job["original_index"]}.json', row)
-    atomic_json(output / "summary.json", {"questions": len(rows), "original_retrieval_matches": sum(r["pair_retrieval_reproduced"] for r in rows),
-                "mean_f1": {a: mean(r["scores"][a]["f1"] for r in rows) for a in ("pair", "single")}})
+    summary = {"questions": len(rows), "original_retrieval_matches": sum(r["pair_retrieval_reproduced"] for r in rows),
+               "mean_f1": {a: mean(r["scores"][a]["f1"] for r in rows) for a in rows[0]["scores"]}}
+    atomic_json(output / "summary.json", summary)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("study", "locomo", "output"):
         parser.add_argument(name, type=Path)
+    parser.add_argument("--repair-multiline", action="store_true",
+                        help="Independently repeat both answers to every training question linked to an omitted utterance")
     args = parser.parse_args()
-    run(args.study, args.locomo, args.output)
+    run(args.study, args.locomo, args.output, repair_multiline=args.repair_multiline)
