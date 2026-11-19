@@ -9,6 +9,26 @@ def _writer_skills(selected):
     return [skill for skill in selected if skill["name"].lower() != "noop" and skill["update_type"].lower() != "noop"]
 
 
+def check_equal_source_choice(row, bank, selected, swapped=None):
+    """Verify the shared two slots and the versioned source skill in each recorded branch."""
+    names = [skill["name"] for skill in bank]
+    fixed = []
+    for name, rule in (("capture_activity_details", "dated_adjacent_turns"),
+                       ("capture_temporal_context", "dated_single_turns")):
+        index = names.index(name)
+        if bank[index].get("source_rule") != rule:
+            raise ValueError("Frozen skill has the wrong source grouping")
+        fixed.append(index)
+    grounded, plain = row["grounded"], row["plain"]
+    if (len(grounded) != 3 or len(plain) != 3 or grounded[:2] != plain[:2]
+            or [grounded[-1], plain[-1]] != fixed or len(set(grounded[:2] + fixed)) != 4
+            or any(i < 0 or i >= len(bank) for i in grounded[:2])):
+        raise ValueError("Equal-source substitution must change only the third slot")
+    chosen, other = (grounded, plain) if row["use"] else (plain, grounded)
+    if selected != [bank[i] for i in chosen] or (swapped is not None and swapped != [bank[i] for i in other]):
+        raise ValueError("Executed equal-source skills differ from the frozen bank")
+
+
 def load_episode(directory, sample_id, span_count, question_ids=None, *, deployment_writer=None):
     """Verify an atomically published episode before using its rows for fitting."""
     rows = json.loads((directory / "rows.json").read_text())
@@ -21,11 +41,17 @@ def load_episode(directory, sample_id, span_count, question_ids=None, *, deploym
     events = [json.loads(line) for line in trace_files[0].read_text().splitlines()]
     spans = [e for e in events if e["kind"] == "span"]
     diagnoses = [e["diagnosis"] for e in events if e["kind"] == "span_credit"]
+    protocol_file = directory.parent.parent / "protocol.json"
+    protocol = json.loads(protocol_file.read_text()) if protocol_file.is_file() else {}
     if (len(rows) != span_count or len(spans) != span_count or len(diagnoses) != span_count
             or any(e["sample"] != sample_id for e in events)
             or sum(e["kind"] == "snapshot" for e in events) != 1):
         raise ValueError(f"Incomplete or mismatched span trace at {directory}")
     for i, (row, span, diagnosis) in enumerate(zip(rows, spans, diagnoses, strict=True)):
+        if protocol.get("equal_sources"):
+            check_equal_source_choice(row, protocol["skills"], diagnosis["sampled_skills"], diagnosis.get("alternative") or None)
+            if span["candidate_versions"] != [skill["version"] for skill in protocol["skills"]]:
+                raise ValueError(f"Training bank differs from the frozen source skills at {directory}")
         if deployment_writer is not None and deployment_writer != ("selected_skills" in span):
             raise ValueError(f"Writer protocol differs in span {i} at {directory}")
         if "selected_skills" in span:

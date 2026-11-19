@@ -4,10 +4,23 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from experiments.controller.resume_status import load_episode
+from experiments.controller.resume_status import check_equal_source_choice, load_episode
 
 
 class ResumeEpisodeTest(unittest.TestCase):
+    def test_both_equal_source_branches_refer_to_the_frozen_versions(self):
+        bank = [{"name": "shared1"}, {"name": "shared2"},
+                {"name": "capture_activity_details", "version": "pair", "source_rule": "dated_adjacent_turns"},
+                {"name": "capture_temporal_context", "version": "single", "source_rule": "dated_single_turns"}]
+        row = {"grounded": [0, 1, 2], "plain": [0, 1, 3], "use": False}
+        selected = [bank[i] for i in row["plain"]]
+        swapped = [bank[i] for i in row["grounded"]]
+        check_equal_source_choice(row, bank, selected, swapped)
+        with self.assertRaisesRegex(ValueError, "frozen bank"):
+            check_equal_source_choice(row, bank, selected, swapped[:2] + [dict(bank[2], version="other")])
+        with self.assertRaisesRegex(ValueError, "third slot"):
+            check_equal_source_choice(dict(row, plain=[1, 0, 3]), bank, selected, swapped)
+
     def test_resume_requires_matching_ids_diagnosis_and_sampled_actions(self):
         with TemporaryDirectory() as tmp:
             directory = Path(tmp) / "conv-26_s1"

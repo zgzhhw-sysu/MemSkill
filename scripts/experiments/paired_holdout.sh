@@ -14,6 +14,9 @@ exec 8<>"$STUDY_DIR/fit.lock"
 flock --shared 8
 runner=scripts/experiments/paired_grounding.sh
 arms=(native always credit terminal rate count)
+if "$python_bin" -c 'import json,sys; sys.exit(not json.load(open(sys.argv[1])).get("equal_sources", False))' "$STUDY_DIR/protocol.json"; then
+    arms+=(plain)
+fi
 "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --select-for-test >"$report_dir/selection.log"
 bash "$runner" validation --study-arm count >"$report_dir/validation-count.log" 2>&1
 "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms "${arms[@]}" >"$report_dir/validation.log"

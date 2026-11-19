@@ -142,6 +142,10 @@ class ReaderEvidenceTest(unittest.TestCase):
         controls = {name: gains.copy() for name in ("native", "terminal", "always", "rate")}
         report = {"phase": "validation", "credit_minus": controls}
         self.assertTrue(development_decision(report)["advance"])
+        controls["plain"] = dict(gains, f1_change=0.)
+        self.assertFalse(development_decision(report)["advance"])
+        controls["plain"] = gains.copy()
+        self.assertTrue(development_decision(report)["advance"])
         controls["rate"]["control_to_credit_on_same_states"] = {"greedy_switches": 0}
         self.assertFalse(development_decision(report)["advance"])
         controls["rate"] = dict(gains, changed_question_evidence=[

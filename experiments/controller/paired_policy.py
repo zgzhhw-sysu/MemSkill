@@ -21,10 +21,13 @@ def count_schedule(seed, sample_id, credit_choices):
 class PairedPolicy(nn.Module):
     """Keep the other K-1 actions and their positions fixed on every decision."""
 
-    def __init__(self, native, target):
+    def __init__(self, native, target, alternative=None):
         super().__init__()
         self.native = native
         self.target = target
+        self.alternative = alternative
+        if alternative == target:
+            raise ValueError("The two fixed skill choices must differ")
         self.mode = "explore"
         self.weights = None
         self.decisions = []
@@ -39,7 +42,12 @@ class PairedPolicy(nn.Module):
             if not 1 <= k < logits.numel():
                 raise ValueError("A single-slot alternative needs an unused candidate")
             plain = logits.topk(k).indices.tolist()
-            if self.target in plain:
+            if self.alternative is not None:
+                others = logits.clone()
+                others[[self.target, self.alternative]] = -torch.inf
+                plain = others.topk(k - 1).indices.tolist() + [self.alternative]
+                slot = k - 1
+            elif self.target in plain:
                 slot = plain.index(self.target)
                 unused = logits.clone()
                 unused[plain] = -torch.inf
@@ -61,9 +69,10 @@ class PairedPolicy(nn.Module):
             else:
                 if not deterministic:
                     raise ValueError("Deployment uses greedy selection")
-                use = self.mode == "always" or logit >= 0
-                if self.mode == "always":
-                    prob = 1.0
+                use = logit >= 0
+                if self.mode in ("always", "plain"):
+                    use = self.mode == "always"
+                    prob = float(use)
                 elif self.mode == "count":
                     use = self.schedule[len(self.decisions)]
                     prob = float(use)
@@ -230,3 +239,66 @@ def fit_memory_novelty(rows, anchor):
     extra = deviations * slope
     intercept = _shift_for_mean_probability(baseline + extra, -extra)
     return {"center": center, "slope": slope, "intercept": intercept}
+
+
+def fit_constrained_placement(rows, rate, anchor):
+    """Spend the anchor's training KL at the same usage rate in the direction of verified F1 gain."""
+    features, offset = _training_states(rows)
+    states = features[:, 1:]
+    base = offset + features @ rate.double()
+    target = offset + features @ anchor.double()
+    if not torch.isclose(base.sigmoid().mean(), target.sigmoid().mean(), atol=1e-7, rtol=0):
+        raise ValueError("The terminal rate control must match the anchor on these training states")
+
+    def divergence(logits):
+        # Mean Bernoulli KL(policy || rate control) expressed in logits.
+        return float(((logits - base) * logits.sigmoid() + F.softplus(base) - F.softplus(logits)).mean())
+
+    budget = max(0., divergence(target))
+    info = {"target_kl": budget, "training_rate": float(base.sigmoid().mean())}
+    effects = base.new_tensor([(1 if r["use"] else -1) * max(-.5, min(.5, r["delta"])) for r in rows])
+    if budget <= 1e-12 or not effects.any():
+        return anchor.clone(), dict(info, fit="anchor", achieved_kl=budget)
+
+    # Center the rate-constrained score. A shared intercept will restore mean usage exactly below.
+    curvature = base.sigmoid() * (-base).sigmoid()
+    if curvature.sum() == 0:
+        return anchor.clone(), dict(info, fit="anchor", achieved_kl=budget)
+    centered = states - (curvature @ states) / curvature.sum()
+    design = centered * curvature.sqrt()[:, None]
+    # Dual ridge solve for the natural gradient, with the actor's 0.01 squared-weight penalty.
+    system = design @ design.T + (.02 * len(rows)) * torch.eye(len(rows), dtype=design.dtype)
+    direction = design.T @ torch.linalg.solve(system, curvature.sqrt() * effects)
+    projected = states @ direction
+    spread = projected.max() - projected.min()
+    if spread <= 1e-12:
+        return anchor.clone(), dict(info, fit="anchor", achieved_kl=budget)
+    direction = direction / spread
+    projected = states @ direction
+
+    def trial(scale):
+        extra = scale * projected
+        intercept = _shift_for_mean_probability(base + extra, -extra)
+        return divergence(base + extra + intercept), intercept
+
+    hi = 1.
+    while trial(hi)[0] < budget and hi < 128:
+        hi *= 2
+    if trial(hi)[0] < budget:
+        return anchor.clone(), dict(info, fit="anchor", achieved_kl=budget)
+    lo = 0.
+    for _ in range(38):
+        mid = (lo + hi) / 2
+        if trial(mid)[0] < budget:
+            lo = mid
+        else:
+            hi = mid
+    scale = (hi + lo) / 2
+    _, intercept = trial(scale)
+    result = rate.double().clone()
+    result[0] += intercept
+    result[1:] += scale * direction
+    result = result.to(rate.dtype)
+    logits = offset + features @ result.double()
+    return result, dict(info, fit="constrained", achieved_kl=divergence(logits),
+                        achieved_rate=float(logits.sigmoid().mean()))

@@ -13,7 +13,7 @@ import numpy as np
 from scipy.special import expit
 
 from experiments.controller.paired_policy import count_schedule
-from experiments.controller.resume_status import load_episode
+from experiments.controller.resume_status import check_equal_source_choice, load_episode
 from experiments.designer.designer_pilot import prefix
 from src.credit_assignment import recovered
 from src.eval import get_evaluator
@@ -125,6 +125,7 @@ def audit_writer_ranges(event, inputs):
 
 def audit(directory, dataset_file, phase, arms):
     cohort = read(Path(__file__).with_name("protocols") / "paired_grounding_cohort.json")
+    protocol = read(directory / "protocol.json")
     external = phase in ("longmemeval", "longmemeval-validation")
     spec = cohort["external" if external else "primary"]
     frozen = None
@@ -162,6 +163,8 @@ def audit(directory, dataset_file, phase, arms):
         for sid, convo in conversations:
             parent = directory / phase / arm / sid
             inputs = read(parent / "inputs.json")
+            if protocol.get("equal_sources") and inputs["skills"] != [s["version"] for s in protocol["skills"]]:
+                raise ValueError(f"Evaluation bank differs from the frozen source skills at {parent}")
             shared = {k: v for k, v in inputs.items() if k not in {"weights", "arm", "count_control"}}
             digest = hashlib.sha256(json.dumps(convo, sort_keys=True).encode()).hexdigest()
             weight_digest = hashlib.sha256(weights[arm].astype(np.float32).tobytes()).hexdigest() if arm in weights else None
@@ -199,7 +202,7 @@ def audit(directory, dataset_file, phase, arms):
                 credit_file = directory / phase / "credit" / sid / "decisions.json"
                 source = credit_file.read_bytes()
                 credit_choices = [r["use"] for r in json.loads(source)]
-                schedule = count_schedule(read(directory / "protocol.json")["seed"], sid, credit_choices)
+                schedule = count_schedule(protocol["seed"], sid, credit_choices)
                 expected = {"schedule": schedule, "credit_decisions_sha256": hashlib.sha256(source).hexdigest()}
                 if (inputs.get("count_control") != expected or len(schedule) != expected_spans
                         or [r["use"] for r in decisions] != schedule):
@@ -222,13 +225,19 @@ def audit(directory, dataset_file, phase, arms):
                 p0, p1 = (probability(row, weights[a]) for a in ("terminal", "credit"))
                 if arm in weights:
                     observed = probability(row, weights[arm])
+                elif arm in ("always", "plain"):
+                    observed = float(arm == "always")
                 elif arm == "count":
                     observed = float(schedule[i])
                 else:
-                    observed = 1.0 if arm == "always" else float(expit(row["base_logit"]))
+                    observed = float(expit(row["base_logit"]))
                 if not math.isclose(observed, row["prob"], abs_tol=2e-6) or row["use"] != (observed >= .5):
                     raise ValueError("Logged choice disagrees with deployed probability")
                 acts = tuple(s["name"] for s in event["selected_skills"])
+                if protocol.get("equal_sources"):
+                    check_equal_source_choice(row, protocol["skills"], event["selected_skills"])
+                    if event["selected_skills"][-1] not in event["skills"]:
+                        raise ValueError(f"Writer did not receive the frozen source skill at {parent}")
                 executed = {s["name"] for s in event["skills"]}
                 if inputs.get("writer_context") and executed and event["source"].strip():
                     calls = audit_writer_ranges(event, inputs)
@@ -356,7 +365,10 @@ def development_decision(report):
     if report["phase"] != "validation":
         raise ValueError("Policy selection requires development data")
     reason = []
-    for arm in ("native", "terminal", "always", "rate"):
+    controls = ["native", "terminal", "always", "rate"]
+    if "plain" in report["credit_minus"]:
+        controls.append("plain")
+    for arm in controls:
         diff = report["credit_minus"][arm]
         if diff["f1_change"] <= 0:
             reason.append(f"No positive development F1 difference against {arm}")
@@ -376,11 +388,13 @@ if __name__ == "__main__":
     parser.add_argument("phase", choices=("validation","test","longmemeval","longmemeval-validation"))
     parser.add_argument("--arms", nargs="+", default=["native","terminal","credit"])
     parser.add_argument("--select-for-test", action="store_true",
-                        help="Check all five development arms and publish selection.json before opening held-out data")
+                        help="Check the required development controls and publish selection.json before opening held-out data")
     args = parser.parse_args()
     if args.select_for_test and args.phase != "validation":
         parser.error("--select-for-test requires validation")
     arms = ["native", "terminal", "credit", "always", "rate"] if args.select_for_test else args.arms
+    if args.select_for_test and read(args.directory / "protocol.json").get("equal_sources"):
+        arms.append("plain")
     result = audit(args.directory, args.dataset, args.phase, arms)
     filename = "comparison-with-count.json" if "count" in arms else "comparison.json"
     if args.select_for_test:
