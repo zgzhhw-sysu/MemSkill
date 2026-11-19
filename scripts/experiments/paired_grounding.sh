@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." || exit 1
-phase=${1:?Pass train, probe-omitted, validation, test, transfer or transfer-validation}
+phase=${1:?Pass train, probe-omitted, probe-weaker, validation, test, transfer or transfer-validation}
 shift
 : "${STUDY_DIR:?Set a directory for this experiment}"
 : "${LOCOMO_DATA:?Set the path to locomo10.json}"

@@ -1,0 +1,148 @@
+"""Recheck the losing counterfactual branch of positive sampled-action training credits."""
+from collections import Counter
+import fcntl
+import hashlib
+import json
+import os
+
+from experiments.controller.probe_omitted import atomic_json, check_responses
+from experiments.controller.resume_status import load_episode
+from src.credit_assignment import _answer, _digest, _same_branch, _write_branch, hidden_retrieval_candidate, possible_recovery
+from src.episode_trace import evidence_turns
+from src.rag_utils import get_embeddings
+
+
+def matches_recorded_swap(branch, saved):
+    """Require the previously measured bank, suffix, and every requested reader response."""
+    if branch.get("contract_fault") or branch.get("failed_span") is not None or not branch.get("qa"):
+        return False
+    actual = dict(branch, qa={str(i): a for i, a in branch["qa"].items()})
+    expected = dict(saved, qa={i: saved["qa"].get(i) for i in actual["qa"]})
+    return _same_branch(actual, expected)
+
+
+def check_weaker_span(trainer, conversation, spans, diagnosis):
+    idx = diagnosis["span_id"]
+    alternative = diagnosis["alternative"]
+    questions = diagnosis["questions"]
+    targets = {q["qa_index"]: q for q in questions if q["controller_delta"] > 0}
+    ids = [q["qa_index"] for q in questions]
+    qas = conversation["qa"]
+    vectors = get_embeddings(trainer.args.retriever, [qas[i]["question"] for i in ids], "query")
+    queries = {i: (qas[i], v) for i, v in zip(ids, vectors, strict=True) if i in targets}
+    results = {i: {"original_index": q["original_index"], "original_delta": q["controller_delta"],
+                   "status": "unreproduced", "competing": []} for i, q in targets.items()}
+    if not _same_branch(diagnosis["swap"], diagnosis["swap_repeat"]):
+        raise ValueError("Historical swap and its repeat disagree")
+    if any(q["original_index"] != qas[i]["original_index"] or not q["control_matched"]
+           or q["original_f1"] <= diagnosis["swap"]["qa"][str(i)]["f1"] for i, q in targets.items()):
+        raise ValueError("Counterfactual is not the recorded losing branch for this training question")
+    weak = _write_branch(trainer, spans, idx, alternative, queries, include_contents=True)
+    check_responses({"questions": [], "control": weak})
+    contents = weak.pop("contents", [])
+    report = {"questions": results, "weak": weak}
+    if not matches_recorded_swap(weak, diagnosis["swap"]):
+        return report
+
+    turns = {i: evidence_turns(conversation["conversation"], qas[i].get("evidence")) for i in ids}
+    quotes = list(dict.fromkeys(f'{t["session_date"]} | {t["speaker"]}: {t["text"]}'
+                                for i in ids for t in turns[i] if t["dia_id"] in spans[idx]["source_turns"]))
+    can_insert = any(op["update_type"].lower() == "insert" for op in alternative)
+    truths = {i: trainer.evaluator.get_ground_truth(qas[i]) for i in targets}
+    repair = {}
+    reproducible = True
+    if quotes and can_insert:
+        report["repair_quotes"] = quotes
+        repair = _write_branch(trainer, spans, idx, alternative, queries, quotes)
+        report["repair"] = repair
+        check_responses({"questions": [], "execution_repair": repair})
+        reproducible = (repair["actions"] == weak["actions"] and not repair["contract_fault"]
+                        and repair.get("writer_prompt_hashes") == weak.get("writer_prompt_hashes")
+                        and set(repair.get("qa", {})) == set(targets))
+        if reproducible and any(possible_recovery(weak["qa"][i], repair["qa"][i], truths[i]) for i in targets):
+            repeat = _write_branch(trainer, spans, idx, alternative, queries, quotes)
+            report["repair_repeat"] = repeat
+            check_responses({"questions": [], "repair_repeat": repeat})
+            reproducible = not repeat["contract_fault"] and _same_branch(repair, repeat)
+
+    live = dict(enumerate(contents))
+    for i, outcome in results.items():
+        before = weak["qa"][i]
+        refs = before["indices"]
+        if _digest([live[j] for j in refs]) != before["context_hash"]:
+            raise ValueError("Counterfactual reader context does not match the replay")
+        if (reproducible and repair and repair["bank_hash"] != weak["bank_hash"]
+                and repair["qa"][i]["context_hash"] != before["context_hash"]):
+            if possible_recovery(before, repair["qa"][i], truths[i]):
+                outcome["competing"].append("execution")
+        mid = hidden_retrieval_candidate(qas[i], turns[i], refs, live)
+        stable = True
+        if mid is not None:
+            context = [live[j] for j in refs[:-1]] + [live[mid]]
+            answer = _answer(trainer, qas[i], context)
+            probe = {"inserted_index": mid, "replaced_index": refs[-1], "context_hash": _digest(context), "answer": answer}
+            outcome["retrieval"] = probe
+            if not answer["ok"]:
+                raise RuntimeError("Counterfactual retrieval reader failed")
+            if possible_recovery(before, answer, truths[i]):
+                probe["repeat"] = _answer(trainer, qas[i], context)
+                if not probe["repeat"]["ok"]:
+                    raise RuntimeError("Counterfactual retrieval repeat failed")
+                stable = probe["repeat"] == answer
+                if stable:
+                    outcome["competing"].append("retrieval")
+        if outcome["competing"]:
+            outcome["status"] = "competing_recovery"
+        elif reproducible and stable:
+            outcome["status"] = "survived_probes"
+        else:
+            outcome["status"] = "unresolved"
+    return report
+
+
+def probe_weaker_windows(trainer, study, windows, through):
+    backend = os.environ.get("MEMSKILL_BACKEND_ID", trainer.args.api_base)
+    root = study / "diagnostics" / "weaker-branch" / hashlib.sha256(backend.encode()).hexdigest()[:16]
+    root.mkdir(parents=True, exist_ok=True)
+    jobs = []
+    counts = Counter()
+    for convo, episode in windows:
+        trace, = (episode / "traces").glob("*.jsonl")
+        raw = trace.read_bytes()
+        events = [json.loads(line) for line in raw.splitlines()]
+        spans = [e for e in events if e["kind"] == "span"]
+        ids = [q["original_index"] for q in convo["qa"]]
+        load_episode(episode, convo["sample_id"], len(spans), ids, deployment_writer=trainer.args.span_credit_deployment_writer)
+        counts["windows"] += 1
+        for event in events:
+            if event["kind"] != "span_credit":
+                continue
+            d = event["diagnosis"]
+            counts["sampled_losses_checked_by_original_rule"] += sum(q["controller_delta"] < 0 for q in d["questions"])
+            positives = [q for q in d["questions"] if q["controller_delta"] > 0]
+            if positives:
+                if d["evidence_rule_version"] != 2 or any(q["cause"] != "selection" for q in positives):
+                    raise ValueError("Expected selection-only rule-2 training credits")
+                signature = {"episode": episode.name, "trace_sha256": hashlib.sha256(raw).hexdigest(), "backend": backend,
+                             "span": d["span_id"], "positive_question_ids": [q["original_index"] for q in positives]}
+                jobs.append((convo, spans, d, signature))
+    # End-of-window swaps can be checked before the more expensive suffix replays.
+    jobs.sort(key=lambda job: (len(job[1]) - job[2]["span_id"], job[3]["episode"]))
+    with (root / "probe.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        os.environ["MEMSKILL_USAGE_LOG"] = str(root / "usage.jsonl")
+        for convo, spans, diagnosis, signature in jobs:
+            name = f'{signature["episode"]}-span{signature["span"]}'
+            path = root / (name + ".json")
+            if path.exists():
+                result = json.loads(path.read_text())
+                if result["inputs"] != signature:
+                    raise ValueError(f"Different training inputs at {path}")
+            else:
+                result = dict(inputs=signature, **check_weaker_span(trainer, convo, spans, diagnosis))
+                atomic_json(path, result)
+            states = [q["status"] for q in result["questions"].values()]
+            counts.update(states)
+            print(name, states, flush=True)
+        atomic_json(root / f"through-{through}.json", {"backend": backend, "counts": dict(counts),
+                    "checked": [j[3] for j in jobs]})
