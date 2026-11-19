@@ -9,13 +9,26 @@ import torch
 
 from experiments.controller.audit_paired import audit_rate_control
 from experiments.controller.paired_grounding import load_arm_weights, reuse_identical_choices
-from experiments.controller.paired_policy import PairedPolicy, count_schedule, fit_policy, fit_anchored_credit, match_training_probability
+from experiments.controller.paired_policy import PairedPolicy, count_schedule, fit_policy, fit_anchored_credit, fit_source_count_correction, match_training_probability
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_source_count_can_change_order_while_preserving_training_propensity(self):
+        anchor = torch.tensor([-.35, 0.])
+        rows = [dict(state=[1.], base_logit=i/10, use=True, delta=delta, source_item_count=n)
+                for i, (n, delta) in enumerate([(0, -.5), (1, 0.), (2, 0.), (9, .4)])]
+        intercept, slope = fit_source_count_correction(rows, anchor)
+        base = [r["base_logit"] + float(anchor[0]) for r in rows]
+        logits = [x + intercept + slope * math.log1p(r["source_item_count"]) for x, r in zip(base, rows)]
+        self.assertGreater(slope, 0.)
+        self.assertLess(logits[0], base[0])
+        self.assertGreater(logits[-1], base[-1])
+        self.assertAlmostEqual(torch.tensor(base).sigmoid().mean().item(), torch.tensor(logits).sigmoid().mean().item(), 6)
+        self.assertEqual(fit_source_count_correction([dict(r, source_item_count=2) for r in rows], anchor), (0., 0.))
+
     def test_count_control_uses_only_the_count_and_executes_the_entire_schedule(self):
         choices = [True, True, True, False, False, True]
         schedule = count_schedule(42, "conv-47", choices)

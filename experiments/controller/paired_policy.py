@@ -117,11 +117,6 @@ def fit_anchored_credit(rows, terminal, *, center_states=False):
     """Update a frozen terminal actor from verified outcomes, preserving its probabilities on abstentions."""
     features, offset = _training_states(rows)
     baseline = offset + features @ terminal.double()
-    effects = torch.tensor([(1 if row["use"] else -1) * max(-0.5, min(0.5, row["delta"]))
-                            for row in rows], dtype=features.dtype)
-    verified = effects != 0
-    if not verified.any():
-        return terminal.clone()
     if center_states:
         states = features[:, 1:]
         center = states.mean(dim=0)
@@ -130,10 +125,22 @@ def fit_anchored_credit(rows, terminal, *, center_states=False):
         if scale <= 1e-8:
             return fit_anchored_credit(rows, terminal)
         features = torch.cat((features[:, :1], variation / scale), dim=1)
+    correction = _fit_credit_correction(rows, features, baseline)
+    if center_states:
+        slope = correction[1:] / scale
+        correction = torch.cat(((correction[0] - center @ slope).reshape(1), slope))
+    return terminal + correction.float()
+
+
+def _fit_credit_correction(rows, features, baseline):
+    effects = features.new_tensor([(1 if r["use"] else -1) * max(-0.5, min(0.5, r["delta"])) for r in rows])
+    verified = effects != 0
+    if not verified.any():
+        return features.new_zeros(features.shape[1])
     local = effects[verified]
     abstained = ~verified
     target = baseline[abstained].sigmoid()
-    change = torch.zeros_like(terminal, dtype=features.dtype, requires_grad=True)
+    change = features.new_zeros(features.shape[1], requires_grad=True)
     optimizer = torch.optim.LBFGS([change], max_iter=100, line_search_fn="strong_wolfe",
                                   tolerance_grad=1e-9, tolerance_change=1e-12)
 
@@ -147,11 +154,7 @@ def fit_anchored_credit(rows, terminal, *, center_states=False):
         return loss
 
     optimizer.step(closure)
-    correction = change.detach()
-    if center_states:
-        slope = correction[1:] / scale
-        correction = torch.cat(((correction[0] - center @ slope).reshape(1), slope))
-    return terminal + correction.float()
+    return change.detach()
 
 
 def match_training_probability(rows, terminal, credit):
@@ -159,6 +162,12 @@ def match_training_probability(rows, terminal, credit):
     features, offset = _training_states(rows)
     base = offset + features @ terminal.double()
     extra = features @ (credit.double() - terminal.double())
+    result = terminal.clone()
+    result[0] += _shift_for_mean_probability(base, extra)
+    return result
+
+
+def _shift_for_mean_probability(base, extra):
     target = (base + extra).sigmoid().mean()
     # A common shift at either extreme bounds the mean of the state-dependent shifts.
     lo, hi = float(extra.min()), float(extra.max())
@@ -168,6 +177,21 @@ def match_training_probability(rows, terminal, credit):
             lo = mid
         else:
             hi = mid
-    result = terminal.clone()
-    result[0] += (lo + hi) / 2
-    return result
+    return (lo + hi) / 2
+
+
+def fit_source_count_correction(rows, anchor):
+    """Fit a correction from the number of available source items while retaining mean training propensity."""
+    features, offset = _training_states(rows)
+    baseline = offset + features @ anchor.double()
+    counts = baseline.new_tensor([math.log1p(r["source_item_count"]) for r in rows])
+    scale = counts.std(unbiased=False)
+    if scale <= 1e-8:
+        return 0., 0.
+    centered = (counts - counts.mean()) / scale
+    inputs = torch.stack((torch.ones_like(centered), centered), dim=1)
+    correction = _fit_credit_correction(rows, inputs, baseline)
+    slope = float(correction[1] / scale)
+    extra = counts * slope
+    intercept = _shift_for_mean_probability(baseline + extra, -extra)
+    return intercept, slope
