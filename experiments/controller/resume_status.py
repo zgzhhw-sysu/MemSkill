@@ -41,6 +41,12 @@ def load_episode(directory, sample_id, span_count, question_ids=None, *, deploym
                     branch_skills = _writer_skills(diagnosis["alternative"])
                 if diagnosis[key].get("writer_skills") != branch_skills:
                     raise ValueError(f"Writer protocol differs in {key} at {directory}")
+            control = diagnosis.get("control", {})
+            if row["delta"] and "writer_prompt_hashes" in control:
+                actual = [r["prompt_sha256"] for r in span["executor_responses"]]
+                if actual != control["writer_prompt_hashes"] or any(
+                        not step["matches_rollout"] for step in control["suffix"]):
+                    raise ValueError(f"Credit without a matching writer replay at {directory}")
         chosen = row["grounded"] if row["use"] else row["plain"]
         recorded = [skill["version"] for skill in diagnosis["sampled_skills"]]
         versions = span["candidate_versions"]
