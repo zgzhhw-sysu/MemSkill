@@ -83,6 +83,10 @@ python -m experiments.controller.audit_training_replays "$STUDY_DIR" > training-
 
 ## 测试范围
 
+另在 LongMemEval-S 自带的 98 条验证历史中，预先按问题 ID 的哈希在六类可回答题各取两条，再加入其余五条独立问题家族的弃答题。共 17 条完整历史、816 个 session。与正式测试的 105 个问题家族交集为零。使用已通过 LoCoMo 开发筛选的冻结权重、相同编码和生成后端，按历史依次运行六组。12 道可回答题和 5 道弃答题分开报告。可从仓库根目录运行 `bash scripts/experiments/paired_transfer_validation.sh`，逐历史断点保存在 `$STUDY_DIR/longmemeval-validation/`。该验证队列用于观察跨数据集行为，正式测试沿用原候选顺序和样本。[外部验证清单](../../experiments/controller/protocols/paired_external_validation.json)
+
+正式 LongMemEval-S 划分的 105 条历史对应 105 个不同的问题家族。部分背景 session 跨历史复用。在 5,460 对历史中，有 246 对至少共享一个 session ID，每对至多共享两个。区间按每条完整历史的配对得分计算。
+
 | 数据 | 使用方式 | 样本 |
 | --- | --- | --- |
 | LoCoMo 验证 | 选择方案，检验查询和写入链路 | 两条固定验证对话，各取前六个 session，评估证据完整落在前缀内的可评分题 |

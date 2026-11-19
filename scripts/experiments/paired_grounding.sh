@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." || exit 1
-phase=${1:?Pass train, probe-omitted, validation, test or transfer}
+phase=${1:?Pass train, probe-omitted, validation, test, transfer or transfer-validation}
 shift
 : "${STUDY_DIR:?Set a directory for this experiment}"
 : "${LOCOMO_DATA:?Set the path to locomo10.json}"
@@ -15,14 +15,17 @@ dataset=locomo
 data_file=$LOCOMO_DATA
 phase_args=(--study-phase "$phase" --span-credit-audit)
 unset MEMSKILL_GREEDY_EVAL_CACHE
-if [[ "$phase" == validation || "$phase" == test || "$phase" == transfer ]]; then
+if [[ "$phase" == validation || "$phase" == test || "$phase" == transfer || "$phase" == transfer-validation ]]; then
     export MEMSKILL_GREEDY_EVAL_CACHE="$STUDY_DIR/response-cache/${phase/transfer/longmemeval}"
 fi
-if [[ $phase == transfer ]]; then
+if [[ $phase == transfer || $phase == transfer-validation ]]; then
     module=experiments.controller.transfer_grounding
     dataset=longmemeval
     data_file=${LONGMEMEVAL_DATA:?Set the path to longmemeval_s_cleaned.json}
     phase_args=()
+    if [[ $phase == transfer-validation ]]; then
+        phase_args+=(--study-external-validation)
+    fi
     writer_model=${MEMSKILL_WRITER_TOKENIZER_PATH:-"$(dirname -- "$MEMSKILL_QWEN_EMBEDDING_PATH")/Meta-Llama-3-8B-Instruct"}
     phase_args+=(--study-writer-tokenizer "$writer_model")
 fi

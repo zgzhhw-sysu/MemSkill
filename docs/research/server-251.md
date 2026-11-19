@@ -1,5 +1,7 @@
 # 251 上的配对实验
 
+CPU 编码的冻结信用组另做 LongMemEval-S 独立验证。服务 `memskill-251-transfer-validation` 使用原 40% 占空比的生成服务，实时进度在 `~/memskill-work/runs/paired-251-external-validation/client.log`，历史断点在 `~/memskill-work/study-anchor/longmemeval-validation/`。正式候选选定并运行时，这组补充验证让出生成资源。17 条验证历史均按完整会话执行，首次运行前记录权重、协议、验证决定及样本清单的 SHA-256。
+
 研究工作区是 `~/memskill-work/MemSkill`，实验断点在 `~/memskill-work/study`，迁入的原始快照在 `~/span-credit-20261120`。独立环境 `~/memskill-work/venv` 使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3 和 sentence-transformers 5.6.0。248 实际使用的配对实验依赖及其传递依赖共 109 个，准确版本在目标机 `~/memskill-work/deploy/requirements-248.txt`。研究数据的口径见[配对协议](span-credit-paired.md)。
 
 ## GPU 占用和释放
