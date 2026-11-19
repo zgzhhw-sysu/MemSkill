@@ -107,28 +107,12 @@ python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" valida
 
 读取 `validation/selection.json`。先比较 `credit_minus.terminal` 的同状态概率变化、贪心切换数、实际三技能组合变化和逐题 F1。再检查 `changed_question_evidence` 中两组读到的提示及记忆来源。与 `always` 相同的轨迹要单列，这种结果不足以证明策略会按 span 选择性地使用该技能。若验证退化，保留该版，用训练和验证对话继续迭代。
 
-选定方案后记录权重和协议指纹，再一次性跑完整留出集。以下命令使用同一组冻结权重。
+选定方案后，从仓库根目录运行完整评估。入口先核对五组验证结果，补齐等次数对照，再冻结三份策略权重和实验协议。它在每个阶段分别执行六组比较，续跑时校验已保存的指纹和逐段结果。
 
 ```bash
-(
-  set -e
-  cd "$STUDY_DIR"
-  sha256sum protocol.json terminal.json credit.json rate.json > frozen.sha256
-)
-(
-  set -e
-  bash scripts/experiments/paired_grounding.sh test
-  python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" test \
-    --arms native terminal credit always rate
-  for arm in native terminal credit always rate; do
-    bash scripts/experiments/paired_grounding.sh transfer --study-arm "$arm"
-  done
-  python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" longmemeval \
-    --arms native terminal credit always rate
-  (cd "$STUDY_DIR" && sha256sum -c frozen.sha256)
-)
+bash scripts/experiments/paired_holdout.sh
 ```
 
 LoCoMo 主测试含两段完整对话、55 个 session、314 道可评分题。预设目标为相对 `terminal` 和 `native` 的逐题平均 F1 均至少提高 **0.02**，且两段对话分别为正。另有 86 道无普通参考答案的对抗题按原协议单列。LongMemEval-S 迁移测试含 105 段完整历史、5,027 个 session，覆盖六类问题；101 道可回答题用于主 F1，4 道弃答题另报。报告逐类结果和按历史配对、按题型分层的 95% 区间。两个数据集分别报告，保留逐题回退和无法由选技解释的变化。
 
-最终报告在 `test/comparison.json` 和 `longmemeval/comparison.json`。每个已完成的评估历史保存实际问题编号、分数、决策、轨迹及用量；完整历史间可续跑。实验结束后在启动服务的终端执行 `kill "$MODEL_PID"; wait "$MODEL_PID"`，并按目标机约定释放租约或恢复限量空闲守护。
+六组正式报告在 `test/comparison-with-count.json` 和 `longmemeval/comparison-with-count.json`，冻结清单及运行日志在 `holdout/`。每个已完成的评估历史保存实际问题编号、分数、决策、轨迹及用量；完整历史间可续跑。实验结束后在启动服务的终端执行 `kill "$MODEL_PID"; wait "$MODEL_PID"`，并按目标机约定释放租约或恢复限量空闲守护。
