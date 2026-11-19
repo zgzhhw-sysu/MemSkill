@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 from statistics import mean
+from tempfile import NamedTemporaryFile
 from types import SimpleNamespace
 
 import numpy as np
@@ -229,13 +230,47 @@ def audit(directory, dataset_file, phase, arms):
     return report
 
 
+def development_decision(report):
+    """Check whether changed span decisions improve development QA beyond global skill usage."""
+    if report["phase"] != "validation":
+        raise ValueError("Policy selection requires development data")
+    reason = []
+    for arm in ("native", "terminal", "always", "rate"):
+        diff = report["credit_minus"][arm]
+        if diff["f1_change"] <= 0:
+            reason.append(f"No positive development F1 difference against {arm}")
+        if not diff["control_to_credit_on_same_states"]["greedy_switches"]:
+            reason.append(f"No changed greedy choices on the recorded {arm} states")
+        supported = [q["f1_delta"] for q in diff["changed_question_evidence"]
+                     if q["actions_changed_in_history"] and q["reader_prompt_changed"]]
+        if sum(supported) <= 0:
+            reason.append(f"No positive net F1 difference with verified choice and reader changes against {arm}")
+    return {"advance": not reason, "reasons": reason}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
     parser.add_argument("dataset", type=Path)
     parser.add_argument("phase", choices=("validation","test","longmemeval"))
     parser.add_argument("--arms", nargs="+", default=["native","terminal","credit"])
+    parser.add_argument("--select-for-test", action="store_true",
+                        help="Check all five development arms and publish selection.json before opening held-out data")
     args = parser.parse_args()
-    result = audit(args.directory, args.dataset, args.phase, args.arms)
-    (args.directory / args.phase / "comparison.json").write_text(json.dumps(result, indent=2)+"\n")
+    if args.select_for_test and args.phase != "validation":
+        parser.error("--select-for-test requires validation")
+    arms = ["native", "terminal", "credit", "always", "rate"] if args.select_for_test else args.arms
+    result = audit(args.directory, args.dataset, args.phase, arms)
+    filename = "comparison.json"
+    if args.select_for_test:
+        result["selection"] = development_decision(result)
+        filename = "selection.json"
+    directory = args.directory / args.phase
+    with NamedTemporaryFile(mode="w", dir=directory, delete=False) as temporary:
+        json.dump(result, temporary, indent=2)
+        temporary.write("\n")
+    Path(temporary.name).replace(directory / filename)
+    if args.select_for_test:
+        print(json.dumps(result["selection"], indent=2))
+        raise SystemExit(0 if result["selection"]["advance"] else 3)
     print(json.dumps(result, indent=2))

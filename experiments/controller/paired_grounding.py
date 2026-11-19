@@ -160,6 +160,8 @@ def main():
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
+    parser.add_argument("--study-train-sessions", type=int, choices=(4, 8),
+                        help="Use the first 4 or 8 sessions of each training dialogue, in disjoint pairs")
     options, remainder = parser.parse_known_args()
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
@@ -168,6 +170,11 @@ def main():
         raise ValueError("This protocol requires LoCoMo, a frozen K=3 policy, greedy 8B responses and evidence rule 2")
     out = options.study_dir.resolve()
     out.mkdir(exist_ok=True, parents=True)
+    path = out / "protocol.json"
+    train_sessions = options.study_train_sessions
+    if train_sessions is None:
+        train_sessions = json.loads(path.read_text())["train_sessions"][-1][-1] if path.exists() else 4
+    train_windows = [[start, start + 1] for start in range(1, train_sessions, 2)]
     set_seed(args.seed)
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
@@ -185,14 +192,13 @@ def main():
         "seed": args.seed, "skills": specs, "model": args.model, "writer_tokens": args.max_new_tokens,
         "retriever": args.retriever, "retrieval_k": [args.mem_top_k, args.mem_top_k_eval],
         "train": [c["sample_id"] for c in train], "validation": [c["sample_id"] for c in val],
-        "test": [c["sample_id"] for c in test], "train_sessions": [[1, 2], [3, 4]],
+        "test": [c["sample_id"] for c in test], "train_sessions": train_windows,
         "sampling": "fair coin for one fixed-K substitution; same coin on branch-specific suffix state",
         "training_signals": "leave-one-episode-out centered terminal F1 in both arms; credit adds signed rule-2 single-slot F1 deltas",
         "validation_sessions": 6, "test_sessions": "all", "decision_threshold": "greedy, p>=0.5",
         "target": "at least +0.02 micro mean per-question F1 vs terminal and native, positive on each independent test dialogue",
         "weight": 1, "ridge": 0.01, "rule": 2, "span_budget": args.span_credit_spans, "question_budget": args.span_credit_questions,
     }
-    path = out / "protocol.json"
     with (out / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if path.exists():
@@ -212,7 +218,7 @@ def main():
     if options.study_phase == "train":
         root = out / "train"
         root.mkdir(exist_ok=True)
-        episodes = [(start, i, c) for start in (1, 3) for i, c in enumerate(train)]
+        episodes = [(start, i, c) for start, _ in train_windows for i, c in enumerate(train)]
         for start, i, c in reversed(episodes) if options.study_reverse else episodes:
             dest = root / f"{c['sample_id']}_s{start}"
             with (root / (dest.name + ".lock")).open("a") as lock:

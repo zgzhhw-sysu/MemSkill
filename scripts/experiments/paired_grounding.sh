@@ -7,6 +7,9 @@ shift
 : "${LOCOMO_DATA:?Set the path to locomo10.json}"
 : "${CONTROLLER_CHECKPOINT:?Set the native conversation Controller checkpoint}"
 : "${MEMSKILL_QWEN_EMBEDDING_PATH:?Set the local Qwen3-Embedding-0.6B model directory}"
+if [[ $phase == test || $phase == transfer ]] && [[ -f "$STUDY_DIR/require-selective-validation" ]]; then
+    "${MEMSKILL_PYTHON:-python}" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --select-for-test
+fi
 module=experiments.controller.paired_grounding
 dataset=locomo
 data_file=$LOCOMO_DATA

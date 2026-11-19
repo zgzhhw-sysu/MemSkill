@@ -31,3 +31,5 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 ```
 
 运行日志和每三秒的显卡采样在 `~/memskill-work/runs/paired-251/`。模型服务随实验租约退出。每个完整训练窗口、每条验证／测试对话以及每段迁移测试历史分别落盘，换机或重启后可从已落盘的完整记录续跑。验证阶段检查同状态选技概率、实际选技、读到的记忆和逐题 F1；最终留出集沿用已锁定的完整历史和计分规则。
+
+验证包含两条互相独立的对话，分别有 30 和 45 道可评分题。251 在实验目录创建 `require-selective-validation` 后，统一启动脚本会在读取最终测试题前复核五组验证结果，并将决定写入 `validation/selection.json`。若第一轮发展出的策略未能在验证时胜过整体概率对照等基线，后续任务 `memskill-251-followup` 可从已完成的十二个窗口开始，在 `~/memskill-work/study-eight` 采集额外十二个训练窗口。第二轮日志在 `~/memskill-work/runs/paired-251-eight/`。
