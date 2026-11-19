@@ -15,7 +15,9 @@ from scipy.special import expit
 from experiments.controller.paired_policy import count_schedule
 from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix
+from src.credit_assignment import recovered
 from src.eval import get_evaluator
+from src.eval_utils import normalize_answer
 from src.replay import restore_text
 
 
@@ -38,6 +40,23 @@ def bootstrap_by_type(deltas, types, seed=20261120):
 def probability(decision, weights):
     state = np.asarray(decision["state"], dtype=np.float64)
     return float(expit(decision["base_logit"] + weights[0] + np.dot(weights[1:], state / max(np.linalg.norm(state), 1e-12))))
+
+
+def answer_change(before, after, truth):
+    """Describe a scored change using literal reference evidence, separately from token F1."""
+    old, new = (normalize_answer(row["answer"]).split() for row in (before, after))
+    refs = truth if isinstance(truth, list) else [truth]
+    def contains(words, phrase):
+        return bool(phrase) and any(words[i:i + len(phrase)] == phrase for i in range(len(words) - len(phrase) + 1))
+    shorter, longer = sorted((old, new), key=len)
+    if (len(shorter) < len(longer) and contains(longer, shorter)
+            and any(contains(shorter, normalize_answer(str(ref)).split()) for ref in refs)):
+        return "credit_shorter_with_shared_reference" if new == shorter else "control_shorter_with_shared_reference"
+    if recovered(before, after, truth):
+        return "credit_recovered_reference"
+    if recovered(after, before, truth):
+        return "control_recovered_reference"
+    return "other_wording_or_content_change"
 
 
 def audit_rate_control(study, weights):
@@ -104,7 +123,8 @@ def audit(directory, dataset_file, phase, arms):
         raise ValueError("Both credit and terminal results are required")
     weights = {arm: np.asarray(read(directory / (arm + ".json"))) for arm in arms if arm in ("credit", "terminal", "rate")}
     scores, probabilities, extra = {}, {}, {}
-    groups, answerable = {}, {}
+    groups, answerable, references = {}, {}, {}
+    predictions = defaultdict(dict)
     choices, readers = defaultdict(dict), defaultdict(dict)
     placements = {}
     common_inputs = {}
@@ -137,6 +157,8 @@ def audit(directory, dataset_file, phase, arms):
                         or not math.isclose(f1, r["f1"], abs_tol=1e-9)):
                     raise ValueError(f"Invalid score for {key}")
                 scored[key], groups[key] = f1, str(q["question_type"] if external else q["category"])
+                references[key] = ev.get_ground_truth(q)
+                predictions[arm][key] = {"answer": r["prediction"], "f1": f1, "ok": True}
                 answerable[key] = not (external and sid.endswith("_abs"))
             decisions = read(parent / "decisions.json")
             expected_spans = len(convo["haystack_sessions"]) if external else sum(
@@ -239,6 +261,7 @@ def audit(directory, dataset_file, phase, arms):
             if actions != choices[arm][sid, span]:
                 changed_spans[sid].add(span)
         evidence = []
+        answer_changes = defaultdict(list)
         unsupported_delta = 0.0
         for (sid, index), delta in d.items():
             if delta == 0:
@@ -248,12 +271,17 @@ def audit(directory, dataset_file, phase, arms):
             prompt_changed = old_prompt != new_prompt
             if not changed_spans[sid] or not prompt_changed:
                 unsupported_delta += delta
+            change = answer_change(predictions[arm][sid, index], predictions["credit"][sid, index], references[sid, index])
+            answer_changes[change].append(delta)
             evidence.append({"history": sid, "question_index": index, "f1_delta": delta,
+                             "answer_change": change,
                              "actions_changed_in_history": bool(changed_spans[sid]),
                              "reader_prompt_changed": prompt_changed,
                              "switched_spans_read_in_control": sorted(old_origins & changed_spans[sid]),
                              "switched_spans_read_in_credit": sorted(new_origins & changed_spans[sid])})
         contrast["changed_question_evidence"] = evidence
+        contrast["answer_changes"] = {kind: {"questions": len(values), "contribution_to_mean_f1_change": sum(values) / len(keys)}
+                                      for kind, values in answer_changes.items()}
         contrast["f1_change_without_verified_action_to_prompt_change"] = unsupported_delta / len(keys)
         if external:
             contrast["stratified_95pct_ci"] = bootstrap_by_type(list(d.values()), [groups[k] for k in keys])
