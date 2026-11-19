@@ -105,6 +105,23 @@ def reader_inputs(events, scored_rows, questions, evaluator):
     return result
 
 
+def audit_writer_ranges(event, inputs):
+    """Check that the measured requests cover the source once under one output allowance."""
+    end = total = 0
+    calls = event["executor_responses"]
+    for call in calls:
+        start, stop = call["source_range"]
+        cap = call["output_cap"]
+        if (start != end or stop <= start or not 0 < call["output_tokens"] <= cap
+                or not 0 < call["input_tokens"] <= inputs["writer_context"]["context_tokens"] - cap):
+            raise ValueError("Invalid writer source range or token counts")
+        end = stop
+        total += cap
+    if end != len(event["source"]) or total != inputs["writer_tokens"]:
+        raise ValueError("Writer requests did not cover the session under its output budget")
+    return len(calls)
+
+
 def audit(directory, dataset_file, phase, arms):
     cohort = read(Path(__file__).with_name("protocols") / "paired_grounding_cohort.json")
     external = phase == "longmemeval"
@@ -200,6 +217,10 @@ def audit(directory, dataset_file, phase, arms):
                     raise ValueError("Logged choice disagrees with deployed probability")
                 acts = tuple(s["name"] for s in event["selected_skills"])
                 executed = {s["name"] for s in event["skills"]}
+                if inputs.get("writer_context") and executed and event["source"].strip():
+                    calls = audit_writer_ranges(event, inputs)
+                    counts["writer_calls"] += calls
+                    counts["split_writer_spans"] += int(calls > 1)
                 if ("capture_activity_details" in executed) != row["use"]:
                     raise ValueError("Executor did not receive the selected writing skill")
                 if ("capture_activity_details" in acts) != row["use"] or len(set(acts)) != 3:

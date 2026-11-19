@@ -19,6 +19,8 @@ if [[ $phase == transfer ]]; then
     dataset=longmemeval
     data_file=${LONGMEMEVAL_DATA:?Set the path to longmemeval_s_cleaned.json}
     phase_args=()
+    writer_model=${MEMSKILL_WRITER_TOKENIZER_PATH:-"$(dirname -- "$MEMSKILL_QWEN_EMBEDDING_PATH")/Meta-Llama-3-8B-Instruct"}
+    phase_args+=(--study-writer-tokenizer "$writer_model")
 fi
 exec "${MEMSKILL_PYTHON:-python}" -u -m "$module" "${phase_args[@]}" \
     --study-dir "$STUDY_DIR" --dataset "$dataset" --data-file "$data_file" \

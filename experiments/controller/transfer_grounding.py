@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "rate", "count"), required=True)
     parser.add_argument("--study-reverse", action="store_true")
+    parser.add_argument("--study-writer-tokenizer", type=Path, help="Local writer model directory for context budgeting")
     options, remaining = parser.parse_known_args()
     sys.argv[1:] = remaining
     args = get_agentic_memory_args()
@@ -48,6 +49,9 @@ def main():
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
     trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
+    if options.study_writer_tokenizer:
+        from src.writer_context import WriterContext
+        trainer.executor.writer_context = WriterContext(options.study_writer_tokenizer)
     target = "capture_activity_details"
     trainer.operation_bank.get_operation(target).source_rule = "attributed_turn_pairs"
     skills = [skill_spec(op) for op in trainer.operation_bank.get_candidate_operations()]

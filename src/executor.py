@@ -1,6 +1,7 @@
 """
 Executor: Executes operations using LLM API
 """
+import hashlib
 import json
 import re
 import logging
@@ -46,6 +47,7 @@ class Executor:
         self.args = args
         self.retriever_name = args.retriever
         self.logger = logging.getLogger('AgenticMemory')
+        self.writer_context = None
 
     def _build_executor_prompt(self, operations: List, session_text: str,
                                retrieved_memories: List[str]) -> str:
@@ -135,31 +137,37 @@ class Executor:
                 reasoning="No operations provided"
             )]
 
-        sub_chunks = [session_text]
-        all_results = []
-        for sub_text in sub_chunks:
-            if not sub_text.strip():
-                continue
-            # Build executor prompt from selected skills
-            instruction = self._build_executor_prompt(operations, sub_text, retrieved_memories)
+        def build_prompt(text):
+            return self._build_executor_prompt(operations, text, retrieved_memories)
 
+        requests = []
+        if session_text.strip():
+            if self.writer_context is None:
+                requests = [(0, len(session_text), build_prompt(session_text), None, self.args.max_new_tokens)]
+            else:
+                requests = self.writer_context.prepare(session_text, build_prompt, self.args.max_new_tokens)
+        all_results = []
+        for start, end, instruction, expected_tokens, output_cap in requests:
             # Call LLM API
             try:
-                  response, input_tokens, output_tokens = get_llm_response_via_api(
-                      prompt=instruction,
-                      LLM_MODEL=self.args.model,
-                      base_url=self.args.api_base,
-                      api_key=self.args.api_key,
-                      MAX_TOKENS=self.args.max_new_tokens,
-                      TAU=self.args.temperature,
-                      MAX_TRIALS=10,
-                      usage_kind="executor",
-                      TIME_GAP=3,
-                  )
-                  if audit is not None:
-                      import hashlib
-                      audit.append({"prompt_sha256": hashlib.sha256(instruction.encode()).hexdigest(),
-                                    "response": response, "input_tokens": input_tokens, "output_tokens": output_tokens})
+                response, input_tokens, output_tokens = get_llm_response_via_api(
+                    prompt=instruction,
+                    LLM_MODEL=self.args.model,
+                    base_url=self.args.api_base,
+                    api_key=self.args.api_key,
+                    MAX_TOKENS=output_cap,
+                    TAU=self.args.temperature,
+                    MAX_TRIALS=10,
+                    usage_kind="executor",
+                    TIME_GAP=3,
+                )
+                if expected_tokens is not None and int(input_tokens) != expected_tokens:
+                    raise ValueError("Writer client and server token counts disagree")
+                if audit is not None:
+                    audit.append({"prompt_sha256": hashlib.sha256(instruction.encode()).hexdigest(),
+                                  "response": response, "input_tokens": input_tokens, "output_tokens": output_tokens})
+                    if expected_tokens is not None:
+                        audit[-1].update(source_range=[start, end], output_cap=output_cap)
             except Exception as e:
                 self.logger.warning(f"Executor API call failed: {e}")
                 all_results.append(ExecutionResult(

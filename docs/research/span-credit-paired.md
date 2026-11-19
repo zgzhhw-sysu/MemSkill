@@ -84,6 +84,8 @@ LoCoMo 报告每段对话的配对差值以及各题型 F1。LongMemEval-S 在�
 
 ## 复现
 
+LongMemEval-S 训练划分的 297 条历史共有 14,169 段去重后的 session 文本。按字符数取最长的 24 段，用部署版 Llama 聊天模板、空检索和 256 个生成 token 测量，有 3 段超过 8,192-token 上限，最长请求需要 18,107 个 token。迁移评估对每个完整 session 仍只选一次技能。若写入提示超长，执行器用服务端同版 tokenizer 划分原文，保留日期和发言者，向每个片段传入相同的技能和检索记忆。各请求合计分配原有的 256 个生成 token。原文规则在整个 session 上执行一次。每组审计都核对原文字符范围首尾相接、各次实际 token 数和总生成额度。普通长度的提示按原样发送一次。
+
 在仓库根目录设置 `STUDY_DIR`、`LOCOMO_DATA`、`CONTROLLER_CHECKPOINT`、`MEMSKILL_QWEN_EMBEDDING_PATH` 和 `MEMSKILL_API_BASE`。`MEMSKILL_PYTHON` 可指定实验用的 Python。基础模型为同一本地 Llama-3-8B-Instruct，编码器为 Qwen3-Embedding-0.6B。为多个等价端点共用结果时，将 `MEMSKILL_BACKEND_ID` 设置为相同的模型指纹和推理配置。研究机上实验期间关闭四张卡的显存占用进程。
 
 ```bash

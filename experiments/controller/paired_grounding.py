@@ -77,11 +77,13 @@ def collect(trainer, convo, seed, dest):
 
 def reuse_identical_choices(dest, arm, weights, signature):
     """Identical choices at each observed state imply the same deterministic rollout by induction."""
+    policy_fields = {"arm", "weights", "count_control"}
+    shared = {k: v for k, v in signature.items() if k not in policy_fields}
     for reference in sorted(dest.parent.parent.glob("*/" + dest.name)):
         if reference == dest or not (reference / "inputs.json").is_file():
             continue
         source = json.loads((reference / "inputs.json").read_text())
-        if any(source.get(k) != v for k,v in signature.items() if k not in {"arm","weights","count_control"}):
+        if {k: v for k, v in source.items() if k not in policy_fields} != shared:
             continue
         decisions = json.loads((reference / "decisions.json").read_text())
         schedule = signature["count_control"]["schedule"] if arm == "count" else None
@@ -130,6 +132,9 @@ def score(trainer, conversation, dest, arm, weights):
         "reader": trainer.args.model, "writer_tokens": trainer.args.max_new_tokens,
         "retriever": trainer.args.retriever, "backend": os.environ.get("MEMSKILL_BACKEND_ID", trainer.args.api_base),
     }
+    writer_context = getattr(getattr(trainer, "executor", None), "writer_context", None)
+    if writer_context is not None:
+        signature["writer_context"] = writer_context.signature
     schedule = None
     if arm == "count":
         study = dest.parents[2]
