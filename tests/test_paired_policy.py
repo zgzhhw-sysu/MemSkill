@@ -9,13 +9,33 @@ import torch
 
 from experiments.controller.audit_paired import audit_rate_control
 from experiments.controller.paired_grounding import load_arm_weights, reuse_identical_choices
-from experiments.controller.paired_policy import PairedPolicy, fit_policy, fit_anchored_credit, match_training_probability
+from experiments.controller.paired_policy import PairedPolicy, count_schedule, fit_policy, fit_anchored_credit, match_training_probability
 from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_count_control_uses_only_the_count_and_executes_the_entire_schedule(self):
+        choices = [True, True, True, False, False, True]
+        schedule = count_schedule(42, "conv-47", choices)
+        self.assertEqual(schedule, count_schedule(42, "conv-47", list(reversed(choices))))
+        self.assertEqual(sum(schedule), sum(choices))
+        self.assertEqual(count_schedule(42, "conv-47", [False] * 3), [False] * 3)
+        self.assertEqual(count_schedule(42, "conv-47", [True] * 3), [True] * 3)
+        with self.assertRaises(ValueError):
+            count_schedule(42, "conv-47", [])
+        native = PPOController(state_dim=5, op_dim=4, hidden_dim=8, action_top_k=3, device="cpu")
+        gate = PairedPolicy(native, 0)
+        gate.mode, gate.schedule = "count", schedule
+        ops = torch.randn(6, 4)
+        for use in schedule:
+            selected, log_prob, _ = gate(torch.randn(5), ops, deterministic=True)
+            self.assertEqual(0 in selected, use)
+            self.assertEqual(len(set(selected)), 3)
+            self.assertEqual(log_prob, 0.)
+        self.assertEqual([r["prob"] for r in gate.decisions], list(map(float, schedule)))
+
     def test_split_writer_accounts_for_both_gpus_before_rest(self):
         with patch("torch.cuda.synchronize") as sync, patch("time.sleep") as sleep:
             with patch("time.monotonic", side_effect=[10, 12, 18]):
@@ -135,6 +155,14 @@ class PairedPolicyTest(unittest.TestCase):
             self.assertTrue(reuse_identical_choices(dst, "credit", torch.tensor([0.2,0.]), {"arm":"credit","backend":"fixed"}))
             self.assertEqual(json.loads((dst/"reuse.json").read_text())["checked_decisions"], 1)
             self.assertFalse(json.loads((dst/"decisions.json").read_text())[0]["use"])
+            control = base / "count" / "history"
+            control.parent.mkdir()
+            def signature(schedule):
+                return {"arm": "count", "backend": "fixed", "count_control": {"schedule": schedule}}
+            self.assertFalse(reuse_identical_choices(control, "count", None, signature([True])))
+            self.assertFalse(reuse_identical_choices(control, "count", None, signature([False, True])))
+            self.assertTrue(reuse_identical_choices(control, "count", None, signature([False])))
+            self.assertEqual(json.loads((control/"decisions.json").read_text())[0]["prob"], 0.)
 
 
 if __name__ == "__main__":
