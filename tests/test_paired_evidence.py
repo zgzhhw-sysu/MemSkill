@@ -4,10 +4,23 @@ import unittest
 from types import SimpleNamespace
 
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
+from experiments.controller.probe_omitted import check_responses, omitted_final_indices
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_final_training_probe_requires_observed_unexamined_questions_linked_to_the_last_span(self):
+        spans = [{"source_turns": ["D1:1"]}, {"source_turns": ["D2:1", "D2:2"]}]
+        questions = [{"evidence": ev} for ev in (["D1:1"], ["D2:1"], ["D1:1", "D2:2"], ["D2:2"], [])]
+        self.assertEqual(omitted_final_indices(spans, questions, {0, 1, 2, 4}, {"questions": [{"qa_index": 1}]}), [2])
+        record = {"questions": [], "control": {"qa": {0: {"ok": True}}, "actions": [{"reasoning": "INSERT"}]}}
+        check_responses(record)
+        for invalid in (dict(record, swap={"qa": {0: {"ok": False}}}),
+                        dict(record, execution_repair={"actions": [{"reasoning": "API call failed: timeout"}]}),
+                        dict(record, questions=[{"retrieval_probe":{"reply":{"ok":True}, "repeat":{"ok":False}}}])):
+            with self.assertRaises(RuntimeError):
+                check_responses(invalid)
+
     def test_shortening_an_already_present_reference_is_separate_from_recovering_it(self):
         answer = {"answer": "Python and C++.", "f1": 1., "ok": True}
         long = {"answer": "James has worked with Python and C++.", "f1": .5, "ok": True}

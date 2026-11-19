@@ -203,7 +203,7 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted"])
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
@@ -272,6 +272,13 @@ def main():
         locked = json.loads((Path(__file__).with_name("protocols") / "paired_grounding_cohort.json").read_text())["primary"]
         if protocol["input_sha256"] != locked["file_sha256"] or protocol["test"] != locked["ids"]:
             raise ValueError("Test inputs differ from the locked LoCoMo cohort")
+    if options.study_phase == "probe-omitted":
+        from experiments.controller.probe_omitted import probe_training_windows
+        samples = {c["sample_id"]: c for c in train}
+        windows = ((window(samples[sid], start, end - start + 1), out / "train" / f"{sid}_s{start}")
+                   for start, end in train_windows for sid in protocol["train"])
+        probe_training_windows(trainer, out, windows)
+        return
     if options.study_phase == "train":
         root = out / "train"
         root.mkdir(exist_ok=True)
