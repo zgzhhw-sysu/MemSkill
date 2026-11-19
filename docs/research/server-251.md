@@ -32,4 +32,6 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 
 运行日志和每三秒的显卡采样在 `~/memskill-work/runs/paired-251/`。模型服务随实验租约退出。每个完整训练窗口、每条验证／测试对话以及每段迁移测试历史分别落盘，换机或重启后可从已落盘的完整记录续跑。验证阶段检查同状态选技概率、实际选技、读到的记忆和逐题 F1；最终留出集沿用已锁定的完整历史和计分规则。
 
+训练可用 5、6 号卡上的第二个生成服务分担反事实回放。这个副本按层均分同一份 BF16 权重，端口为 18753，设置 `--devices 2 --duty .28 --reserve-mib 4608`。每个分块和解码步都会等两张卡完成计算后休息。在 251 上用主服务实际跑过的训练对话 `conv-43` 核对了 2 次写入与 8 次问答，两端回复文字和输入、输出 token 数逐条一致。比对在 `runs/paired-251/aux-equivalence.json`，运行目录以 `~/memskill-work` 为起点。反向训练进程取得 3 号编码卡的租约后按相反顺序领取窗口；新采集窗口的 `backend.json` 记录推理后端。正式基准的各组评估都沿用主服务。
+
 验证包含两条互相独立的对话，分别有 30 和 45 道可评分题。251 在实验目录创建 `require-selective-validation` 后，统一启动脚本会在读取最终测试题前复核五组验证结果，并将决定写入 `validation/selection.json`。若第一轮发展出的策略未能在验证时胜过整体概率对照等基线，后续任务 `memskill-251-followup` 可从已完成的十二个窗口开始，在 `~/memskill-work/study-eight` 采集额外十二个训练窗口。第二轮日志在 `~/memskill-work/runs/paired-251-eight/`。

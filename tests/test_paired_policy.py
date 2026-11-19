@@ -3,16 +3,27 @@ import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import call, patch
 
 import torch
 
 from experiments.controller.paired_grounding import reuse_identical_choices
 from experiments.controller.paired_policy import PairedPolicy, fit_policy, match_training_probability
+from scripts.experiments.serve_low_duty import DutyCycle
 from src.controller import PPOController
 from src.replay import attributed_turn_pairs
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_split_writer_accounts_for_both_gpus_before_rest(self):
+        with patch("torch.cuda.synchronize") as sync, patch("time.sleep") as sleep:
+            with patch("time.monotonic", side_effect=[10, 12, 18]):
+                clock = DutyCycle(0.25, 2)
+                clock.rest()
+            self.assertEqual(sync.call_args_list, [call(0), call(1)])
+            sleep.assert_called_once_with(6.0)
+            self.assertEqual(clock.started, 18)
+
     def test_same_noise_replays_and_native_greedy_is_preserved(self):
         torch.manual_seed(41)
         native = PPOController(state_dim=5, op_dim=4, hidden_dim=8, action_top_k=3, device="cpu")

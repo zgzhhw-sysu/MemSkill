@@ -68,6 +68,8 @@ def collect(trainer, convo, seed, dest):
                              old_log_probability=buffer.log_probs[i], causes=dict(Counter(q["cause"] for q in diagnosis["questions"]))))
         save(work / "rows.json", rows)
         save(work / "questions.json", [q["original_index"] for q in convo["qa"]])
+        if os.environ.get("MEMSKILL_BACKEND_ID"):
+            save(work / "backend.json", {"inference": os.environ["MEMSKILL_BACKEND_ID"]})
         work.rename(dest)
     return rows
 
