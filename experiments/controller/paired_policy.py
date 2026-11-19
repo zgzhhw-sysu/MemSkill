@@ -113,7 +113,7 @@ def fit_policy(rows, credit_weight):
     return theta.detach().float()
 
 
-def fit_anchored_credit(rows, terminal):
+def fit_anchored_credit(rows, terminal, *, center_states=False):
     """Update a frozen terminal actor from verified outcomes, preserving its probabilities on abstentions."""
     features, offset = _training_states(rows)
     baseline = offset + features @ terminal.double()
@@ -122,6 +122,14 @@ def fit_anchored_credit(rows, terminal):
     verified = effects != 0
     if not verified.any():
         return terminal.clone()
+    if center_states:
+        states = features[:, 1:]
+        center = states.mean(dim=0)
+        variation = states - center
+        scale = variation.square().sum(dim=1).mean().sqrt()
+        if scale <= 1e-8:
+            return fit_anchored_credit(rows, terminal)
+        features = torch.cat((features[:, :1], variation / scale), dim=1)
     local = effects[verified]
     abstained = ~verified
     target = baseline[abstained].sigmoid()
@@ -139,7 +147,11 @@ def fit_anchored_credit(rows, terminal):
         return loss
 
     optimizer.step(closure)
-    return terminal + change.detach().float()
+    correction = change.detach()
+    if center_states:
+        slope = correction[1:] / scale
+        correction = torch.cat(((correction[0] - center @ slope).reshape(1), slope))
+    return terminal + correction.float()
 
 
 def match_training_probability(rows, terminal, credit):

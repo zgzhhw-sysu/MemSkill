@@ -57,7 +57,7 @@ def probability_placement(records):
             "spans": n, "dialogues": by_dialogue, "arms": aggregate}
 
 
-def compare(study):
+def compare(study, *, centered_candidate=False):
     protocol = json.loads((study / "protocol.json").read_text())
     windows = read_windows(study, protocol)
     counts = Counter()
@@ -67,6 +67,9 @@ def compare(study):
         terminal = fit_policy(train, 0)
         anchor = fit_anchored_credit(train, terminal)
         weights = {"terminal": terminal, "anchor": anchor, "rate": match_training_probability(train, terminal, anchor)}
+        if centered_candidate:
+            candidate = fit_anchored_credit(train, terminal, center_states=True)
+            weights["centered"] = match_training_probability(train, candidate, anchor)
         for (sample, start), pairs in windows.items():
             if sample != held:
                 continue
@@ -108,14 +111,25 @@ def compare(study):
                        "improved": sum(r["scores"]["anchor"] > r["scores"][a] for r in records),
                        "worse": sum(r["scores"]["anchor"] < r["scores"][a] for r in records)}
                    for a in means if a != "anchor"}
-    return {"scope": "one decision on a held training dialogue, with the suffix exploration noise fixed",
+    expectation = probability_placement(records)
+    report = {"scope": "one decision on a held training dialogue, with the suffix exploration noise fixed",
             "coverage": dict(counts), "matched_span_question_links": len(records), "matched_spans": len(eligible),
             "unique_questions": len({(r["dialogue"], r["question"]) for r in records}),
             "mean_link_f1": means, "anchor_minus": differences,
-            "single_decision_expectation": probability_placement(records), "records": records}
+            "single_decision_expectation": expectation, "records": records}
+    if centered_candidate:
+        required = ("expected_f1", "placement_delta")
+        contrasts = {a: {k: expectation["arms"]["centered"][k] - expectation["arms"][a][k] for k in required}
+                     for a in ("anchor", "rate")}
+        report["centered_training_screen"] = {"differences": contrasts,
+                                               "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
+    return report
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("study", type=Path)
-    print(json.dumps(compare(parser.parse_args().study), indent=2))
+    parser.add_argument("--centered-candidate", action="store_true",
+                        help="Test a centered, dispersion-scaled credit correction at the original training mean probability")
+    args = parser.parse_args()
+    print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate), indent=2))
