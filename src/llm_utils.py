@@ -1,3 +1,4 @@
+import hashlib
 import time
 import openai
 import threading
@@ -7,6 +8,8 @@ import tiktoken
 from transformers import AutoTokenizer
 from multiprocessing.dummy import Pool as ThreadPool
 from tqdm import tqdm
+
+from src.evaluation_cache import publish_response, read_response, request_cache
 
 
 
@@ -109,59 +112,57 @@ def get_llm_response_via_api(prompt,
     if not api_key:
         raise ValueError("API KEY EMPTY")
 
-    completion = None
-    trials_left = MAX_TRIALS
-
+    api_params = {
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": TAU, "top_p": TOP_P, "seed": SEED, "max_tokens": MAX_TOKENS,
+    }
+    if response_format is not None:
+        api_params["response_format"] = response_format
+    cache = request_cache(base_url, api_params, usage_kind)
+    prompt_hash = hashlib.sha256(prompt.encode()).hexdigest() if cache else None
     started = time.monotonic()
-    while trials_left:
-        trials_left -= 1
-        client = _get_client_round_robin(
-            api_keys=api_key,
-            base_url=base_url,
-            max_retries=2,
-            timeout=float(os.environ.get("MEMSKILL_API_TIMEOUT_S", "60"))
-        )
-        try:
-            api_params = {
-                "model": LLM_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": TAU,
-                "top_p": TOP_P,
-                "seed": SEED,
-                "max_tokens": MAX_TOKENS,
-            }
-
-            if response_format is not None:
-                api_params["response_format"] = response_format
-
-            completion = client.chat.completions.create(**api_params)
-            break
-        except Exception as e:
-            print(e)
-            if "request timed out" in str(e).strip().lower():
+    cached = read_response(*cache) if cache else None
+    attempts = 0
+    if cached:
+        if cached["payload"]["prompt_sha256"] != prompt_hash:
+            raise ValueError("Cached request has a different prompt")
+        response = cached["payload"]["response"]
+        prompt_tokens, completion_tokens = cached["payload"]["tokens"]
+    else:
+        completion = None
+        for attempts in range(1, MAX_TRIALS + 1):
+            client = _get_client_round_robin(
+                api_keys=api_key, base_url=base_url, max_retries=2,
+                timeout=float(os.environ.get("MEMSKILL_API_TIMEOUT_S", "60")),
+            )
+            try:
+                completion = client.chat.completions.create(**api_params)
                 break
-            print("Retrying...")
-            time.sleep(TIME_GAP)
+            except Exception as e:
+                print(e)
+                if "request timed out" in str(e).strip().lower():
+                    break
+                print("Retrying...")
+                time.sleep(TIME_GAP)
+        if completion is None:
+            raise Exception("Reach MAX_TRIALS={}".format(MAX_TRIALS))
+        contents = [c.message.content for c in completion.choices]
+        response = contents[0] if len(contents) == 1 else contents
+        prompt_tokens = completion.usage.prompt_tokens
+        completion_tokens = completion.usage.completion_tokens
+        if cache:
+            cached = publish_response(*cache, prompt_hash, response, prompt_tokens, completion_tokens)
 
-    if completion is None:
-        raise Exception("Reach MAX_TRIALS={}".format(MAX_TRIALS))
-
-    contents = completion.choices
-    meta_info = completion.usage
-    completion_tokens = meta_info.completion_tokens
-    prompt_tokens = meta_info.prompt_tokens
     usage_log = os.environ.get("MEMSKILL_USAGE_LOG")
     if usage_log:
-        row = {"kind": usage_kind, "purpose": usage_purpose.get(), "model": LLM_MODEL, "input": prompt_tokens, "output": completion_tokens,
-               "attempts": MAX_TRIALS - trials_left, "elapsed_s": time.monotonic() - started}
+        row = {"kind": usage_kind, "purpose": usage_purpose.get(), "model": LLM_MODEL, "input": prompt_tokens,
+               "output": completion_tokens, "attempts": attempts, "elapsed_s": time.monotonic() - started}
+        if cache:
+            row.update(cache_key=cache[1], response_sha256=cached["sha256"], cache_hit=attempts == 0)
         with _client_lock, open(usage_log, "a") as stream:
             stream.write(json.dumps(row) + "\n")
-    # total_tokens = meta_info.total_tokens
-    # print(completion_tokens, prompt_tokens, total_tokens)
-    if len(contents) == 1:
-        return contents[0].message.content, prompt_tokens, completion_tokens
-    else:
-        return [c.message.content for c in contents], prompt_tokens, completion_tokens
+    return response, prompt_tokens, completion_tokens
 
 
 
