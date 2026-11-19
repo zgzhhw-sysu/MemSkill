@@ -39,7 +39,7 @@
 | [`src/inference/`](src/inference/) | Shared memory construction and caching, text question answering, and ALFWorld rollouts |
 | [`src/eval/`](src/eval/) | Dataset-specific evaluation metrics |
 | [`experiments/designer/`](experiments/designer/) | LoCoMo pilots, fault injection, and replay of proposed skill revisions |
-| [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults. [Paired study protocol](docs/research/span-credit-paired.md) |
+| [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults. [Paired study protocol](docs/research/span-credit-paired.md) · [换机交接与断点续跑](docs/research/server-handoff.md) |
 | [`scripts/train/`](scripts/train/) and [`scripts/eval/`](scripts/eval/) | Training and evaluation launchers for the supported datasets |
 | [`scripts/data/`](scripts/data/) | ALFWorld expert trajectory preparation |
 | [`tests/`](tests/) | Replay and credit assignment regression tests |

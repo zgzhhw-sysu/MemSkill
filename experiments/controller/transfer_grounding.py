@@ -46,7 +46,9 @@ def main():
     assert args.model == protocol["model"] and args.action_top_k == 3 and args.temperature == 0
     args.include_abstentions = True
     set_seed(args.seed)
-    trainer = get_trainer(args, AgenticMemoryConfig().update_from_args(args))
+    config = AgenticMemoryConfig().update_from_args(args)
+    config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
+    trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
     target = "capture_activity_details"
     trainer.operation_bank.get_operation(target).source_rule = "attributed_turn_pairs"

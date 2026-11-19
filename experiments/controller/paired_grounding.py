@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 import torch
 
 from experiments.controller.paired_policy import PairedPolicy, fit_policy
+from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix, save
 from src.cli import set_seed
 from src.data_processing.datasets import load_dataset, split_data
@@ -34,7 +35,9 @@ def window(conversation, start, length):
 
 def collect(trainer, convo, seed, dest):
     if dest.exists():
-        return json.loads((dest / "rows.json").read_text())
+        ids = [q["original_index"] for q in convo["qa"]]
+        spans = sum(k.startswith("session_") and not k.endswith("_date_time") for k in convo["conversation"])
+        return load_episode(dest, convo["sample_id"], spans, ids)
     policy = trainer.controller
     policy.mode = "explore"
     policy.decisions.clear()
@@ -166,7 +169,9 @@ def main():
     out = options.study_dir.resolve()
     out.mkdir(exist_ok=True, parents=True)
     set_seed(args.seed)
-    trainer = get_trainer(args, AgenticMemoryConfig().update_from_args(args))
+    config = AgenticMemoryConfig().update_from_args(args)
+    config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
+    trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
     bank = trainer.operation_bank
     target = "capture_activity_details"
