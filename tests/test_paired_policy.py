@@ -19,6 +19,13 @@ from src.replay import attributed_turn_pairs, dated_turn_groups
 
 
 class PairedPolicyTest(unittest.TestCase):
+    def test_empty_final_longmem_turn_keeps_its_source_position(self):
+        text = "Session Date: 2023-06-01\n\nassistant: Hello\n\nuser: Again\n\nassistant: "
+        self.assertEqual(dated_turn_groups(text, 1), ["2023-06-01 | assistant: Hello",
+                         "2023-06-01 | user: Again", "2023-06-01 | assistant:"])
+        self.assertEqual(dated_turn_groups(text, 2), ["2023-06-01 | assistant: Hello user: Again",
+                         "2023-06-01 | assistant:"])
+
     def test_equal_source_arms_keep_identical_words_on_multiline_locomo_and_longmem(self):
         src = ('DATE: Thursday on 1 June, 2023\nCONVERSATION:\nTim said, "First line\nsecond yesterday."\n'
                'John said, "I have a picture" and shared a photo.\nTim said, "Thanks!"')
