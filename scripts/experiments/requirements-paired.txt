@@ -1,0 +1,17 @@
+# Python 3.12. Install a driver-compatible PyTorch build separately (source: 2.10.0+cu128).
+accelerate==1.14.0
+faiss-cpu==1.13.2
+json-repair==0.64.4
+nltk==3.9.3
+numpy==2.2.6
+openai==1.109.1
+regex==2026.2.28
+safetensors==0.8.0
+scikit-learn==1.8.0
+scipy==1.17.1
+sentence-transformers==5.6.0
+tiktoken==0.8.0
+tokenizers==0.21.4
+tqdm==4.67.3
+transformers==4.53.3
+wandb==0.18.7

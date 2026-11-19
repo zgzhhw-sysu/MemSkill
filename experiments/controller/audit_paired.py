@@ -13,6 +13,7 @@ from scipy.special import expit
 
 from experiments.designer.designer_pilot import prefix
 from src.eval import get_evaluator
+from src.replay import restore_text
 
 
 def read(path):
@@ -36,6 +37,39 @@ def probability(decision, weights):
     return float(expit(decision["base_logit"] + weights[0] + np.dot(weights[1:], state / max(np.linalg.norm(state), 1e-12))))
 
 
+def reader_inputs(events, scored_rows, questions, evaluator):
+    """Rebuild the ordered evidence for each QA from the final, versioned memory bank."""
+    spans = [e for e in events if e["kind"] == "span"]
+    live = restore_text(spans)
+    snapshot, = [e for e in events if e["kind"] == "snapshot"]
+    versions = {(change["memory_id"], change["version"]): (span["span_id"], change["after"])
+                for span in spans for change in span["changes"]}
+    last_version = {memory_id: version for memory_id, version in versions}
+    final = [tuple(ref) for ref in snapshot["memory_refs"]]
+    if (final != [(mid, last_version[mid]) for mid in live]
+            or [versions[ref][1] for ref in final] != list(live.values())
+            or snapshot["text_sha256"] != hashlib.sha256(
+                json.dumps(list(live.items()), ensure_ascii=False).encode()).hexdigest()):
+        raise ValueError("Final memory references or contents disagree with the write trace")
+    answers = {row["qa_index"]: row for row in scored_rows}
+    result = {}
+    for query in (e for e in events if e["kind"] == "qa"):
+        index = query["query_id"]
+        row, question = answers[index], questions[index]
+        if any(i < 0 or i >= len(final) for i in row["retrieved_indices"]):
+            raise ValueError(f"Invalid retrieved index for question {index}")
+        refs = [final[i] for i in row["retrieved_indices"]]
+        if (index in result or not query["success"] or query["refs"] != [list(ref) for ref in refs]
+                or query["question"] != question["question"] or query["prediction"] != row["prediction"]
+                or query["tokens"] != row["tokens"] or not math.isclose(query["f1"], row["f1"])):
+            raise ValueError(f"Reader trace disagrees with scored question {index}")
+        prompt = evaluator.build_prompt(question["question"], [versions[ref][1] for ref in refs], question)
+        result[index] = (hashlib.sha256(prompt.encode()).hexdigest(), {versions[ref][0] for ref in refs})
+    if result.keys() != answers.keys():
+        raise ValueError("Incomplete reader trace")
+    return result
+
+
 def audit(directory, dataset_file, phase, arms):
     cohort = read(Path(__file__).with_name("protocols") / "paired_grounding_cohort.json")
     external = phase == "longmemeval"
@@ -55,17 +89,28 @@ def audit(directory, dataset_file, phase, arms):
     weights = {arm: np.asarray(read(directory / (arm + ".json"))) for arm in ("credit", "terminal")}
     scores, probabilities, extra = {}, {}, {}
     groups, answerable = {}, {}
-    choices = defaultdict(dict)
+    choices, readers = defaultdict(dict), defaultdict(dict)
+    common_inputs = {}
     for arm in arms:
         scored, probabilities[arm] = {}, []
         counts = Counter()
         for sid, convo in conversations:
             parent = directory / phase / arm / sid
+            inputs = read(parent / "inputs.json")
+            shared = {k: v for k, v in inputs.items() if k not in {"weights", "arm"}}
+            digest = hashlib.sha256(json.dumps(convo, sort_keys=True).encode()).hexdigest()
+            weight_digest = hashlib.sha256(weights[arm].astype(np.float32).tobytes()).hexdigest() if arm in weights else None
+            if (inputs["arm"] != arm or inputs["weights"] != weight_digest or shared["conversation"] != digest
+                    or shared != common_inputs.setdefault(sid, shared)):
+                raise ValueError(f"Policies were evaluated with different inputs or weights at {parent}")
             report = read(parent / "scores.json")
             refs = {0: convo} if external else dict(ev.filter_qa_list(convo["qa"]))
             if len(report["answers"]) != len(refs) or {r["qa_index"] for r in report["answers"]} != refs.keys():
                 raise ValueError(f"Incomplete data in {parent}")
             ids = read(parent / "question_ids.json")
+            expected_ids = [0] if external else [q.get("original_index", i) for i, q in enumerate(convo["qa"])]
+            if ids != expected_ids:
+                raise ValueError(f"Question indices differ from the source at {parent}")
             for r in report["answers"]:
                 index = r["qa_index"]
                 q = refs[index]
@@ -84,8 +129,13 @@ def audit(directory, dataset_file, phase, arms):
             traces = list((parent / "traces").glob("*.jsonl"))
             if len(traces) != 1:
                 raise ValueError(f"Missing or duplicate trace at {parent}")
-            spans = [e for e in (json.loads(line) for line in traces[0].read_text().splitlines()) if e["kind"] == "span"]
-            if len(spans) != expected_spans:
+            events = [json.loads(line) for line in traces[0].read_text().splitlines()]
+            if any(event["sample"] != sid for event in events):
+                raise ValueError(f"Trace belongs to another history at {parent}")
+            for index, evidence in reader_inputs(events, report["answers"], refs, ev).items():
+                readers[arm][sid, ids[index]] = evidence
+            spans = [e for e in events if e["kind"] == "span"]
+            if [e["span_id"] for e in spans] != list(range(expected_spans)):
                 raise ValueError("Incomplete traced history")
             for i, (row, event) in enumerate(zip(decisions, spans, strict=True)):
                 p0, p1 = (probability(row, weights[a]) for a in ("terminal", "credit"))
@@ -141,6 +191,27 @@ def audit(directory, dataset_file, phase, arms):
                     "terminal_to_credit_on_same_states":{"mean_probabilities":p.mean(axis=0).tolist(),
                       "mean_absolute_shift":float(np.abs(p[:,1]-p[:,0]).mean()),
                       "greedy_switches":int(((p[:,0]>=.5)!=(p[:,1]>=.5)).sum()), "states":len(p)}}
+        changed_spans = defaultdict(set)
+        for (sid, span), actions in choices["credit"].items():
+            if actions != choices[arm][sid, span]:
+                changed_spans[sid].add(span)
+        evidence = []
+        unsupported_delta = 0.0
+        for (sid, index), delta in d.items():
+            if delta == 0:
+                continue
+            old_prompt, old_origins = readers[arm][sid, index]
+            new_prompt, new_origins = readers["credit"][sid, index]
+            prompt_changed = old_prompt != new_prompt
+            if not changed_spans[sid] or not prompt_changed:
+                unsupported_delta += delta
+            evidence.append({"history": sid, "question_index": index, "f1_delta": delta,
+                             "actions_changed_in_history": bool(changed_spans[sid]),
+                             "reader_prompt_changed": prompt_changed,
+                             "switched_spans_read_in_control": sorted(old_origins & changed_spans[sid]),
+                             "switched_spans_read_in_credit": sorted(new_origins & changed_spans[sid])})
+        contrast["changed_question_evidence"] = evidence
+        contrast["f1_change_without_verified_action_to_prompt_change"] = unsupported_delta / len(keys)
         if external:
             contrast["stratified_95pct_ci"] = bootstrap_by_type(list(d.values()), [groups[k] for k in keys])
         else:

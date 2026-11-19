@@ -59,7 +59,7 @@ class BaseTrainer:
         self.device = args.device
         set_retriever_flash_attn(bool(getattr(config, "use_flash_attn", True)))
 
-        # Initialize encoders (each with its own state encoder backbone to reduce thread contention)
+        # Parallel callers use separate backbones. Serial evaluation can share frozen weights.
         encode_batch_size = getattr(config, 'encode_batch_size', 64)
         use_flash_attn = bool(getattr(config, "use_flash_attn", True))
         self.state_encoder = StateEncoder(
@@ -70,15 +70,18 @@ class BaseTrainer:
             encode_batch_size=encode_batch_size,
             use_flash_attn=use_flash_attn
         )
+        shared = self.state_encoder._base_encoder if getattr(config, "share_serial_encoders", False) else None
         self.op_encoder = OpEncoder(
             model_name=config.op_encoder,
             device=self.device,
+            base_encoder=shared if config.op_encoder == config.state_encoder else None,
             encode_batch_size=encode_batch_size,
             use_flash_attn=use_flash_attn
         )
-        # Dedicated state encoder for memory bank embeddings (avoid contention with policy encoder)
+        # Memory states use the same encoding settings as policy states.
         self.memory_bank_encoder = StateEncoder(
             model_name=config.state_encoder,
+            base_encoder=shared,
             device=self.device,
             fusion_mode=getattr(config, 'state_fusion', 'mean'),
             fusion_tau=getattr(config, 'state_fusion_tau', 1.0),
