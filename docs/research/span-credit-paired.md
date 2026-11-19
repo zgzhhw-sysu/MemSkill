@@ -14,6 +14,10 @@
 
 验证集还运行 `rate` 对照。它保留 `terminal` 的全部状态系数，只调整一个截距，使其在完整训练窗口上的平均选技概率与 `credit` 一致。比较两组在相同验证状态上的贪心选择和实际逐题 F1，可检查收益是否仅靠整体提高某项技能的使用概率就能复现。概率匹配不保证贪心使用次数相同。
 
+251 上的实验在打开最终测试集之前，对两个验证前缀统一执行五组比较。信用策略相对于每个对照都需要有正的平均 F1 差值，并且至少在一个对照状态上改变贪心选择。只统计实际选技和读入问答的提示都发生变化的题时，配对 F1 差值之和也须为正。完整报告在 `validation/selection.json`。验证集只用于选择策略，正式收益仍由冻结后的测试集估计。
+
+第一轮若无法通过上述验证，第二轮只扩充同六条训练对话，加入 session 5–6 和 7–8。这样可从 12 个训练窗口、24 个 span 增到 24 个窗口、48 个 span。窗口、种子和每个 span 的四题探查预算提前固定，验证和测试的对话及题目沿用第一轮。第二轮使用独立的实验目录，前四个 session 的训练轨迹可在核对协议和训练记录后复用。
+
 ## 测试范围
 
 | 数据 | 使用方式 | 样本 |
@@ -38,6 +42,7 @@ LoCoMo 报告每段对话的配对差值以及各题型 F1。LongMemEval-S 在�
 bash scripts/experiments/paired_grounding.sh train
 bash scripts/experiments/paired_grounding.sh validation
 python -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms native terminal credit always rate
+touch "$STUDY_DIR/require-selective-validation"
 
 # 冻结方案后执行
 bash scripts/experiments/paired_grounding.sh test
@@ -49,6 +54,8 @@ for arm in native terminal credit; do
 done
 python -m experiments.controller.audit_paired "$STUDY_DIR" "$LONGMEMEVAL_DATA" longmemeval
 ```
+
+第二轮在新的 `STUDY_DIR` 下使用 `bash scripts/experiments/paired_grounding.sh train --study-train-sessions 8`。后续验证、测试和断点续跑从该目录的 `protocol.json` 读取训练窗口范围。
 
 `train --study-reverse` 可供另一低负载工作进程从反向顺序领取训练 episode。每个完成的 episode 独立保存来源、轨迹、原始回答和归因记录。评估时，若同一输入、模型和技能版本的已有完整轨迹在新策略下逐步选出完全相同的动作，可复用实际回答。复用记录保存参考轨迹、核对步数和分数文件的 SHA-256。
 
