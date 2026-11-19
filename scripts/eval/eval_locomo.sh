@@ -1,39 +1,45 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." || exit 1
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}"
 
 # --disable-flash-attn \
-# --reward-metric llm_judge \
-# --locomo-train-query-sampling-ratio 0.2 \
-# --resume-new-wandb-run
+# NOTE: chunk-size 256 for Locomo + Qwen
 python main.py \
+    --memory-cache-suffix "locomo_eval" \
+    --eval-only \
+    --inference-workers 4 \
+    --inference-session-workers 1 \
+    --action-top-k 7 \
+    --mem-top-k-eval 20 \
+    --session-mode fixed-length \
+    --chunk-size 512 \
+    --chunk-overlap 64 \
+    --load-checkpoint '[YOUR_CHECKPOINT_PATH]' \
     --dataset locomo \
     --data-file "[YOUR_DATA_PATH]" \
     --model "[YOUR_MODEL_NAME]" \
-    --designer-model "[YOUR_DESIGNER_MODEL_NAME]" \
     --api \
     --api-base "[YOUR_API_BASE]" \
     --api-key "YOUR_API_KEY_1" "YOUR_API_KEY_2" \
-    --retriever contriever \
+    --retriever qwen3-embedding-0.6b \
     --designer-freq 1 \
     --inner-epochs 100 \
     --outer-epochs 10 \
     --batch-size 4 \
     --encode-batch-size 64 \
-    --session-mode full-session \
     --ppo-epochs 2 \
-    --action-top-k 3 \
     --new-action-bias-steps 25 \
     --stage-reward-fraction 0.25 \
     --designer-reflection-cycles 3 \
     --mem-top-k 20 \
-    --mem-top-k-eval 20 \
-    --designer-max-changes 3 \
+    --designer-max-changes 2 \
     --designer-failure-window-epochs 100 \
     --designer-failure-pool-size 2000 \
-    --reward-metric f1 \
+    --reward-metric llm_judge \
     --designer-new-skill-hint \
     --device cuda \
     --enable-designer \
-    --wandb-run-name locomo-train \
+    --skip-load-snapshot-manager \
+    --wandb-run-name eval \
     --save-dir ./checkpoints/locomo_with_designer \
     --out-file ./results/locomo_with_designer.json

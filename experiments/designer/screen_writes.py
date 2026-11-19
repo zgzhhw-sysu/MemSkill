@@ -5,9 +5,9 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from designer_pilot import prefix, save
+from experiments.designer.designer_pilot import prefix, save
 from main import evaluate_text_dataset_queries, load_dataset, set_seed, split_data
-from replay_revision import normalized
+from experiments.designer.replay_revision import normalized
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.designer import DesignerCase
 from src.episode_trace import DETAIL_INSTRUCTION, confirmed_proposal

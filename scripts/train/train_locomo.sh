@@ -1,17 +1,14 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." || exit 1
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-0}"
 
 # --disable-flash-attn \
+# --reward-metric llm_judge \
+# --locomo-train-query-sampling-ratio 0.2 \
 # --resume-new-wandb-run
 python main.py \
-    --alfworld-eval-query-source objective \
-    --alfworld-pair-a-min 40 \
-    --alfworld-pair-a-max 60 \
-    --alfworld-pair-b-size 5 \
-    --alfworld-pair-b-workers 80 \
-    --alfworld-pair-same-type-prob 1.0 \
-    --dataset alfworld \
-    --alfworld-offline-data "[YOUR_OFFLINE_DATA_PATH]" \
+    --dataset locomo \
+    --data-file "[YOUR_DATA_PATH]" \
     --model "[YOUR_MODEL_NAME]" \
     --designer-model "[YOUR_DESIGNER_MODEL_NAME]" \
     --api \
@@ -21,9 +18,9 @@ python main.py \
     --designer-freq 1 \
     --inner-epochs 100 \
     --outer-epochs 10 \
-    --batch-size 16 \
-    --encode-batch-size 8 \
-    --session-mode fixed-length \
+    --batch-size 4 \
+    --encode-batch-size 64 \
+    --session-mode full-session \
     --ppo-epochs 2 \
     --action-top-k 3 \
     --new-action-bias-steps 25 \
@@ -34,10 +31,10 @@ python main.py \
     --designer-max-changes 3 \
     --designer-failure-window-epochs 100 \
     --designer-failure-pool-size 2000 \
-    --reward-metric llm_judge \
+    --reward-metric f1 \
     --designer-new-skill-hint \
     --device cuda \
     --enable-designer \
-    --wandb-run-name alf-train \
-    --save-dir ./checkpoints/alf_with_designer \
-    --out-file ./results/alf_with_designer.json
+    --wandb-run-name locomo-train \
+    --save-dir ./checkpoints/locomo_with_designer \
+    --out-file ./results/locomo_with_designer.json

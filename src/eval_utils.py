@@ -13,7 +13,7 @@ ps = PorterStemmer()
 from tqdm import tqdm
 
 
-from llm_utils import get_llm_response
+from src.llm_utils import get_llm_response
 
 
 def normalize_answer(s):

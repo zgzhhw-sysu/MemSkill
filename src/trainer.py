@@ -32,13 +32,13 @@ from src.data_processing.alfworld import (
     chunk_trajectories_by_tokens,
 )
 from src.eval import get_evaluator
-from rag_utils import (
+from src.rag_utils import (
     get_embeddings,
     init_context_model,
     init_query_model,
     set_retriever_flash_attn,
 )
-from eval_utils import llm_judge
+from src.eval_utils import llm_judge
 from prompts.prompt_pool import LLM_JUDGE_GENERAL_PROMPT
 
 CHECKPOINT_VERSION = 4
@@ -569,7 +569,7 @@ class BaseTrainer:
         )
         if getattr(self.args, "span_credit_weight", 0) or getattr(self.args, "span_credit_audit", False):
             from .credit_assignment import allocate, diagnose_episode
-            from llm_utils import usage_purpose
+            from src.llm_utils import usage_purpose
             trace = memory_bank.trace
             token = usage_purpose.set("span_credit")
             try:
@@ -807,7 +807,7 @@ class BaseTrainer:
         Returns:
             Tuple(reward_value, raw_performance)
         """
-        from llm_utils import get_llm_response
+        from src.llm_utils import get_llm_response
 
         self.log("Evaluating QA...")
         eval_args = self.evaluator.prepare_eval_args()

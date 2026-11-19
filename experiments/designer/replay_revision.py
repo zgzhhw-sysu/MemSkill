@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-from designer_pilot import prefix, save
+from experiments.designer.designer_pilot import prefix, save
 from main import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.episode_trace import evidence_turns
