@@ -240,7 +240,7 @@ def _retrieval_probe(trainer, qa, row, live, turns, versions):
     return False, record
 
 
-def diagnose_episode(trainer, conversation, trace, steps):
+def diagnose_episode(trainer, conversation, trace, steps, *, requested_questions=None):
     """Probe evidence-linked spans before PPO. Never use evaluation conversations as training input."""
     from src.rag_utils import get_embeddings
     events = trace.events
@@ -276,8 +276,16 @@ def diagnose_episode(trainer, conversation, trace, steps):
         record = {"span_id": start, "evidence_rule_version": rule_version, "sampled_skills": selected, "candidate_versions": candidate_versions,
                   "execution_fault": fault, "questions": [], "mean_controller_delta": 0.0}
         records.append(record)
+        if requested_questions is not None and start not in requested_questions:
+            record["status"] = "outside_requested_probe"
+            continue
         indices = [i for i in sorted(rows) if set(event.get("source_turns", ())).intersection(
             conversation["qa"][i].get("evidence") or ())]
+        if requested_questions is not None:
+            requested = requested_questions[start]
+            if not set(requested).issubset(indices):
+                raise ValueError("Requested questions must have observed answers and evidence in this span")
+            indices = [i for i in indices if i in requested]
         if not indices or probed >= trainer.args.span_credit_spans:
             record["status"] = "budget" if indices else "no_linked_training_question"
             continue
