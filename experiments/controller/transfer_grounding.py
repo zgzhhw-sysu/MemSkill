@@ -18,7 +18,7 @@ from src.trainer import get_trainer
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "rate"), required=True)
+    parser.add_argument("--study-arm", choices=("native", "terminal", "credit", "always", "rate", "count"), required=True)
     parser.add_argument("--study-reverse", action="store_true")
     options, remaining = parser.parse_known_args()
     sys.argv[1:] = remaining

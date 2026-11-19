@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 from scipy.special import expit
 
+from experiments.controller.paired_policy import count_schedule
 from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix
 from src.eval import get_evaluator
@@ -105,6 +106,7 @@ def audit(directory, dataset_file, phase, arms):
     scores, probabilities, extra = {}, {}, {}
     groups, answerable = {}, {}
     choices, readers = defaultdict(dict), defaultdict(dict)
+    placements = {}
     common_inputs = {}
     for arm in arms:
         scored, probabilities[arm] = {}, []
@@ -112,7 +114,7 @@ def audit(directory, dataset_file, phase, arms):
         for sid, convo in conversations:
             parent = directory / phase / arm / sid
             inputs = read(parent / "inputs.json")
-            shared = {k: v for k, v in inputs.items() if k not in {"weights", "arm"}}
+            shared = {k: v for k, v in inputs.items() if k not in {"weights", "arm", "count_control"}}
             digest = hashlib.sha256(json.dumps(convo, sort_keys=True).encode()).hexdigest()
             weight_digest = hashlib.sha256(weights[arm].astype(np.float32).tobytes()).hexdigest() if arm in weights else None
             if (inputs["arm"] != arm or inputs["weights"] != weight_digest or shared["conversation"] != digest
@@ -141,6 +143,18 @@ def audit(directory, dataset_file, phase, arms):
                 k.startswith("session_") and not k.endswith("_date_time") for k in convo["conversation"])
             if len(decisions) != expected_spans:
                 raise ValueError(f"Partial history at {parent}: {len(decisions)}/{expected_spans}")
+            schedule = None
+            if arm == "count":
+                credit_file = directory / phase / "credit" / sid / "decisions.json"
+                source = credit_file.read_bytes()
+                credit_choices = [r["use"] for r in json.loads(source)]
+                schedule = count_schedule(read(directory / "protocol.json")["seed"], sid, credit_choices)
+                expected = {"schedule": schedule, "credit_decisions_sha256": hashlib.sha256(source).hexdigest()}
+                if (inputs.get("count_control") != expected or len(schedule) != expected_spans
+                        or [r["use"] for r in decisions] != schedule):
+                    raise ValueError(f"Count control differs from its preassigned placement at {parent}")
+                placements[sid] = {"spans": len(schedule), "grounded_in_each": sum(credit_choices),
+                                   "different_positions": sum(a != b for a, b in zip(schedule, credit_choices, strict=True))}
             traces = list((parent / "traces").glob("*.jsonl"))
             if len(traces) != 1:
                 raise ValueError(f"Missing or duplicate trace at {parent}")
@@ -156,6 +170,8 @@ def audit(directory, dataset_file, phase, arms):
                 p0, p1 = (probability(row, weights[a]) for a in ("terminal", "credit"))
                 if arm in weights:
                     observed = probability(row, weights[arm])
+                elif arm == "count":
+                    observed = float(schedule[i])
                 else:
                     observed = 1.0 if arm == "always" else float(expit(row["base_logit"]))
                 if not math.isclose(observed, row["prob"], abs_tol=2e-6) or row["use"] != (observed >= .5):
@@ -191,6 +207,8 @@ def audit(directory, dataset_file, phase, arms):
               "per_type_counts": {t:len(ks) for t,ks in by_group.items()}, "arms": {}, "credit_minus": {}}
     if "rate" in arms:
         report["rate_control"] = audit_rate_control(directory, weights)
+    if placements:
+        report["count_control"] = placements
     for arm, s in scores.items():
         kind = {t:mean(s[k] for k in ks) for t,ks in by_group.items()}
         report["arms"][arm] = {"f1":mean(s[k] for k in keys), "macro_type_f1":mean(kind.values()),
@@ -277,7 +295,7 @@ if __name__ == "__main__":
         parser.error("--select-for-test requires validation")
     arms = ["native", "terminal", "credit", "always", "rate"] if args.select_for_test else args.arms
     result = audit(args.directory, args.dataset, args.phase, arms)
-    filename = "comparison.json"
+    filename = "comparison-with-count.json" if "count" in arms else "comparison.json"
     if args.select_for_test:
         result["selection"] = development_decision(result)
         filename = "selection.json"

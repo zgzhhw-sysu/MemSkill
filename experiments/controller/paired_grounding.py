@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 import torch
 
-from experiments.controller.paired_policy import PairedPolicy, fit_policy, fit_anchored_credit, match_training_probability
+from experiments.controller.paired_policy import PairedPolicy, count_schedule, fit_policy, fit_anchored_credit, match_training_probability
 from experiments.controller.resume_status import load_episode
 from experiments.designer.designer_pilot import prefix, save
 from src.cli import set_seed
@@ -81,22 +81,27 @@ def reuse_identical_choices(dest, arm, weights, signature):
         if reference == dest or not (reference / "inputs.json").is_file():
             continue
         source = json.loads((reference / "inputs.json").read_text())
-        if any(source.get(k) != v for k,v in signature.items() if k not in {"arm","weights"}):
+        if any(source.get(k) != v for k,v in signature.items() if k not in {"arm","weights","count_control"}):
             continue
         decisions = json.loads((reference / "decisions.json").read_text())
-        if not decisions:
+        schedule = signature["count_control"]["schedule"] if arm == "count" else None
+        if not decisions or (schedule is not None and len(schedule) != len(decisions)):
             continue
         revised = []
-        for row in decisions:
+        for index, row in enumerate(decisions):
             logit = row["base_logit"]
             if weights is not None:
                 state = torch.tensor(row["state"], dtype=weights.dtype)
                 vector = torch.cat((state.new_ones(1), torch.nn.functional.normalize(state, dim=0)))
                 logit += float(vector @ weights)
             use = arm == "always" or logit >= 0
-            if use != row["use"] or (arm != "always" and abs(logit) < 1e-5):
+            probability = 1.0 if arm == "always" else float(torch.sigmoid(torch.tensor(logit)))
+            if schedule is not None:
+                use = schedule[index]
+                probability = float(use)
+            if use != row["use"] or (arm not in ("always", "count") and abs(logit) < 1e-5):
                 break
-            revised.append(dict(row, prob=1.0 if arm == "always" else float(torch.sigmoid(torch.tensor(logit)))))
+            revised.append(dict(row, prob=probability))
         if len(revised) != len(decisions):
             continue
         with TemporaryDirectory(dir=dest.parent) as tmp:
@@ -125,6 +130,18 @@ def score(trainer, conversation, dest, arm, weights):
         "reader": trainer.args.model, "writer_tokens": trainer.args.max_new_tokens,
         "retriever": trainer.args.retriever, "backend": os.environ.get("MEMSKILL_BACKEND_ID", trainer.args.api_base),
     }
+    schedule = None
+    if arm == "count":
+        study = dest.parents[2]
+        credit = dest.parent.parent / "credit" / dest.name
+        credit.parent.mkdir(exist_ok=True)
+        with (credit.parent / (credit.name + ".lock")).open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            score(trainer, conversation, credit, "credit", load_arm_weights(study, "credit"))
+        source = (credit / "decisions.json").read_bytes()
+        seed = json.loads((study / "protocol.json").read_text())["seed"]
+        schedule = count_schedule(seed, dest.name, [r["use"] for r in json.loads(source)])
+        signature["count_control"] = {"schedule": schedule, "credit_decisions_sha256": hashlib.sha256(source).hexdigest()}
     if dest.exists():
         if json.loads((dest / "inputs.json").read_text()) != signature:
             raise ValueError(f"Existing evaluation uses different inputs at {dest}")
@@ -135,10 +152,13 @@ def score(trainer, conversation, dest, arm, weights):
     policy.weights = weights
     policy.mode = arm
     policy.decisions.clear()
+    policy.schedule = schedule
     with TemporaryDirectory(dir=dest.parent) as tmp:
         directory = Path(tmp) / "eval"
         os.environ["MEMSKILL_USAGE_LOG"] = str(Path(tmp) / "usage.jsonl")
         report = evaluate_bank(trainer, trainer.operation_bank, [conversation], directory)
+        if schedule is not None and [d["use"] for d in policy.decisions] != schedule:
+            raise ValueError("Count control did not execute its assigned span schedule")
         answers = report["answers"]
         qa_list = trainer.data_processor.get_qa_list(conversation)
         expected = dict(trainer.evaluator.filter_qa_list(qa_list))
@@ -158,7 +178,7 @@ def score(trainer, conversation, dest, arm, weights):
 
 
 def load_arm_weights(study, arm):
-    if arm in ("native", "always"):
+    if arm in ("native", "always", "count"):
         return None
     path = study / (arm + ".json")
     if arm == "rate" and not path.exists():
@@ -180,7 +200,7 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test"])
     parser.add_argument("--study-dir", type=Path, required=True)
-    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "all"], default="all")
+    parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
     parser.add_argument("--study-train-sessions", type=int, choices=(4, 8),
                         help="Use the first 4 or 8 sessions of each training dialogue, in disjoint pairs")

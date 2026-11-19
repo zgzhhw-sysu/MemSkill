@@ -1,9 +1,21 @@
 """A conditional, single-slot skill policy on top of a frozen MemSkill Controller."""
+import hashlib
 import math
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+
+def count_schedule(seed, sample_id, credit_choices):
+    """Place the same number of uses uniformly by a history-specific, fixed hash order."""
+    if not credit_choices or any(type(use) is not bool for use in credit_choices):
+        raise ValueError("The count control requires a completed binary decision trajectory")
+    def priority(step):
+        return hashlib.sha256(f"memskill-count-v1:{seed}:{sample_id}:{step}".encode()).digest()
+    order = sorted(range(len(credit_choices)), key=priority)
+    selected = set(order[:sum(credit_choices)])
+    return [step in selected for step in range(len(order))]
 
 
 class PairedPolicy(nn.Module):
@@ -16,6 +28,7 @@ class PairedPolicy(nn.Module):
         self.mode = "explore"
         self.weights = None
         self.decisions = []
+        self.schedule = None
 
     def forward(self, state, candidates, deterministic=False, new_op_mask=None, *, record_noise=None, replay_noise=None):
         with torch.no_grad():
@@ -51,6 +64,9 @@ class PairedPolicy(nn.Module):
                 use = self.mode == "always" or logit >= 0
                 if self.mode == "always":
                     prob = 1.0
+                elif self.mode == "count":
+                    use = self.schedule[len(self.decisions)]
+                    prob = float(use)
             selected, other = (grounded, plain) if use else (plain, grounded)
             if record_noise is not None:
                 record_noise.update(uniform=coin, paired_alternative=other)
