@@ -48,6 +48,10 @@ python3 -m experiments.controller.resume_status ~/memskill-work/study
 
 扩充训练结束后由五组开发验证决定是否交接 GPU 4、7。通过时只由 `memskill-251-official` 执行六组正式测试，并优先于 `memskill-251-anchor-gpu` 使用这两张卡。旧版扩充服务在同一进程里排了四组迁移评估。本轮运行中的一次性交接服务 `memskill-251-expanded-handoff` 会核对原训练任务的 systemd 调用标识、75 道开发题的选择结果、正式服务选中的实验目录和四个冻结文件的 SHA-256，再结束该旧任务以释放租约。验证未通过时，扩充任务自行退出，原编码环境的候选接续验证。再次启动时，部署目录中的 `run-expanded.sh` 已在开发验证和冻结后结束。
 
+本轮扩充版五组开发比较已完成，选择文件记录 `advance=false`。原编码环境的零信用约束组已启用 18754 端口。两个开发目录中的原始组和固定技能组输入相同，已向后一组接续提供 85 条具有相同后端、请求内容与 token 记录的开发缓存。外部验证在第一条历史完成 47 次写入后遇到端口交接，已在 18754 端口重启该历史，可从逐请求缓存重用已完成的生成。
+
+在 `study-eight/diagnostics/weaker-branch/<backend-hash>/`，常用的逐 span 结果及 `through-8.json` 会在逐题复核完成后更新。新版收据带有 `reader_match_version=2`，副本位于 `per-question/`。与早期判断不同的共享写入或读取情况可用 `all-readers-v1/` 下归档的旧收据对照。两道训练题对原始检索、替换末位及调到首位的重复读取在 `runs/paired-251/opposite-credit-retrieval/` 和 `opposite-credit-rank/`。
+
 整窗口训练审计的结果在 `~/memskill-work/runs/paired-251/forward-stochastic.json`。同一末段两种真实写入的逐题复测保存在相邻的 `forward-last-switches/`，早期快照含 `progress`，完整快照含 `summary.json`。复测由 CPU 执行 Qwen 检索，调用 5、6 号卡上已有的 28% 占空比 Llama 生成服务。
 
 训练归因的补充任务可用以下命令查看。原始训练窗口、各项探查与完整历史评估分别写入各自目录。前三个写入粒度窗口的逐题回答、等来源发言数量复核和第 85 题较差分支的两种修复记录都在 `~/memskill-work/runs/paired-251/` 下。

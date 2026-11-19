@@ -12,13 +12,50 @@ from src.episode_trace import evidence_turns
 from src.rag_utils import get_embeddings
 
 
+def matching_readers(branch, reference):
+    """Compare the shared write trajectory first, then check each measured retrieval and answer."""
+    if any(b.get("contract_fault") or b.get("failed_span") is not None or not b.get("qa") for b in (branch, reference)):
+        return set()
+    if not _same_branch(dict(branch, qa={}), dict(reference, qa={})):
+        return set()
+    saved = {str(i): a for i, a in reference["qa"].items()}
+    return {i for i, a in branch["qa"].items() if a["ok"] and a == saved.get(str(i))}
+
+
 def matches_recorded_swap(branch, saved):
     """Require the previously measured bank, suffix, and every requested reader response."""
-    if branch.get("contract_fault") or branch.get("failed_span") is not None or not branch.get("qa"):
-        return False
-    actual = dict(branch, qa={str(i): a for i, a in branch["qa"].items()})
-    expected = dict(saved, qa={i: saved["qa"].get(i) for i in actual["qa"]})
-    return _same_branch(actual, expected)
+    return bool(branch.get("qa")) and len(matching_readers(branch, saved)) == len(branch["qa"])
+
+
+def partial_legacy_match(result, diagnosis):
+    weak = result["weak"]
+    matched = {str(i) for i in matching_readers(weak, diagnosis["swap"])}
+    if any((str(i) in matched) != (q["status"] != "unreproduced")
+           for i, q in result["questions"].items()):
+        return True
+    if "repair_repeat" in result:
+        repair = result["repair"]
+        reproduced = matching_readers(repair, result["repair_repeat"])
+        return 0 < len(reproduced) < len(repair.get("qa", {}))
+    return False
+
+
+def publish_reader_result(root, name, data):
+    """Retain the older aggregate-reader receipt before updating the standard result path."""
+    current = root / name
+    if current.is_file():
+        old = json.loads(current.read_text())
+        if old == data:
+            return
+        if "reader_match_version" not in old:
+            archive = root / "all-readers-v1" / name
+            archive.parent.mkdir(exist_ok=True)
+            if archive.exists():
+                if json.loads(archive.read_text()) != old:
+                    raise ValueError(f"Historical reader receipt differs at {archive}")
+            else:
+                os.link(current, archive)
+    atomic_json(current, data)
 
 
 def check_weaker_span(trainer, conversation, spans, diagnosis):
@@ -41,7 +78,9 @@ def check_weaker_span(trainer, conversation, spans, diagnosis):
     check_responses({"questions": [], "control": weak})
     contents = weak.pop("contents", [])
     report = {"questions": results, "weak": weak}
-    if not matches_recorded_swap(weak, diagnosis["swap"]):
+    matched = matching_readers(weak, diagnosis["swap"])
+    queries = {i: q for i, q in queries.items() if i in matched}
+    if not queries:
         return report
 
     turns = {i: evidence_turns(conversation["conversation"], qas[i].get("evidence")) for i in ids}
@@ -50,28 +89,30 @@ def check_weaker_span(trainer, conversation, spans, diagnosis):
     can_insert = any(op["update_type"].lower() == "insert" for op in alternative)
     truths = {i: trainer.evaluator.get_ground_truth(qas[i]) for i in targets}
     repair = {}
-    reproducible = True
+    verified = set(queries)
     if quotes and can_insert:
         report["repair_quotes"] = quotes
         repair = _write_branch(trainer, spans, idx, alternative, queries, quotes)
         report["repair"] = repair
         check_responses({"questions": [], "execution_repair": repair})
-        reproducible = (repair["actions"] == weak["actions"] and not repair["contract_fault"]
-                        and repair.get("writer_prompt_hashes") == weak.get("writer_prompt_hashes")
-                        and set(repair.get("qa", {})) == set(targets))
-        if reproducible and any(possible_recovery(weak["qa"][i], repair["qa"][i], truths[i]) for i in targets):
+        if (repair["actions"] != weak["actions"] or repair["contract_fault"] or repair.get("failed_span") is not None
+                or repair.get("writer_prompt_hashes") != weak.get("writer_prompt_hashes")):
+            verified.clear()
+        verified.intersection_update(repair.get("qa", {}))
+        if any(possible_recovery(weak["qa"][i], repair["qa"][i], truths[i]) for i in verified):
             repeat = _write_branch(trainer, spans, idx, alternative, queries, quotes)
             report["repair_repeat"] = repeat
             check_responses({"questions": [], "repair_repeat": repeat})
-            reproducible = not repeat["contract_fault"] and _same_branch(repair, repeat)
+            verified.intersection_update(matching_readers(repair, repeat))
 
     live = dict(enumerate(contents))
-    for i, outcome in results.items():
+    for i in queries:
+        outcome = results[i]
         before = weak["qa"][i]
         refs = before["indices"]
         if _digest([live[j] for j in refs]) != before["context_hash"]:
             raise ValueError("Counterfactual reader context does not match the replay")
-        if (reproducible and repair and repair["bank_hash"] != weak["bank_hash"]
+        if (i in verified and repair and repair["bank_hash"] != weak["bank_hash"]
                 and repair["qa"][i]["context_hash"] != before["context_hash"]):
             if possible_recovery(before, repair["qa"][i], truths[i]):
                 outcome["competing"].append("execution")
@@ -93,7 +134,7 @@ def check_weaker_span(trainer, conversation, spans, diagnosis):
                     outcome["competing"].append("retrieval")
         if outcome["competing"]:
             outcome["status"] = "competing_recovery"
-        elif reproducible and stable:
+        elif i in verified and stable:
             outcome["status"] = "survived_probes"
         else:
             outcome["status"] = "unresolved"
@@ -129,6 +170,8 @@ def probe_weaker_windows(trainer, study, windows, through, *, omitted=False):
     root = study / "diagnostics" / "weaker-branch" / key
     if omitted:
         root = root / "omitted-final"
+    canonical_root = root
+    root = root / "per-question"
     root.mkdir(parents=True, exist_ok=True)
     jobs = []
     counts = Counter()
@@ -156,7 +199,7 @@ def probe_weaker_windows(trainer, study, windows, through, *, omitted=False):
                 jobs.append((convo, spans, d, signature))
     # End-of-window swaps can be checked before the more expensive suffix replays.
     jobs.sort(key=lambda job: (len(job[1]) - job[2]["span_id"], job[3]["episode"]))
-    with (root / "probe.lock").open("a") as lock:
+    with (canonical_root / "probe.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         os.environ["MEMSKILL_USAGE_LOG"] = str(root / "usage.jsonl")
         for convo, spans, diagnosis, signature in jobs:
@@ -167,10 +210,22 @@ def probe_weaker_windows(trainer, study, windows, through, *, omitted=False):
                 if result["inputs"] != signature:
                     raise ValueError(f"Different training inputs at {path}")
             else:
-                result = dict(inputs=signature, **check_weaker_span(trainer, convo, spans, diagnosis))
+                legacy = canonical_root / path.name
+                prior = json.loads(legacy.read_text()) if legacy.is_file() else None
+                if prior and prior["inputs"] != signature:
+                    raise ValueError(f"Different training inputs at {legacy}")
+                if prior and not partial_legacy_match(prior, diagnosis):
+                    result = dict(prior, reader_match_version=2)
+                else:
+                    result = dict(inputs=signature, reader_match_version=2,
+                                  **check_weaker_span(trainer, convo, spans, diagnosis))
                 atomic_json(path, result)
+            publish_reader_result(canonical_root, path.name, result)
             states = [q["status"] for q in result["questions"].values()]
             counts.update(states)
             print(name, states, flush=True)
-        atomic_json(root / f"through-{through}.json", {"backend": backend, "counts": dict(counts),
-                    "checked": [j[3] for j in jobs]})
+        summary = {"backend": backend, "reader_match_version": 2, "counts": dict(counts),
+                   "checked": [j[3] for j in jobs]}
+        name = f"through-{through}.json"
+        atomic_json(root / name, summary)
+        publish_reader_result(canonical_root, name, summary)
