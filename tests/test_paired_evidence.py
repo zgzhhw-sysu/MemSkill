@@ -8,10 +8,25 @@ from types import SimpleNamespace
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from experiments.controller.probe_omitted import check_responses, omitted_final_indices
 from experiments.controller.audit_training_replays import probability_placement
+from experiments.controller.transfer_grounding import external_histories
 from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_external_validation_requires_separate_question_families_and_complete_histories(self):
+        def sample(sid):
+            return {"question_id": sid, "question_type": "temporal", "haystack_sessions": [[], []]}
+        data = [sample(sid) for sid in ("a", "b_abs", "c", "a_abs", "c_abs")]
+        splits = {"test": [2], "val": [0, 1, 3, 4]}
+        formal = {"ids": ["c"], "history_sessions": 2}
+        val = {"ids": ["a", "b_abs"], "abstentions": 1, "answerable_types": {"temporal": 1}, "history_sessions": 4}
+        self.assertEqual(external_histories(data, splits, formal), [data[2]])
+        self.assertEqual(external_histories(data, splits, formal, val), data[:2])
+        for bad in (dict(val, ids=["a", "a_abs"]), dict(val, ids=["a", "c_abs"]),
+                    dict(val, answerable_types={"multi": 1}), dict(val, history_sessions=3)):
+            with self.assertRaises(ValueError):
+                external_histories(data, splits, formal, bad)
+
     def test_probability_placement_preserves_dialogue_rates_and_weights_spans_equally(self):
         def link(dialogue, span, p, plain, grounded):
             return {"dialogue": dialogue, "span": span, "window": 1, "probabilities": {"actor": p},

@@ -125,8 +125,18 @@ def audit_writer_ranges(event, inputs):
 
 def audit(directory, dataset_file, phase, arms):
     cohort = read(Path(__file__).with_name("protocols") / "paired_grounding_cohort.json")
-    external = phase == "longmemeval"
+    external = phase in ("longmemeval", "longmemeval-validation")
     spec = cohort["external" if external else "primary"]
+    frozen = None
+    if phase == "longmemeval-validation":
+        manifest = Path(__file__).with_name("protocols") / "paired_external_validation.json"
+        spec = read(manifest)
+        frozen = read(directory / phase / "frozen.json")
+        fit = {name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+               for name in ("protocol.json", "terminal.json", "credit.json", "rate.json")}
+        if (fit != frozen["weights_and_protocol"] or hashlib.sha256(manifest.read_bytes()).hexdigest() != frozen["cohort_sha256"]
+                or hashlib.sha256((directory / "validation/selection.json").read_bytes()).hexdigest() != frozen["development_selection_sha256"]):
+            raise ValueError("External validation inputs differ from the frozen manifest")
     if hashlib.sha256(dataset_file.read_bytes()).hexdigest() != spec["file_sha256"]:
         raise ValueError("Input fingerprint differs from cohort")
     data = read(dataset_file)
@@ -156,6 +166,7 @@ def audit(directory, dataset_file, phase, arms):
             digest = hashlib.sha256(json.dumps(convo, sort_keys=True).encode()).hexdigest()
             weight_digest = hashlib.sha256(weights[arm].astype(np.float32).tobytes()).hexdigest() if arm in weights else None
             if (inputs["arm"] != arm or inputs["weights"] != weight_digest or shared["conversation"] != digest
+                    or (frozen and shared["backend"] != frozen["backend"])
                     or shared != common_inputs.setdefault(sid, shared)):
                 raise ValueError(f"Policies were evaluated with different inputs or weights at {parent}")
             report = read(parent / "scores.json")
@@ -362,7 +373,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
     parser.add_argument("dataset", type=Path)
-    parser.add_argument("phase", choices=("validation","test","longmemeval"))
+    parser.add_argument("phase", choices=("validation","test","longmemeval","longmemeval-validation"))
     parser.add_argument("--arms", nargs="+", default=["native","terminal","credit"])
     parser.add_argument("--select-for-test", action="store_true",
                         help="Check all five development arms and publish selection.json before opening held-out data")
