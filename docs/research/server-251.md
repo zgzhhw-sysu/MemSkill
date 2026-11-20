@@ -361,3 +361,25 @@ systemctl --user status memskill-251-credit-rank-allocation memskill-251-capped-
 # 单元已退出且完整后期汇总还未生成时恢复
 systemd-run --user --collect --unit=memskill-251-credit-rank-allocation --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_credit_rank_251.sh"
 ```
+
+### 最早证据位置的延迟干预
+
+`memskill-251-first-evidence` 使用物理 GPU 2 上的同一 Qwen 编码器，以及 GPU 7 上占空比 22% 的共享 Llama，每个编码租约最多执行一条新轨迹，并在租约间留出时间。辅助单元 `memskill-251-first-evidence-prefill` 从已核对的实际早段检索还原原提示，提前测量切换技能后的首个写入；相同早段的多个终点共用一次结果。预取进程优先处理同后端、同模型参数及完全相同提示已有实测响应的请求，其余请求按登记顺序生成。完整轨迹核对该次写入的请求键、响应散列、输入和输出 token。`memskill-251-prefix-interaction` 在 GPU 1 上核对四路径上限，并给已有背景轨迹的目标冻结数值预测。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+out="$work/runs/paired-251-linked-eight/late-pairs/first-evidence"
+systemctl --user status memskill-251-{first-evidence,first-evidence-prefill,prefix-interaction}
+ls "$out"/through-*.json
+# 单元已退出且对应回执尚未完成时，选择需要恢复的一个角色
+role=measure
+case "$role" in
+    measure) unit=first-evidence ;;
+    prefill) unit=first-evidence-prefill ;;
+    interaction) unit=prefix-interaction ;;
+esac
+systemd-run --user --collect --unit="memskill-251-$unit" --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_first_evidence_251.sh" "$role"
+```
+
+`late-pairs/first-evidence/registration.json` 绑定全部题目、冻结策略和已有对照分数。各组的 `forecast.json` 固定换早段、换末段的概率；`pair.json` 要求完整前缀、所有有序技能、问题映射和读者 F1 均通过检查。逐题原始预测和记忆版本见同目录的轨迹。汇总中的 `new_controls_and_switch` 仅含登记时两条末段对照都还未出分的端点。该训练面板与独立测试分开报告。
