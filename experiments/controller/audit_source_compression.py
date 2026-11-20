@@ -95,6 +95,7 @@ def panel(study, corpus, features, starts, *, supplement=False):
                     if expected != effects.keys():
                         raise ValueError(f"Incomplete linked panel at {ep}, span {i}")
                 rows.append(dict(row, dialogue=sid, session=start+i, features=f["features"], links=len(effects), scores=scores,
+                                 credits={ids[j]: (1 if row["use"] else -1)*v for j,v in effects.items()},
                                  signed=(1 if row["use"] else -1) * (mean(effects.values()) if effects else 0.)))
     if len(backends) != 1:
         raise ValueError("The counterfactual measurements must share one backend")
