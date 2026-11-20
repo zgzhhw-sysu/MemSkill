@@ -383,3 +383,22 @@ systemd-run --user --collect --unit="memskill-251-$unit" --property=Restart=on-f
 ```
 
 `late-pairs/first-evidence/registration.json` 绑定全部题目、冻结策略和已有对照分数。各组的 `forecast.json` 固定换早段、换末段的概率；`pair.json` 要求完整前缀、所有有序技能、问题映射和读者 F1 均通过检查。逐题原始预测和记忆版本见同目录的轨迹。汇总中的 `new_controls_and_switch` 仅含登记时两条末段对照都还未出分的端点。该训练面板与独立测试分开报告。
+
+### 读者名次干预与控制器
+
+服务共用 251 GPU 7 上的单请求 Llama，沿用两批原实验各自的后端标识，每个新回答最多生成 32 个 token。短窗口核算默认申请 GPU 0，设置 `MEMSKILL_SLOT_POLICY_GPU=1` 可以移至 GPU 1 的租约。长前缀迁移使用 GPU 1，两个数值任务均使用 6% 的进程显存上限。可按下列命令检查进度。恢复某一服务时按其角色运行同一脚本；单元通过用户级 systemd 在异常退出后重试。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+o="$work/runs/paired-251-linked-eight/source-compression/reader-slot-credit"
+systemctl --user status memskill-251-reader-slot-{hybrids,policy,prefix}
+ls "$o"/{aliases,complete}/{calibration,later,long-prefix}/through-*.json
+find "$o/hybrids" -name '*.json' | wc -l
+# 例：恢复已退出的长前缀评价
+systemd-run --user --collect --unit=memskill-251-reader-slot-prefix --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_reader_slots_251.sh" prefix
+```
+
+`reader`、`policy`、`prefix` 分别对应交换回答、局部随机面板、跨 session 面板。`verified-cases.json` 记录了七次保留信用的对照，`cohort.json` 保存全部 452 次比较及原始物理响应引用；`readers-complete.json` 产生后才能计算采用完整交换结果的策略。短窗口的 `preexisting.json` 和长前缀的 `registration.json` 分别记录冻结前已有分数的窗口。
+
+`memskill-251-reader-slot-witness` 使用同一限载读者，在 `single-rank/requests.json` 登记全部单名次双向交换。对应 `rank-00.json` 等文件保留两次真实回答以及必要性、充分性判定。该单元的脚本角色为 `witness`，`single-rank/summary.json` 只在所有名次完成后生成。

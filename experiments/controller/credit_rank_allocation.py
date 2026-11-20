@@ -306,7 +306,19 @@ def passes(all_stats, strict):
     )
 
 
-def audit_long_prefix(late, dest, models, terminal, splits, device):
+def audit_long_prefix(
+    late,
+    dest,
+    models,
+    terminal,
+    splits,
+    device,
+    *,
+    policy=probabilities,
+    record=focal_record,
+    summarize_panel_fn=summarize_panel,
+    protocol=PLAN.with_name("credit_rank_long_prefix.json"),
+):
     root = late / "cross-window-prefix"
     directory = dest / "long-prefix"
     directory.mkdir(exist_ok=True)
@@ -334,7 +346,7 @@ def audit_long_prefix(late, dest, models, terminal, splits, device):
         raise ValueError("Wrong or overlapping long-prefix cohort")
     path = directory / "registration.json"
     identity = {
-        "plan": file_hash(PLAN.with_name("credit_rank_long_prefix.json")),
+        "plan": file_hash(protocol),
         "cohort": file_hash(manifest),
         "fit": file_hash(dest / "fit.json"),
     }
@@ -376,7 +388,7 @@ def audit_long_prefix(late, dest, models, terminal, splits, device):
                 raise ValueError("Long-prefix evidence changed")
             dec = verified_decision(folder, w, r, specs["skills"])
             state = models[sid, 1]
-            ps = probabilities(dec, state, terminal[sid])
+            ps = policy(dec, state, terminal[sid])
             rows = []
             observed = []
             for idx, action in enumerate(("temporal", "activity")):
@@ -419,7 +431,7 @@ def audit_long_prefix(late, dest, models, terminal, splits, device):
                         "end": w["end"],
                         "cost": r["cost"],
                         "focal_probabilities": ps,
-                        "focal": focal_record(dec, state, 1),
+                        "focal": record(dec, state, 1),
                         "rows": rows,
                         "observed": observed,
                     },
@@ -434,8 +446,8 @@ def audit_long_prefix(late, dest, models, terminal, splits, device):
         report = {
             "registration": file_hash(path),
             "registered_questions": 185,
-            "all": summarize_panel(panels, device),
-            "strict": summarize_panel(fresh, device),
+            "all": summarize_panel_fn(panels, device),
+            "strict": summarize_panel_fn(fresh, device),
         }
         register(directory / f"through-{len(panels):03d}.json", report)
         if len(panels) == 99:
