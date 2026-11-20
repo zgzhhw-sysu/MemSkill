@@ -194,3 +194,15 @@ bash scripts/experiments/paired_holdout.sh
 251 上的 `memskill-251-turn-key-screen` 运行 `scripts/experiments/run_turn_keys_251.sh`。GPU 0 上的 Qwen 编码批大小为 2，占空比为 30%，按当时的空闲显存保留至少 2048 MiB。六条完整训练对话都处理完之后，`~/memskill-work/runs/paired-251-linked-eight/source-compression/turn-keys/` 下的 `forecast.json` 保存留一对话拟合与选技修正，`screen.json` 和 `screen-summary.json` 保存分对话及分题型的检索统计。
 
 `memskill-251-turn-key-reader` 运行 `scripts/experiments/run_turn_key_reader_251.sh`。准备任务通过 GPU 1 租约重建真实记忆库，与原始四路径归档使用同一张编码卡。源端概率拟合固定在 GPU 0 的已有结果；回执分别记录两个后端，逐题核对原始检索排名、答案和 token 数。每个窗口的 `reader/<窗口>/jobs.json` 原子落盘后，评分任务即通过已有的 7 号卡 Llama 服务生成变化的提示，服务占空比为 22%。`pair.json` 保存逐题读入内容的指纹、答案、F1 和用量，同目录的 `usage.jsonl` 记录新调用。`reader-through-N.json` 保存按预登记顺序完成的前 N 个窗口，全部完成才产生 `reader-summary.json`。248 的 `memskill-248-pull-linked-eight` 定期收回整个目录。
+
+### 检索竞争与首段写入重放
+
+`memskill-251-retrieval-competition` 使用 GPU 1 的 30% 占空比 Qwen 编码器重建选技前的检索特征，GPU 上拟合留一对话的两阶段策略，按已落盘的随机配对窗口增量计分。结果在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/retrieval-competition/`。`fit.json`、`preexisting.json` 分别保存模型和冻结前已有分数的窗口。`calibration.json` 对应 91 道训练题，`through-NN.json` 中的 `prospective` 给出严格前瞻成绩，`diagnostics-NN.json` 记录分阶段概率、逻辑读写 token 和晋级判据。各组原来的选技顺序与逐题回答可按存档窗口和路径位回查。`capacity.json` 使用已测四路径，给出保持两阶段用技次数的可行事后策略以及放宽次数约束的上界。
+
+`memskill-251-root-write-repairs` 使用原归档的 GPU 1 编码器和 GPU 7 的 22% 占空比生成服务。启动程序为 `scripts/experiments/run_root_write_repairs_251.sh`。结果位于同级的 `root-write-repairs/<窗口>/`，每个 `q<原始题号>-suffix<动作>.json` 保存两条事实重放、补写后重跑的写入轨迹与补检后回答。相同的本地贪心请求复用有校验的原归档；新请求和 token 写到独立响应目录及窗口用量日志。两个任务都按 251 的 GPU 租约运行。
+
+`memskill-251-root-overlap` 等待全部首段修复回执，再在 GPU 上拟合仅改变首段的附加信用。`source-compression/root-overlap/` 单独保存首次规则登记、数值冻结、此前已出过分的窗口、四路径校准和滚动结果。该项目的 52 个后续训练窗口中，27 个窗口的干预点在首段（257 题），25 个在末段（209 题）；末段焦点概率沿用原策略，首段概率也会通过路径到达率影响两段回报估计。
+
+`retrieval-competition/design-variance.json` 保存有完整路径的训练窗口中四种随机分配下的方差核查。`retrieval-competition/return-control/` 保存对照常数、各自的数值冻结时点及后续面板原始 HT 与校正读数。两个冻结时点之前已产生过路径分数的窗口分别记录。
+
+`root-overlap/question-influence.json` 在全部首段核查和主策略冻结之后生成。它为每一道产生首段额外信用的训练题保存独立留出后的 F1 和首段概率改变量，主策略继续使用预登记的全部训练题。

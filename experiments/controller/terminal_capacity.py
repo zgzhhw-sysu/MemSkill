@@ -11,7 +11,7 @@ from experiments.controller.factorial_rollout import CELLS, read
 from experiments.controller.source_compression import file_hash, register
 
 
-def optimal_rates(reach, native, advantage, question_count, radius):
+def optimal_rates(reach, native, advantage, question_count, radius, *, total_uses=None):
     """Allocate activity mass by per-decision return, with a fixed expected number of uses."""
     if radius is None:
         lower, upper = torch.zeros_like(native), torch.ones_like(native)
@@ -22,12 +22,20 @@ def optimal_rates(reach, native, advantage, question_count, radius):
         )
     order = torch.argsort(question_count * advantage, descending=True, stable=True)
     capacity = (reach * (upper - lower))[order]
-    budget = reach @ (native - lower)
+    if total_uses is None:
+        target = reach @ native
+        # Keep the arithmetic of previously published native-budget receipts.
+        budget = reach @ (native - lower)
+    else:
+        target = torch.as_tensor(total_uses, dtype=native.dtype, device=native.device)
+        budget = target - reach @ lower
+    if budget < -1e-10 or budget > capacity.sum() + 1e-10:
+        raise ValueError("Requested use count is outside the probability bounds")
     previous = capacity.cumsum(0) - capacity
     added = torch.minimum((budget - previous).clamp_min(0), capacity)
     result = lower.clone()
     result[order] += added / reach[order]
-    if not torch.allclose(reach @ result, reach @ native, rtol=0, atol=1e-10):
+    if not torch.allclose(reach @ result, target, rtol=0, atol=1e-10):
         raise ValueError("Oracle changed the number of activity uses within one prefix")
     return result
 
