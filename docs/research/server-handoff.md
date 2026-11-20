@@ -245,3 +245,9 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 ### 自然问答监督的交接位置
 
 当前新增的自然问答扩充实验在 251 的物理卡 3、5、6 上运行。248 的镜像位于 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/exchange-credit/`。先看 `registration.json` 的 234 个已登记来源，再看 `questions/` 的拒绝原因与 `outcomes/` 的真实选技和修补对照。允许单行引言的分析存于 `framed/`，与根目录共用教师响应。两套策略按阶段冻结，只有完整后期诊断过线才进入独立开发集，之后再运行锁定的两套正式测试。[251 的恢复和查数命令](server-251.md#训练对话内的问答与选技对照) · [算法和首轮诊断](algorithm-notes.md#用自然问答补充-span-选技监督)
+
+### 写入前的问题向量预测和较弱分支复核
+
+在同一个 248 镜像根目录下，`source-compression/query-displacement/full/` 保存两个完整冻结预测、各动作概率、实测 F1 与源问题排名核验；`source-compression/legacy-terminal-symmetry/` 保存前四个 session 的独立同技能复核。看后期成绩时，使用同一批窗口的 `through-*.json` 对齐题数，再比较 `raw`、`native` 和 `credit`。`strict` 为策略冻结后才首次出分的窗口。每个窗口的事后最佳得分是机会界，不能作为策略所得 F1。[251 启动和数据位置](server-251.md#问题向量迁移与早期标签复核)
+
+连续权重的冻结预测和逐题结果在 `source-compression/query-displacement/support-mass/full/`。第一批后期 61 题中，活动技能概率平均绝对变化 23.07 个百分点，期望 F1 从仅用回报的 0.55108 降至 0.54200，暂未达到独立开发条件。较弱动作复核的第一份回执为 `legacy-terminal-symmetry/outcomes/conv-26_s1_p1_q85.json`。五条末段候选全部完成后，`summary.json` 将列出每条的修补方向、竞争解释、最终信用以及按对话的分母。[训练诊断和机会界](algorithm-notes.md#用其他对话的问题预测选技后的证据排名)
