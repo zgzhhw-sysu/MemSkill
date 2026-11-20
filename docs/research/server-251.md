@@ -300,3 +300,17 @@ systemctl --user status memskill-251-assisted-span
 systemd-run --user --collect --unit=memskill-251-assisted-span --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_assisted_span_251.sh"
 python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.assisted_trial diagnose "$work/runs/paired-251-linked-eight" "$work/study-linked-eight-gpu" "$LOCOMO_DATA"
 ```
+
+### 原生时间修订技能的写入对照
+
+`memskill-251-temporal-update` 在 GPU 1 上限速编码，复用 GPU 7 的 BF16 生成。早期和后期两个登记队列交替取下一个已经具备原始对照的窗口。每次租约准备一个窗口，保存真实写入、检索结果与读者输入后归还 GPU 1。问答客户端随后将新提示发到 GPU 7，按核验过的提示复用相同回答，两个阶段都可断点恢复。完整输出在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/temporal-update-writer/`。交接时核对 `forecast.json` 的 37 个目标，以及各窗口的 `choice.json`、`writes.json`、`pair.json` 与 `recovery-candidates.json`。后两项分别记录逐题实际回答与待排查的归因。按窗口完成顺序查看 `early-*.json` 和 `later-*.json` 的可匹配题数、旧记忆修改、逻辑读写 token、按对话和题型的 F1。只有完整后期评价才计算是否通过该技能的筛选。原始物理轨迹结果、执行故障和不匹配原因均保留。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+systemctl --user status memskill-251-temporal-update
+# 单元退出且仍有等待采集的窗口时恢复
+systemd-run --user --collect --unit=memskill-251-temporal-update --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_temporal_update_251.sh"
+# 重算扩大动作范围的依据，结果保存在 assisted-span-backup/history-capacity.json
+python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.evidence_transport_capacity "$work/runs/paired-251-linked-eight" --by-history
+```

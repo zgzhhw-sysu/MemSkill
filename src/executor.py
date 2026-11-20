@@ -114,7 +114,7 @@ class Executor:
         )
 
     def execute_operation(self, operation: Union[object, List[object]], session_text: str,
-                          retrieved_memories: List[str], *, audit=None) -> List[ExecutionResult]:
+                          retrieved_memories: List[str], *, audit=None, response_provider=None) -> List[ExecutionResult]:
         """
         Execute a memory operation
         Args:
@@ -146,11 +146,12 @@ class Executor:
                 requests = [(0, len(session_text), build_prompt(session_text), None, self.args.max_new_tokens)]
             else:
                 requests = self.writer_context.prepare(session_text, build_prompt, self.args.max_new_tokens)
+        request = get_llm_response_via_api if response_provider is None else response_provider
         all_results = []
         for start, end, instruction, expected_tokens, output_cap in requests:
             # Call LLM API
             try:
-                response, input_tokens, output_tokens = get_llm_response_via_api(
+                response, input_tokens, output_tokens = request(
                     prompt=instruction,
                     LLM_MODEL=self.args.model,
                     base_url=self.args.api_base,

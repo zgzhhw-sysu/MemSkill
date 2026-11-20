@@ -244,7 +244,7 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only policy for paired trajectory evaluation")
     parser.add_argument("--study-complete-donors", action="store_true", help="Measure only missing trajectories on the randomized earlier donor block")
     parser.add_argument("--study-pair-limit", type=int, help="Run the first N registered training pairs")
@@ -281,7 +281,7 @@ def main():
         parser.error("--study-probe-completed checks the whole training protocol")
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
-    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels")
+    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update")
     if options.study_pair_limit is not None and (options.study_phase not in ("training-late-pairs", "training-cross-prefix", "training-semantic-writer", "training-late-semantic-writer", "training-block-repairs", "training-late-selection-labels") or options.study_pair_limit < 1):
         parser.error("--study-pair-limit requires a positive limit and a paired training panel")
     if paired_trial != bool(options.study_forecast):
@@ -315,9 +315,9 @@ def main():
             parser.error("Paired training trajectories require one leased GPU and serial encoders")
         free, total = torch.cuda.mem_get_info()
         budget = min(int(total * .76), free - 2048 * 2**20)
-        minimum_mib = 2048 if options.study_phase in ("training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels") else 2304
+        minimum_mib = 2048 if options.study_phase in ("training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update") else 2304
         if budget < minimum_mib * 2**20:
-            if options.study_phase in ("training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels"):
+            if options.study_phase in ("training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update"):
                 print(f"Waiting for encoder headroom: CUDA reports {free//2**20} MiB free; need {minimum_mib + 2048} MiB", flush=True)
                 raise SystemExit(75)
             raise RuntimeError("Insufficient free memory for the bounded trajectory encoder")
@@ -379,6 +379,9 @@ def main():
             elif options.study_phase == "training-turn-keys":
                 from experiments.controller.turn_key_reader import prepare
                 prepare(trainer, out, options.study_forecast, train, specs)
+            elif options.study_phase == "training-temporal-update":
+                from experiments.controller.temporal_update_writer import run
+                run(trainer, out, options.study_forecast, train, specs)
             elif options.study_phase == "training-late-semantic-writer":
                 from experiments.controller.late_semantic_writer import run
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)

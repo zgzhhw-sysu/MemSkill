@@ -116,7 +116,40 @@ def backup_diagnostics(src, training, packets, logits, dest):
     print(out, flush=True)
 
 
-def run(base):
+def history_capacity(logits, values, counts, dialogues):
+    """Bound the gains within each history and after omitting it, using the same offset cap."""
+    baseline = expected(logits, torch.zeros_like(logits), values)
+    grids = {
+        "both": list(product((-2, 2), repeat=3)),
+        "first": [(v, 0, 0) for v in (-2, 2)],
+        "last": list(product((0,), (-2, 2), (-2, 2))),
+    }
+    gains = {
+        k: expected(logits[:, None], logits.new_tensor(g), values[:, None]).amax(1)
+        - baseline
+        for k, g in grids.items()
+    }
+
+    def weighted(x, select):
+        return float(counts[select] @ x[select] / counts[select].sum())
+
+    result = {}
+    for sid in ("all", *sorted(set(dialogues))):
+        mask = torch.tensor(
+            [sid == "all" or v == sid for v in dialogues], device=logits.device
+        )
+        result[sid] = {
+            "questions": int(counts[mask].sum()),
+            "baseline": weighted(baseline, mask),
+            "gain": {k: weighted(x, mask) for k, x in gains.items()},
+            "gain_other_histories": weighted(gains["both"], ~mask)
+            if (~mask).any()
+            else None,
+        }
+    return result
+
+
+def run(base, *, by_history=False):
     src = base / "source-compression"
     dest = src / "evidence-transport/pilot"
     pred = dest / "predictions"
@@ -133,6 +166,19 @@ def run(base):
     )
     values = logits.new_tensor([w["values"] for w in training])
     n = logits.new_tensor([len(w["questions"]) for w in training])
+    if by_history:
+        out = src / "assisted-span-backup"
+        out.mkdir(exist_ok=True)
+        groups = history_capacity(logits, values, n, [w["dialogue"] for w in training])
+        register(
+            out / "history-capacity.json",
+            {
+                "fit": file_hash(src / "retrieval-competition/fit.json"),
+                "groups": groups,
+            },
+        )
+        print(groups, flush=True)
+        return
     z = logits.new_tensor([[r[0] for r in v["effects"]] for v in packets])
     out = envelope(logits, z, values, n)
     sources = {w["window"]: file_hash(f) for w, f in zip(training, files, strict=True)}
@@ -155,4 +201,6 @@ def run(base):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("base", type=Path)
-    run(p.parse_args().base)
+    p.add_argument("--by-history", action="store_true")
+    args = p.parse_args()
+    run(args.base, by_history=args.by_history)

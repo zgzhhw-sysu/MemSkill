@@ -88,7 +88,7 @@ def freeze(trainer, train, specs, dest, identity):
     return {(r["dialogue"], r["session"]): r for r in result["rows"] if "offset" in r}
 
 
-def probabilities(trainer, state, indices, offset):
+def probabilities(trainer, state, indices, offset, *, alternative=REL):
     native = trainer.controller.native
     ops = trainer.operation_bank.get_candidate_operations()
     with torch.no_grad():
@@ -100,7 +100,7 @@ def probabilities(trainer, state, indices, offset):
             native.encode_state(x[None]), native.encode_ops(vec[None])
         )[0]
         logits = native._apply_new_action_bias(logits, None)
-        base = logits[indices[REL]] - logits[indices[TEMP]]
+        base = logits[indices[alternative]] - logits[indices[TEMP]]
         return {
             "base_logit": float(base),
             "native": float(base.sigmoid()),
