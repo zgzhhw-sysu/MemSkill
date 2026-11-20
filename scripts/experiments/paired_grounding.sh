@@ -38,7 +38,7 @@ exec "${MEMSKILL_PYTHON:-python}" -u -m "$module" "${phase_args[@]}" \
     --api-key "${MEMSKILL_API_KEY:-local-only}" --state-encoder "$MEMSKILL_QWEN_EMBEDDING_PATH" \
     --op-encoder "$MEMSKILL_QWEN_EMBEDDING_PATH" --retriever qwen3-embedding-0.6b --disable-flash-attn \
     --skip-load-snapshot-manager --session-mode full-session --action-top-k 3 --mem-top-k 5 --mem-top-k-eval 5 \
-    --device "${MEMSKILL_DEVICE:-cpu}" --inference-workers 1 --inference-session-workers 1 --encode-batch-size 2 \
+    --device "${MEMSKILL_DEVICE:-cuda}" --inference-workers 1 --inference-session-workers 1 --encode-batch-size 2 \
     --eval-f1-only --reward-metric f1 --seed 42 --span-credit-spans 2 --span-credit-questions 4 \
     --max-new-tokens 256 --temperature 0 --round 1 --trace-dir "$STUDY_DIR/traces" \
     --log-dir "$STUDY_DIR/logs/$phase" --save-dir "$STUDY_DIR/checkpoints" --out-file "$STUDY_DIR/result.json" "$@"

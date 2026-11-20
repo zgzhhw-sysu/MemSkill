@@ -70,7 +70,7 @@ def load_panel(study, data_file, run, *, completed_only=False):
 def fit_ranker(states, gains, sizes):
     """Use per-question weighting and a fixed ridge penalty on paired span contrasts."""
     difference = states[:, 0] - states[:, 1]
-    weights = torch.zeros(states.shape[-1], dtype=states.dtype, requires_grad=True)
+    weights = states.new_zeros(states.shape[-1], requires_grad=True)
     optimizer = torch.optim.LBFGS([weights], max_iter=100, line_search_fn="strong_wolfe",
                                   tolerance_grad=1e-9, tolerance_change=1e-12)
 
@@ -104,7 +104,7 @@ def measured_return(logits, scores):
                                  + (1-p)*q*scores["01"] + p*q*scores["11"])}
 
 
-def compare(windows):
+def compare(windows, *, device=None):
     histories = {w["dialogue"] for w in windows}
     locations = {(w["dialogue"], w["start"]) for w in windows}
     if len(histories) != 6 or len(windows) != 12 or locations != set(itertools.product(histories, [1, 3])):
@@ -112,7 +112,7 @@ def compare(windows):
     panels = []
     for held in sorted(histories):
         fit = [w for w in windows if w["dialogue"] != held]
-        states = torch.tensor([w["state"] for w in fit], dtype=torch.float64)
+        states = torch.tensor([w["state"] for w in fit], dtype=torch.float64, device=device)
         center = states.mean(dim=(0, 1))
         std = states.std(dim=(0, 1), unbiased=False)
         scale = torch.where(std > 1e-9, std, 1.)
@@ -125,7 +125,7 @@ def compare(windows):
             if w["dialogue"] != held:
                 continue
             x = (states.new_tensor(w["state"]) - center) / scale
-            scores = w["f1"]
+            scores = {cell: float(value) for cell, value in w["f1"].items()}
             logits = {"source": x @ slope + bias, "slot": slots @ slot_slope + slot_bias,
                       "uniform": states.new_zeros(2)}
             panels.append({"dialogue": held, "start": w["start"], "n": w["n"], "cells": scores,
@@ -149,8 +149,9 @@ if __name__ == "__main__":
     parser.add_argument("study", type=Path)
     parser.add_argument("locomo", type=Path)
     parser.add_argument("run", type=Path)
+    parser.add_argument("--device", default="cuda", help="Torch device for the six training folds")
     parser.add_argument("--progress", action="store_true", help="Show only fully measured windows without fitting a policy")
     args = parser.parse_args()
     panel = load_panel(args.study, args.locomo, args.run, completed_only=args.progress)
-    report = ([{k: v for k, v in w.items() if k != "state"} for w in panel] if args.progress else compare(panel))
+    report = ([{k: v for k, v in w.items() if k != "state"} for w in panel] if args.progress else compare(panel, device=args.device))
     print(json.dumps(report, indent=2))
