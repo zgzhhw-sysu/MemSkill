@@ -70,8 +70,8 @@ def attributed_turn_pairs(source):
     return [date + " | " + " ".join(turns[i:i + 2]) for i in range(0, len(turns), 2)]
 
 
-def dated_turn_groups(source, group_size):
-    """Format the same dated source words as one- or two-turn items, including multiline messages."""
+def dated_group_parts(source, group_size):
+    """Return each dated item and the exact portion contributed by each source turn."""
     if group_size not in (1, 2):
         raise ValueError("Expected a single turn or an adjacent pair")
     header, _, body = source.partition("\n")
@@ -94,9 +94,21 @@ def dated_turn_groups(source, group_size):
         return []
     chunks = []
     for start in range(0, len(turns), group_size):
-        words = " ".join(turns[start:start + group_size]).split()
-        chunks.extend(date + " | " + " ".join(words[j:j + 96]) for j in range(0, len(words), 96))
+        words = [(i, word) for i in range(start, min(start + group_size, len(turns)))
+                 for word in turns[i].split()]
+        for j in range(0, len(words), 96):
+            visible = words[j:j + 96]
+            parts = {}
+            for i, word in visible:
+                parts.setdefault(i, []).append(word)
+            parent = date + " | " + " ".join(word for _, word in visible)
+            chunks.append((parent, [(i, date + " | " + " ".join(tokens)) for i, tokens in parts.items()]))
     return chunks
+
+
+def dated_turn_groups(source, group_size):
+    """Format the same dated source words as one- or two-turn items, including multiline messages."""
+    return [parent for parent, _ in dated_group_parts(source, group_size)]
 
 
 def restore_text(events):

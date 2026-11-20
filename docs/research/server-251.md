@@ -188,3 +188,9 @@ bash scripts/experiments/paired_holdout.sh
 `memskill-251-live-omitted-gpu` 在 GPU 7 录得的编码、检索、技能向量及选技概率与 3、4 号卡核对一致后，补查末 span 关联、但原四题预算遗漏的全部训练题。使用生成该训练窗口时相同的双卡写入后端和规则 2。每个窗口单独落盘，进行中写 `diagnostics/omitted-final/<后端指纹>/progress.json`，待所有预定窗口都完成后再写 `summary.json`。已有实验可通过 GPU 租约运行 `bash scripts/experiments/paired_grounding.sh probe-omitted --study-probe-completed`。
 
 7 号卡的训练记忆库分组对照已完成，完整回答与对齐结果在 `~/memskill-work/runs/paired-251/writer-granularity-gpu/`。GPU 轮流运行 Qwen 检索和 Llama 问答，两者占空比分别为 30% 和 28%。另一个受五条发言预算约束的技能实验在 `semantic-turn-budget.json` 保存每个训练 span 的两个选择及覆盖率。服务 `memskill-251-budget-readers` 为 123 道训练问题构建真实写入库对照，在 `skill-budget-writer/` 保存选择、检索计划、逐题回答、实测 token 数和分数。2 号卡上的 Qwen 批大小为 2，使用当时可用显存扣除 2048 MiB 后的分配上限。生成使用现有的 5、6 号卡 28% 占空比服务。服务 `memskill-251-budget-policy` 等全部回答完成后在 GPU 上运行留一对话的概率比较，结果写入同目录的 `crossfit.json`。
+
+### 相邻发言索引与末段选技概率
+
+251 上的 `memskill-251-turn-key-screen` 运行 `scripts/experiments/run_turn_keys_251.sh`。GPU 0 上的 Qwen 编码批大小为 2，占空比为 30%，按当时的空闲显存保留至少 2048 MiB。六条完整训练对话都处理完之后，`~/memskill-work/runs/paired-251-linked-eight/source-compression/turn-keys/` 下的 `forecast.json` 保存留一对话拟合与选技修正，`screen.json` 和 `screen-summary.json` 保存分对话及分题型的检索统计。
+
+`memskill-251-turn-key-reader` 运行 `scripts/experiments/run_turn_key_reader_251.sh`。受 GPU 0 租约保护的准备任务重建已完成窗口的真实记忆库。每个窗口的 `reader/<窗口>/jobs.json` 原子落盘后，评分任务即通过已有的 7 号卡 Llama 服务生成变化的提示，服务占空比为 22%。`pair.json` 保存逐题读入内容的指纹、答案、F1 和用量，同目录的 `usage.jsonl` 记录新调用。`reader-through-N.json` 保存按预登记顺序完成的前 N 个窗口，全部完成才产生 `reader-summary.json`。248 的 `memskill-248-pull-linked-eight` 定期收回整个目录。
