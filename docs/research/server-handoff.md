@@ -193,3 +193,11 @@ systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experimen
 ### 首段收益估计与跨对话方向
 
 在 248 的镜像目录下读取 `logs/source-compression/assisted-span-backup/masked-policy.json`。相同四路径题给出了两种不同检验：能否估准供样题上的首段收益，以及所得策略能否把正确方向迁移到其他对话。首个候选已冻结 58 个窗口，91 题期望 F1 为 0.46137，原生为 0.46189。正式判断查 `expanded/later/` 和 `resolved/later/` 的覆盖、严格前瞻结果、固定基准与等频对照；仅在既有条件全部通过后进入完整历史验证。[251 运行与恢复](server-251.md)
+
+### 查验时间修订技能的实际影响
+
+在 248 镜像的 `logs/source-compression/temporal-update-writer/` 先查 `writes.json` 中的 `older_updates`，再对照同窗口 `pair.json` 的逐题答案、F1 和读出的记忆版本。已有真实首例修改了一条旧记忆。候选动作覆盖 91 道早期题和 209 道较晚训练题，全历史测试仍按原保留集执行。后期窗口全部回收后比较原生、等频、错配前文和固定技能。归因候选需另做规则 2 对照。[251 运行、回执与恢复](server-251.md)
+
+首个 9 题窗口已收回，来源策略 0.46852、原生条件策略 0.45066。两处分数变化中一升一降，额外信用均为零。第二个登记队列从同一训练历史的 session 9–10 开始，与早期窗口交替执行。检查 `reader-inputs.json` 可看到 GPU 1 归还前冻结的检索索引、版本与读者提示，`reader.log` 记录其后由 GPU 7 完成的问答。
+
+已用首个窗口核对分开执行编码与问答的结果。9 题的答案、F1、检索索引及记忆版本与原记录逐项相同，其中 5 题的修订分支检索上下文有变化，5 次读者请求都命中此前实测的同一提示。核验回执为 `reader-equivalence-first.json`。
