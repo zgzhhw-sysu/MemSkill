@@ -478,4 +478,4 @@ for role in backend questions framed prepare read policy; do
 done
 ```
 
-每条接受的问题保留真实回复和替换回复的缓存凭据、两种技能的原始轨迹哈希和读者上下文。有原始问答响应但状态为 `control_parity_failed` 的条目记入覆盖分母并给零训练权重。`outcomes/` 的 `reads` 可核对实际答案、F1 和消耗的 token。`policy/{pilot,breadth,full}/fit.json` 给出有效数与分母，`later/`、`replica/` 和 `long-prefix/` 给出各自的配对诊断。
+每条接受的问题保留真实回复和替换回复的缓存凭据、两种技能的原始轨迹哈希和读者上下文。有原始问答响应但状态为 `control_parity_failed` 的条目保留在该 session 的尝试分母中，辅助原始效应和选技信用都记零。`outcomes/` 的 `reads` 可核对实际答案、F1 和消耗的 token。`policy/{pilot,breadth,full}/fit.json` 给出有效数与分母，`later/`、`replica/` 和 `long-prefix/` 给出各自的配对诊断。
