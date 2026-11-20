@@ -220,3 +220,19 @@ systemd-run --user --collect --unit=memskill-251-three-writer bash "$PWD/scripts
 ```
 
 `panel.json` 固定问题、首段动作和窗口顺序，`forecast.json` 保存两种关系概率。一个窗口的 `choice.json`、`write.json` 和 `pair.json` 分别代表已选技、已建库和已完成该组问答。三路结果保存在 `three-writer/through-*.json`，等待该窗口原始活动路径及其冻结策略预测一并到齐才发布。两个目录都有最终的 `summary.json`。恢复时还需同一父目录中的 `outcomes/` 和 `../source-compression/retrieval-competition/` 的原始回执。
+
+### 写入格式复核和后续因果训练样本
+
+251 的 `memskill-251-writer-block-repair` 在 GPU 0 重建末段记忆，并共用 GPU 7 的限载读者。结果在 `source-compression/writer-block-repair/`。`census.json` 给出受影响条目及实际检索次数，`continuous-envelope.json` 给出连续信用范围的上界，`credit/` 和 `population/` 分别保存原有信用的复核和全部题目的双路径回执。`memskill-251-writer-block-policy` 在 GPU 1 拟合修正后的策略。
+
+`memskill-251-late-selection-labels` 在原 GPU 2 编码后端重放 52 个后期随机窗口。`late-pairs/selection-labels/split.json` 固定 88 题新增训练块和 378 题后续评价块。`memskill-251-late-credit-kernel` 在 GPU 1 拟合，`pilot/` 和 `expanded/` 分别保留仅有较早轨迹和加入新增训练轨迹的数值冻结及逐题结果。路径均相对于 `~/memskill-work/runs/paired-251-linked-eight/`。248 的同步目录为 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/`。
+
+```bash
+cd ~/memskill-work/run-linked-questions-v1
+systemctl --user status memskill-251-writer-block-repair memskill-251-writer-block-policy memskill-251-late-selection-labels memskill-251-late-credit-kernel
+# 服务已退出且仍有缺失窗口时，恢复对应任务。
+systemd-run --user --collect --unit=memskill-251-writer-block-repair bash "$PWD/scripts/experiments/run_writer_block_repair_251.sh"
+systemd-run --user --collect --unit=memskill-251-writer-block-policy bash "$PWD/scripts/experiments/audit_writer_block_251.sh"
+systemd-run --user --collect --unit=memskill-251-late-selection-labels bash "$PWD/scripts/experiments/run_late_selection_labels_251.sh"
+systemd-run --user --collect --unit=memskill-251-late-credit-kernel bash "$PWD/scripts/experiments/audit_late_credit_kernel_251.sh"
+```

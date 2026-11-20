@@ -1,5 +1,7 @@
 # MemSkill 换机交接 · 2026-11-20
 
+251 的写入格式复核与新增因果样本结果分别在 `source-compression/writer-block-repair/` 和 `late-pairs/selection-labels/`，均由 248 自动收回。后期策略加入第 9–12 个 session 的 88 题后，只在之后的 378 题上计分。[运行与恢复方法](server-251.md#写入格式复核和后续因果训练样本)
+
 251 的后期三技能实验已固定六段训练对话的 25 个窗口、209 道题。248 备份目录为 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/late-pairs/semantic-writer/`。交接时一起保留该目录、同级的 `outcomes/` 和上级 `source-compression/retrieval-competition/`。双技能和三技能结果各自按完成窗口发布。[251 启动与恢复命令](server-251.md#后期-25-个窗口的三技能实测)
 
 11 月 21 日起继续在 251 做四路径的末段归因复核和同原文写入实验。248 在 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/` 收回 `factorial-repairs/`、`terminal-capacity/`、`semantic-writer/`。恢复实验时先核对原始四路径目录、已冻结的概率和各窗口回执。三个目录分别保存补写补检结果、固定使用率上界和关系技能的真实写入与回答。[251 服务与恢复命令](server-251.md)
