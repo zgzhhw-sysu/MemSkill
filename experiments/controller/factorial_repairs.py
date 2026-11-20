@@ -137,7 +137,15 @@ def answer(trainer, qa, ctx):
     return dict(result, context_hash=_digest(ctx))
 
 
-def final_probe(trainer, convo, row, cells, banks, embedding):
+def retrieval_probe(trainer, qa, turns, indices, live):
+    mid = hidden_retrieval_candidate(qa, turns, indices, live)
+    if mid is None:
+        return None
+    changed = [*indices[:-1], mid]
+    return dict(answer(trainer, qa, [live[j] for j in changed]), indices=changed)
+
+
+def final_probe(trainer, convo, row, cells, banks, embedding, *, probe_if_write_unavailable=False):
     i, prefix = row["qa_index"], row["background"]
     qa = convo["qa"][i]
     outcome = {
@@ -179,11 +187,19 @@ def final_probe(trainer, convo, row, cells, banks, embedding):
         for t in turns
         if t["dia_id"] in event["source_turns"]
     ]
+    live = dict(enumerate(weak_bank.get_all_contents()))
+    truth = trainer.evaluator.get_ground_truth(qa)
     if not quoted or not any(
         op["update_type"].lower() == "insert" for op in event["skills"]
     ):
+        if probe_if_write_unavailable:
+            probe = retrieval_probe(trainer, qa, turns, before["indices"], live)
+            if probe is not None:
+                outcome["retrieval"] = probe
+                if possible_recovery(before, probe, truth):
+                    outcome["competing"].append("retrieval")
+                    return dict(outcome, status="competing_recovery")
         return dict(outcome, status="unavailable_repair")
-    live = dict(enumerate(weak_bank.get_all_contents()))
     seen = set(live.values())
     missing = [t for t in dict.fromkeys(quoted) if t not in seen]
     # Rebuild a private copy only when a question adds quotes. All original vectors stay in their native batches.
@@ -199,17 +215,13 @@ def final_probe(trainer, convo, row, cells, banks, embedding):
     repair = dict(
         answer(trainer, qa, ctx), indices=list(map(int, idx)), added_quotes=missing
     )
-    truth = trainer.evaluator.get_ground_truth(qa)
     outcome["execution"] = repair
     if repair["context_hash"] != before["context_hash"] and possible_recovery(
         before, repair, truth
     ):
         outcome["competing"].append("execution")
-    indices = before["indices"]
-    mid = hidden_retrieval_candidate(qa, turns, indices, live)
-    if mid is not None:
-        changed = [*indices[:-1], mid]
-        probe = dict(answer(trainer, qa, [live[j] for j in changed]), indices=changed)
+    probe = retrieval_probe(trainer, qa, turns, before["indices"], live)
+    if probe is not None:
         outcome["retrieval"] = probe
         if possible_recovery(before, probe, truth):
             outcome["competing"].append("retrieval")

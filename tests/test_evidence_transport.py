@@ -17,6 +17,7 @@ from experiments.controller.evidence_transport import (
     root_targets,
 )
 from experiments.controller.evidence_transport_capacity import (
+    focal_bound,
     compare_suffixes,
     envelope,
 )
@@ -212,6 +213,40 @@ class EvidenceTransportTests(unittest.TestCase):
         for source, bit in ((digest("different"), 1), (digest("observed"), 0)):
             with self.assertRaises(ValueError):
                 decision_context(span, state, source, bit)
+
+    def test_randomized_window_bound_preserves_mass_separately_by_pivot(self):
+        rows = [
+            {
+                "name": "few",
+                "pivot": 0,
+                "n": 1,
+                "temporal": 0.0,
+                "activity": 1.0,
+                "native_p": 0.25,
+            },
+            {
+                "name": "many",
+                "pivot": 0,
+                "n": 4,
+                "temporal": 0.0,
+                "activity": 0.5,
+                "native_p": 0.5,
+            },
+            {
+                "name": "other",
+                "pivot": 1,
+                "n": 3,
+                "temporal": 1.0,
+                "activity": 0.0,
+                "native_p": 0.25,
+            },
+        ]
+        bound = focal_bound(rows)
+        self.assertEqual(
+            bound["matched_probabilities"], {"many": 0.75, "few": 0.0, "other": 0.25}
+        )
+        self.assertAlmostEqual(bound["matched_usage_gain"], 0.25 / 8)
+        self.assertGreater(bound["unrestricted_gain"], bound["matched_usage_gain"])
 
     def test_sign_constrained_capacity_distinguishes_wrong_direction(self):
         z = torch.zeros((1, 3), dtype=torch.float64)
