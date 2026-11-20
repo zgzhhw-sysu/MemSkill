@@ -236,3 +236,15 @@ systemd-run --user --collect --unit=memskill-251-writer-block-policy bash "$PWD/
 systemd-run --user --collect --unit=memskill-251-late-selection-labels bash "$PWD/scripts/experiments/run_late_selection_labels_251.sh"
 systemd-run --user --collect --unit=memskill-251-late-credit-kernel bash "$PWD/scripts/experiments/audit_late_credit_kernel_251.sh"
 ```
+
+### 自然回复与写入前选技
+
+251 的 `memskill-251-reply-probes` 在物理 GPU 1 上用 Qwen 编码，批大小为 2，编码占空比上限为 30%。`memskill-251-reply-placement` 在同一卡的独立租约内拟合策略，读取前序受控实验的实际写入和读者得分。两个任务可断点恢复。恢复时在 251 的运行目录执行以下命令。
+
+```bash
+cd ~/memskill-work/run-linked-questions-v1
+systemd-run --user --collect --unit=memskill-251-reply-probes --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_reply_probes_251.sh"
+systemd-run --user --collect --unit=memskill-251-reply-placement --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/audit_reply_placement_251.sh"
+```
+
+运行产物位于 `~/memskill-work/runs/paired-251-linked-eight/source-compression/reply-placement/`。每个 session 的 `sources/` 回执含来源指纹、可用回复数、实际目标与同说话者错配目标的四个特征。`fit.json` 固定按对话留出的权重和训练输入指纹，`preexisting.json` 登记拟合时已经落盘的原始问答路径。`calibration.json` 和 `through-NN.json` 保存逐题 F1、各节点选技概率与期望读写 token。查看 `prospective_session13_plus` 可得到冻结后在较晚 session 中的覆盖和 F1。248 定期把该目录拉回论文工作区。

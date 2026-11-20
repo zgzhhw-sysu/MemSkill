@@ -177,3 +177,7 @@ systemd-run --user --unit=memskill-251-retrieval-competition bash "$PWD/scripts/
 systemd-run --user --unit=memskill-251-root-write-repairs bash "$PWD/scripts/experiments/run_root_write_repairs_251.sh"
 systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experiments/run_root_overlap_251.sh"
 ```
+
+### 在 251 接手自然回复实验
+
+在 248 的论文目录下，查看 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/reply-placement/`。先读 `calibration.json` 的 91 题四路径结果，再对照最新 `through-NN.json` 中的 `all`、`prospective` 和 `session13_plus`。其中 `reply` 使用真实相邻回复，`sham` 使用同一说话者的另一条发言，`raw` 使用相同特征和原始终局奖励，`rate` 保留拟合策略在训练样本中的平均使用率。`robust` 是上一版使用解析复核信用的策略。训练历史内的结果单独记录。独立验证与正式测试仍按原登记的完整历史评价。[服务和恢复命令](server-251.md)
