@@ -1,5 +1,21 @@
 # 251 上的配对实验
 
+## 11 月 20 日晚的运行
+
+`memskill-251-linked-eight.service` 使用 GPU 3、4 执行两个训练进程，逐个从训练窗口的两端取任务。GPU 5、6 共同承载一个 Llama 3 8B BF16 服务，端口为 18773，逐卡分配约 7658 MiB。编码器每批最多两条，目标占空比为 35%。生成服务逐 16 个输入 token 预填充并逐 token 解码，目标占空比为 28%。调度脚本位于 `~/memskill-work/deploy/run-linked-251.sh`。
+
+```bash
+systemctl --user status memskill-251-linked-eight
+cd ~/memskill-work
+tail -n 5 runs/paired-251-linked-eight/{writer,train-3,train-4}.log
+find study-linked-eight-gpu/train -maxdepth 2 -name rows.json | wc -l
+python3 deploy/gpu_guard.py status
+```
+
+训练集有 24 个两段 session 的窗口。每个窗口完整写入后发布 `rows.json`。两路训练退出后，同一服务评估开发集及各对照，开发筛选通过才运行两套正式测试。GPU 租约关闭后守护按显存余量恢复有限占用。
+
+## 前序实验记录
+
 自 11 月 20 日 10:13 起，模型实验统一走 CUDA。等来源训练由 GPU 3、4 编码和检索，GPU 5、6 做写入与问答。训练、开发及通过筛选后的完整测试均使用这套后端。配对启动脚本默认选择 CUDA，有限显存时在 GPU 租约处等待。CPU 负责 I/O、分词、调度和 F1 统计。
 
 旧 CPU 编码正式复核和两路外部开发作业已经停止，已有断点保留。等来源 CPU 训练保存了四个完整窗口，工作进程已暂停；其服务内的 18759 端口仍向 GPU 训练提供 5、6 号卡上的 Llama 生成。GPU 作业退出后一起释放该共享服务。查看当前工作使用 `systemctl --user status memskill-251-equal-gpu` 和 `python3 ~/memskill-work/deploy/gpu_guard.py status`。

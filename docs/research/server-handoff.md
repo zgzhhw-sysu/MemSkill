@@ -2,7 +2,7 @@
 
 251 已接续 248 的训练。两台机器的 Python 均为 3.12.12，配对实验所用的 109 个 Python 依赖逐项版本一致。目标机的代码在 `~/memskill-work/MemSkill`，训练断点和模型路径见 [251 运行说明](server-251.md)。
 
-当前从 `study-equal-sources-gpu` 续跑。GPU 3、4 按窗口分工，GPU 5、6 提供限载生成。CPU 编码的正式复核和外部开发作业已停止，保留原冻结清单、已有模型响应及已落盘的历史。GPU 候选单独完成开发筛选后，再运行完整 LoCoMo 和 LongMemEval-S。服务为 `memskill-251-equal-gpu`，训练、开发及通过筛选后的正式日志在 `~/memskill-work/runs/paired-251-equal-gpu/`。
+11 月 20 日 21:56，251 已启动新训练 `memskill-251-linked-eight`。运行目录为 `~/memskill-work/study-linked-eight-gpu`，逐卡日志在 `~/memskill-work/runs/paired-251-linked-eight/`。旧四题预算实验已完成，75 题开发集上的信用、原策略及终局奖励 F1 均为 0.41787。248 的私有备份 `runs/span_credit/251-bf16/recovered-20261120-2040/` 包含 4,292 个逐文件核对 SHA-256 的普通文件。新实验的进度按已原子发布的训练窗口计数。
 
 11 月 20 日 10:38，GPU 端已保存 `conv-26_s1` 和 `conv-44_s3` 两个完整训练窗口，四个 span 的初轮规则 2 额外信用均为零。工作进程在窗口落盘后已重启为 CUDA 拟合版本。7 号卡按相同编码指纹补探四题预算遗漏的问题。77 题的记忆分组 GPU 对照已完成。新候选在每个 span 按技能描述选择五条发言，879 道训练题上的证据覆盖筛选已完成，真实写入库上的 123 题读者实验在 `~/memskill-work/runs/paired-251/skill-budget-writer/`。两项训练筛选的代码入口和评分范围见[配对实验记录](span-credit-paired.md)。
 

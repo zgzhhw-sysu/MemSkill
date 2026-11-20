@@ -71,10 +71,9 @@ def load_panel(study, data_file, run, *, completed_only=False, include_questions
     return windows
 
 
-def fit_ranker(states, gains, sizes):
+def fit_preference(difference, gains, sizes):
     """Use per-question weighting and a fixed ridge penalty on paired span contrasts."""
-    difference = states[:, 0] - states[:, 1]
-    weights = states.new_zeros(states.shape[-1], requires_grad=True)
+    weights = difference.new_zeros(difference.shape[-1], requires_grad=True)
     optimizer = torch.optim.LBFGS([weights], max_iter=100, line_search_fn="strong_wolfe",
                                   tolerance_grad=1e-9, tolerance_change=1e-12)
 
@@ -86,7 +85,11 @@ def fit_ranker(states, gains, sizes):
         return loss
 
     optimizer.step(closure)
-    weights = weights.detach()
+    return weights.detach()
+
+
+def fit_ranker(states, gains, sizes):
+    weights = fit_preference(states[:, 0] - states[:, 1], gains, sizes)
     # Fix otherwise unidentified intercept using training states only.
     logits = states @ weights
     low, high = -float(logits.max()), -float(logits.min())

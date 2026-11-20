@@ -47,8 +47,30 @@ def window(conversation, start, length):
     return dict(subset, conversation=content, qa=[q for q in subset["qa"] if set(q["evidence"]) <= turns])
 
 
+def verify_linked_questions(events, questions):
+    """Require every eligible factual answer and every question linked to either span."""
+    from experiments.controller.probe_omitted import check_responses
+    answers = [e for e in events if e["kind"] == "qa"]
+    answered = sorted(int(e["query_id"].rsplit("_", 1)[1]) for e in answers if e["success"])
+    if len(answers) != len(questions) or answered != list(range(len(questions))):
+        raise ValueError("Missing or repeated factual training answer")
+    spans = [e for e in events if e["kind"] == "span"]
+    records = [e["diagnosis"] for e in events if e["kind"] == "span_credit"]
+    for span, record in zip(spans, records, strict=True):
+        turns = set(span["source_turns"])
+        expected = [(i, q["original_index"]) for i, q in enumerate(questions) if turns.intersection(q["evidence"])]
+        observed = [(q["qa_index"], q["original_index"]) for q in record["questions"]]
+        if span["span_id"] != record["span_id"] or record["evidence_rule_version"] != 2 or observed != expected:
+            raise ValueError("Incomplete or mismatched rule-2 question panel")
+        check_responses(record)
+
+
 def collect(trainer, convo, seed, dest):
+    all_linked = getattr(trainer.args, "study_all_linked_questions", False)
     if dest.exists():
+        if all_linked:
+            trace, = (dest / "traces").glob("*.jsonl")
+            verify_linked_questions([json.loads(line) for line in trace.read_bytes().splitlines()], convo["qa"])
         ids = [q["original_index"] for q in convo["qa"]]
         spans = sum(k.startswith("session_") and not k.endswith("_date_time") for k in convo["conversation"])
         return load_episode(dest, convo["sample_id"], spans, ids,
@@ -68,6 +90,8 @@ def collect(trainer, convo, seed, dest):
         log = trainer.train_episode(convo, memory, sessions, buffer, episode_length=length,
                                     precompute_embeddings=precompute)
         trace = [json.loads(line) for line in memory.trace.path.read_text().splitlines()]
+        if all_linked:
+            verify_linked_questions(trace, convo["qa"])
         diagnostics = [e["diagnosis"] for e in trace if e["kind"] == "span_credit"]
         rows = []
         for i, (decision, diagnosis) in enumerate(zip(policy.decisions, diagnostics, strict=True)):
@@ -228,6 +252,8 @@ def main():
                         help="Audit positive sampled-action credit in completed omitted-final question receipts")
     parser.add_argument("--study-probe-completed", action="store_true",
                         help="Probe saved training windows on their original backend while other windows are collecting")
+    parser.add_argument("--study-share-probe-encoder", action="store_true",
+                        help="Reuse the same frozen CUDA Qwen for serial omitted-question state, skill and retrieval calls")
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "plain", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
@@ -237,6 +263,10 @@ def main():
                         help="Compare the activity and temporal skills with paired and single source turns in slot three")
     parser.add_argument("--study-deployment-writer", action="store_true",
                         help="Use evaluation-time writer prompts in training and counterfactual branches")
+    parser.add_argument("--study-all-linked-questions", action="store_true",
+                        help="Probe every evidence-linked training question in each two-session window")
+    parser.add_argument("--study-center-credit", action="store_true",
+                        help="Center and scale training states for the abstention-anchored correction")
     parser.add_argument("--study-anchor-abstentions", action="store_true",
                         help="Penalize probability changes at training states with no verified local credit")
     options, remainder = parser.parse_known_args()
@@ -244,6 +274,8 @@ def main():
         parser.error("--study-probe-completed requires --study-phase probe-omitted")
     if options.study_probe_completed and options.study_probe_through is not None:
         parser.error("--study-probe-completed checks the whole training protocol")
+    if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
+        parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
     if (args.dataset != "locomo" or not args.api or args.enable_designer or not args.eval_f1_only
@@ -258,6 +290,13 @@ def main():
     if train_sessions is None:
         train_sessions = saved_protocol["train_sessions"][-1][-1] if saved_protocol else 4
     train_windows = [[start, start + 1] for start in range(1, train_sessions, 2)]
+    train, val, test = split_data(load_dataset(args.data_file, "locomo"), "locomo")
+    args.study_all_linked_questions = options.study_all_linked_questions or saved_protocol.get("all_linked_questions", False)
+    if args.study_all_linked_questions:
+        if args.span_credit_spans < 2:
+            parser.error("An exhaustive two-session window requires probing both spans")
+        args.span_credit_questions = max(1, max(len(window(c, start, end - start + 1)["qa"])
+                                               for c in train for start, end in train_windows))
     set_seed(args.seed)
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
@@ -265,7 +304,6 @@ def main():
     trainer.load_checkpoint(args.load_checkpoint)
     equal_sources = options.study_equal_sources or saved_protocol.get("equal_sources", False)
     specs = configure_policy(trainer, equal_sources)
-    train, val, test = split_data(load_dataset(args.data_file, "locomo"), "locomo")
     protocol = {
         "input_sha256": hashlib.sha256(Path(args.data_file).read_bytes()).hexdigest(),
         "checkpoint_sha256": hashlib.sha256(Path(args.load_checkpoint).read_bytes()).hexdigest(),
@@ -279,6 +317,12 @@ def main():
         "target": "at least +0.02 micro mean per-question F1 vs terminal and native, positive on each independent test dialogue",
         "weight": 1, "ridge": 0.01, "rule": 2, "span_budget": args.span_credit_spans, "question_budget": args.span_credit_questions,
     }
+    if args.study_all_linked_questions:
+        protocol["all_linked_questions"] = True
+    if options.study_center_credit or saved_protocol.get("center_credit"):
+        if not (options.study_anchor_abstentions or saved_protocol.get("anchor_abstentions")):
+            parser.error("--study-center-credit requires --study-anchor-abstentions")
+        protocol["center_credit"] = True
     if equal_sources:
         protocol["equal_sources"] = True
     if args.span_credit_deployment_writer:
@@ -323,7 +367,14 @@ def main():
             probe_weaker_windows(trainer, out, windows, through, omitted=options.study_weaker_omitted)
         else:
             from experiments.controller.probe_omitted import probe_training_windows
-            probe_training_windows(trainer, out, windows, completed_only=options.study_probe_completed)
+            from contextlib import nullcontext
+            from src.rag_utils import reuse_qwen_retriever
+            if options.study_share_probe_encoder and not config.share_serial_encoders:
+                parser.error("--study-share-probe-encoder requires one serial inference worker")
+            sharing = (reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever)
+                       if options.study_share_probe_encoder else nullcontext())
+            with sharing:
+                probe_training_windows(trainer, out, windows, completed_only=options.study_probe_completed)
         return
     if options.study_phase == "train":
         root = out / "train"
@@ -342,7 +393,10 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX)
             with torch.device(args.device):
                 terminal = fit_policy(rows, 0)
-                credit = fit_anchored_credit(rows, terminal) if protocol.get("anchor_abstentions") else fit_policy(rows, 1)
+                if protocol.get("anchor_abstentions"):
+                    credit = fit_anchored_credit(rows, terminal, center_states=protocol.get("center_credit", False))
+                else:
+                    credit = fit_policy(rows, 1)
                 rate = match_training_probability(rows, terminal, credit)
             print(f"Fitted terminal, credit and rate policies on {credit.device}", flush=True)
             for arm, weights in (("terminal", terminal), ("credit", credit), ("rate", rate)):
