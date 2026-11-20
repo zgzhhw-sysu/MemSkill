@@ -9,7 +9,7 @@ import torch
 
 from experiments.controller.audit_source_compression import panel, summarize
 from experiments.controller.conditional_credit import read, writer_outcomes
-from experiments.controller.factorial_rollout import CELLS, path_mass
+from experiments.controller.factorial_rollout import CELLS, path_mass, record_scored_paths
 from experiments.controller.granularity_placement import load_panel
 from experiments.controller.query_prototypes import prototype_logits
 from experiments.controller.source_compression import file_hash, register
@@ -141,13 +141,13 @@ def run(phase, previous, current, corpus, proxy, source):
             }
         else:
             windows = writer_outcomes(current, corpus, source, parent, candidate=model)
-            fresh = [
-                w
-                for w in windows
-                if f"{w['dialogue']}_s{w['start']}" not in model["already_published_windows"]
-            ]
+            early = record_scored_paths(source / "factorial", d / "frozen.json") | set(
+                model["already_published_windows"]
+            )
+            fresh = [w for w in windows if f"{w['dialogue']}_s{w['start']}" not in early]
             rep = {
                 "complete_panel": compare(windows, model),
+                "windows_with_any_early_scores": sorted(early),
                 "already_published_windows": model["already_published_windows"],
                 "strictly_later": compare(fresh, model) if fresh else None,
             }
