@@ -22,6 +22,18 @@ def deployment_operations(operations):
             and str(getattr(op, "update_type", "")).lower() != "noop"]
 
 
+def capped_empty_insert(response, output_tokens, cap, results):
+    """Recognize a final empty block following successfully decoded writes."""
+    return (
+        output_tokens == cap and len(results) >= 2
+        and re.search(r"(?im)^\s*ACTION[ \t]*:[ \t]*INSERT[ \t]*\Z", response.rstrip()) is not None
+        and not results[-1].success and results[-1].action_type == "NOOP"
+        and results[-1].reasoning == "Failed to parse MEMORY_ITEM for INSERT"
+        and all(r.success for r in results[:-1])
+        and any(r.action_type == "INSERT" for r in results[:-1])
+    )
+
+
 class ExecutionResult:
     """Result of operation execution"""
     def __init__(self, action_type: str, success: bool,
@@ -114,7 +126,7 @@ class Executor:
         )
 
     def execute_operation(self, operation: Union[object, List[object]], session_text: str,
-                          retrieved_memories: List[str], *, audit=None, response_provider=None) -> List[ExecutionResult]:
+                          retrieved_memories: List[str], *, audit=None, response_provider=None, repair_capped_source=False) -> List[ExecutionResult]:
         """
         Execute a memory operation
         Args:
@@ -179,7 +191,13 @@ class Executor:
                 continue
 
             # Parse response (may contain multiple actions)
-            all_results.extend(self._parse_response(response, len(retrieved_memories)))
+            parsed = self._parse_response(response, len(retrieved_memories))
+            if (repair_capped_source and end == len(session_text) and all(r.success for r in all_results)
+                    and capped_empty_insert(response, output_tokens, output_cap, parsed)
+                    and any(op.update_type.lower() == "insert" and getattr(op, "source_rule", None)
+                            in ("dated_single_turns", "dated_adjacent_turns") for op in operations)):
+                parsed = parsed[:-1]
+            all_results.extend(parsed)
 
         if not all_results:
             return [ExecutionResult(

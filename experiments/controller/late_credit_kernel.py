@@ -145,7 +145,7 @@ def probabilities(d, model, weights):
     return dict(zip(ARMS, (base + shifts).sigmoid().tolist(), strict=True))
 
 
-def score(late, assignment, models, weights):
+def score(late, assignment, models, weights, *, policy=probabilities, arms=ARMS):
     sid = assignment["dialogue"]
     name = f"{sid}_s{assignment['start']}"
     folder = late / "outcomes" / name
@@ -168,7 +168,7 @@ def score(late, assignment, models, weights):
 
         cost[bits] = budgets(folder, bits)
         for stage, (key, d) in enumerate(zip((0, 1 + a), decisions, strict=True)):
-            p = probabilities(d, models[sid, stage], weights[sid])
+            p = policy(d, models[sid, stage], weights[sid])
             if ps.setdefault(key, p) != p:
                 raise ValueError("Different probability for same focal state")
     focal = ps[0 if pair["pivot"] == 0 else 1 + pair["background"]]
@@ -178,7 +178,7 @@ def score(late, assignment, models, weights):
         values = {k: low + p * (high - low) for k, p in focal.items()}
         ht = {
             k: 2 * (mass(branches[0], ps, k) * low + mass(branches[1], ps, k) * high)
-            for k in ARMS
+            for k in arms
         }
         for k in ("native", "terminal"):
             if not math.isclose(
@@ -199,7 +199,7 @@ def score(late, assignment, models, weights):
                 op: sum(2 * mass(b, ps, k) * cost[b][op] for b in branches)
                 for op in ("reader", "executor")
             }
-            for k in ARMS
+            for k in arms
         },
         "pair": file_hash(folder / "pair.json"),
     }
