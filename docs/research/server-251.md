@@ -331,3 +331,21 @@ systemctl --user status memskill-251-temporal-update-audit memskill-251-temporal
 systemd-run --user --collect --unit=memskill-251-temporal-update-audit --property=Restart=on-failure --property=RestartSec=90 bash "$PWD/scripts/experiments/run_temporal_update_251.sh" audit
 systemd-run --user --collect --unit=memskill-251-temporal-partition --property=Restart=on-failure --property=RestartSec=90 bash "$PWD/scripts/experiments/run_temporal_partition_251.sh"
 ```
+
+### 截断写入对照
+
+251 的 `memskill-251-capped-source-encode` 在物理 GPU 1 使用小批次 Qwen 编码，`memskill-251-capped-source-read` 复用物理 GPU 7 的限载 Llama，`memskill-251-capped-source-policy` 在 GPU 1 租约内拟合。编码器在等待新末段写入与问答期间交还租约。角色可分别恢复，使用相同回执跳过已完成的工作。以下命令在 251 执行。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+out="$work/runs/paired-251-linked-eight/source-compression/capped-source-credit"
+systemctl --user status memskill-251-capped-source-{encode,read,policy}
+ls "$out"/conv-*/*/questions/*.json
+python3 "$guard" status
+# 仅对已退出且对应工作未完成的角色执行，将 role 设为 encode、read 或 policy
+role=policy
+systemd-run --user --collect --unit="memskill-251-capped-source-$role" --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_capped_source_251.sh" "$role"
+```
+
+`registration.json` 固定原始路径与题目；`complete.json` 要求五条路径都完成同技能重测。`policy/{mask,repaired}/fit.json` 给出训练输入及拟合参数；`preexisting.json` 列出冻结时已经出分的路径。`calibration/summary.json` 是 88 题跨历史回算；`later/through-*.json` 同时列出当前全部窗口及在冻结后才出分的窗口。248 的 linked-eight 镜像定期回收该目录。

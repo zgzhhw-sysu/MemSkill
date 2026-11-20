@@ -205,3 +205,9 @@ systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experimen
 ### 交叉库核验和新策略
 
 在 248 镜像的 `logs/source-compression/temporal-update-audit/`，首个 9 题窗口的两项来源效应已经拆开。旧项贡献为 0，新增条目贡献了原策略观察到的全部 +0.01786 期望 F1。另一个 8 题窗口在两种固定技能下均为 0.46429。两者来自同一条训练对话，独立基准仍封存。查看 `controller/*/forecast.json` 的供样窗口和各状态选技概率，并用对应的 `through-*.json` 核对比单独预测总收益、等频策略、原生策略多得多少 F1。只有通过登记的筛选后才进入独立开发与完整测试。[251 的运行入口和回执](server-251.md)
+
+### 继续核验截断写入
+
+251 已在 conv-43 第 112 题实测出同技能修复使 F1 从 0 变为 1。查看 `logs/source-compression/capped-source-credit/conv-43_s11/01/questions/112.json` 的原答案和重测答案，邻近的 `inputs.json` 和 `writes.json` 保存检索输入、记忆版本及写入记录。检查同级 `complete.json` 确认 36 次分支问答全部到齐，再读取 `policy/repaired/` 的策略结果。策略对照的主要指标是目标 span 选择概率及其加权 F1，同时检查按对话的得分、等频对照、终局奖励对照和置信区间。独立开发和完整测试的准入条件见登记协议。[运行与断点恢复](server-251.md) · [控制器实验协议](../../experiments/controller/protocols/capped_source_credit.json)
+
+conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0.15714，换技能的原始平均优势从 0.21464 缩到 0.05750。临时将受影响的训练比较置零后，88 题回算的期望 F1 为 0.47455，原生为 0.47451，终局策略为 0.47981。正式目标仍待跨对话和独立数据检验。
