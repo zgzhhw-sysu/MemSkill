@@ -73,6 +73,22 @@ def table(original, states, model, cases, costs, *, pivot=None, background=None)
             rate=rate,
             **{k: prior[k] for k in ("overlap", "return_only", "native", "terminal")},
         )
+    return trajectory_table(
+        original,
+        ps,
+        cases,
+        costs,
+        ARMS,
+        ("overlap", "return_only", "native", "terminal"),
+        pivot=pivot,
+        background=background,
+    )
+
+
+def trajectory_table(
+    original, ps, cases, costs, arms, reproduce, *, pivot=None, background=None
+):
+    """Integrate observed trajectories and verify unchanged policies against archived F1."""
     focus = ps[0 if pivot == 0 else 1 + background] if pivot is not None else None
     factor = 2 if focus else 1
     expected_tokens = {
@@ -80,13 +96,13 @@ def table(original, states, model, cases, costs, *, pivot=None, background=None)
             op: sum(factor * mass(bits, ps, k) * use[op] for bits, use in costs.items())
             for op in ("reader", "executor")
         }
-        for k in ARMS
+        for k in arms
     }
     rows = []
     for i, r in enumerate(original["rows"]):
         integrated = {
             k: sum(factor * mass(bits, ps, k) * y[i] for bits, y in cases.items())
-            for k in ARMS
+            for k in arms
         }
         if focus:
             low, high = (v[i] for v in cases.values())
@@ -97,7 +113,7 @@ def table(original, states, model, cases, costs, *, pivot=None, background=None)
         else:
             metrics = {"f1": integrated}
         for metric, values in metrics.items():
-            for k in ("overlap", "return_only", "native", "terminal"):
+            for k in reproduce:
                 if not math.isclose(values[k], r[metric][k], abs_tol=1e-10):
                     raise ValueError(
                         "An unchanged policy or trajectory failed reproduction"
