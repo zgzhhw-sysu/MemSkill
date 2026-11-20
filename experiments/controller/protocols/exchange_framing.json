@@ -1,0 +1,6 @@
+{
+  "parent": "exchange_credit.json",
+  "reason": "After four session-5 teacher replies had been screened and rejected for JSON formatting, register a separate format sensitivity analysis before reading their downstream policy effects. The strict cohort and raw completions stay immutable.",
+  "change": "Reuse identical teacher and reader requests. Also accept exactly one introductory text line ending in a colon, at most 96 characters without JSON delimiters or a question mark, followed only by a JSON object, null, or one JSON fence. Do not extract substrings from malformed JSON, strip multiple lines of commentary, repair contents, regenerate answers, or change source checks. Count all 234 attempts and keep strict status per source.",
+  "analysis": "Freeze independent numeric forecasts for this exploratory branch. Apply the same held-history folds, denominators, alternate-explanation vetoes, controls and prospective diagnostics. Report it separately from the initially registered strict branch."
+}

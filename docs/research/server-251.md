@@ -447,3 +447,35 @@ systemd-run --user --collect --unit=memskill-251-passage-advantage --property=Re
 systemd-run --user --collect --unit=memskill-251-passage-prefix --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_passage_advantage_251.sh" prefix
 systemd-run --user --collect --unit=memskill-251-passage-reliability --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_passage_advantage_251.sh" case
 ```
+
+### 训练对话内的问答与选技对照
+
+结果根目录是 `$work/runs/paired-251-linked-eight/source-compression/exchange-credit`。根目录使用严格 JSON，`framed/` 使用单行引言规则，两者复用同一批物理模型响应。下列命令在 251 上查看当前进度。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+out="$work/runs/paired-251-linked-eight/source-compression/exchange-credit"
+systemctl --user list-units --all 'memskill-251-exchange-*'
+for dir in "$out" "$out/framed"; do
+    for stage in questions prepared outcomes; do
+        [[ ! -d "$dir/$stage" ]] || python3 -c 'import collections,json,pathlib,sys; print(sys.argv[1], dict(collections.Counter(json.loads(p.read_bytes())["status"] for p in pathlib.Path(sys.argv[1]).glob("*.json"))))' "$dir/$stage"
+    done
+done
+```
+
+重启服务器后，仅恢复缺失的角色。运行中的客户端会从已写入的逐条记录续跑。`backend` 会核对端口、权重、限载和物理卡，复用已有服务。端口空闲且有工作时，使用项目租约在 5、6 上部署同配置的推理服务。Qwen 在物理卡 3 按原批次编码，每批最多 2 条，duty 为 0.30，预留 2 GiB。Llama 服务串行处理请求，duty 为 0.28，每张卡预留 4608 MiB。保留其他 CUDA 进程及项目的全局租约约定。
+
+```bash
+for role in backend questions framed prepare read policy; do
+    unit="memskill-251-exchange-$role"
+    systemctl --user is-active --quiet "$unit" && continue
+    args=("$role")
+    [[ $role != questions ]] || args=(questions strict)
+    [[ $role != framed ]] || args=(questions framed)
+    systemd-run --user --collect --unit="$unit" -p Restart=on-failure -p RestartSec=45 \
+        --working-directory="$PWD" bash "$PWD/scripts/experiments/run_exchange_credit_251.sh" "${args[@]}"
+done
+```
+
+每条接受的问题保留真实回复和替换回复的缓存凭据、两种技能的原始轨迹哈希和读者上下文。有原始问答响应但状态为 `control_parity_failed` 的条目记入覆盖分母并给零训练权重。`outcomes/` 的 `reads` 可核对实际答案、F1 和消耗的 token。`policy/{pilot,breadth,full}/fit.json` 给出有效数与分母，`later/`、`replica/` 和 `long-prefix/` 给出各自的配对诊断。
