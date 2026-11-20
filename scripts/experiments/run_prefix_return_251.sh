@@ -10,6 +10,7 @@ history=("$work/study-equal-sources-gpu" "$LOCOMO_DATA" "$base")
 inputs=("$work/study-equal-sources-gpu" "$work/study-linked-eight-gpu" "$LOCOMO_DATA" "$base")
 runner=(python3 "$guard" run --gpus 0 -- "$MEMSKILL_PYTHON" -m)
 prev=''
+prior_cross=-1
 while true; do
     n=$(find "$full" -mindepth 2 -maxdepth 2 -name measurement.json | wc -l)
     pairs=$(find "$late/outcomes" -mindepth 2 -maxdepth 2 -name pair.json | wc -l)
@@ -28,6 +29,16 @@ while true; do
         done
         prev="$n:$pairs"
     fi
-    [[ -s "$late/prefix-return/main/summary.json" && -s "$late/prefix-return/pilot/summary.json" && -s "$late/rank-return/main/summary.json" && -s "$late/rank-return/pilot/summary.json" ]] && exit 0
+    cross="$late/cross-window-prefix"
+    if [[ -s "$late/rank-return/main/forecast.json" && -s "$cross/manifest.json" ]]; then
+        measured=$(find "$cross" -mindepth 2 -maxdepth 2 -name pair.json | wc -l)
+        if [[ "$measured" != "$prior_cross" ]]; then
+            "${runner[@]}" experiments.controller.audit_cross_window "$late"
+            prior_cross=$measured
+        fi
+    fi
+    if [[ -s "$late/prefix-return/main/summary.json" && -s "$late/prefix-return/pilot/summary.json" &&
+          -s "$late/rank-return/main/summary.json" && -s "$late/rank-return/pilot/summary.json" &&
+          ( ! -s "$cross/manifest.json" || -s "$cross/main-crossfit/summary.json" ) ]]; then exit 0; fi
     sleep 45
 done
