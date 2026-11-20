@@ -3,6 +3,7 @@
 import argparse
 import math
 import os
+import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -181,6 +182,16 @@ def build(trainer, convo, folder, archive, specs, forecast, mass):
     }
 
 
+def reader_backend_matches(screen_backend, archive_backend, actual):
+    # The source-only fit can use another physical card. Replay must match the archived writer and encoder.
+    def without_encoder_device(value):
+        return re.sub(r"-qwen[0-7]-", "-qwen-", value, count=1)
+
+    return actual == archive_backend and without_encoder_device(
+        actual
+    ) == without_encoder_device(screen_backend)
+
+
 def prepare(trainer, study, forecast_path, train, specs):
     archive = forecast_path.parent / "factorial"
     root = forecast_path.parent / "turn-keys"
@@ -194,7 +205,9 @@ def prepare(trainer, study, forecast_path, train, specs):
         or panel["protocol"] != screen["protocol"]
         or panel["forecast"] != file_hash(forecast_path)
         or forecast["manifest"] != file_hash(root / "manifest.json")
-        or screen["backend"] != os.environ["MEMSKILL_BACKEND_ID"]
+        or not reader_backend_matches(
+            screen["backend"], panel["backend"], os.environ["MEMSKILL_BACKEND_ID"]
+        )
     ):
         raise ValueError("Different frozen panel, retriever or writer")
     data = {c["sample_id"]: c for c in train}
@@ -213,7 +226,8 @@ def prepare(trainer, study, forecast_path, train, specs):
         inputs = {
             "measurement": file_hash(before),
             "forecast": file_hash(root / "forecast.json"),
-            "backend": screen["backend"],
+            "backend": panel["backend"],
+            "source_screen_backend": screen["backend"],
         }
         receipt = path / "jobs.json"
         if receipt.exists():

@@ -193,4 +193,4 @@ bash scripts/experiments/paired_holdout.sh
 
 251 上的 `memskill-251-turn-key-screen` 运行 `scripts/experiments/run_turn_keys_251.sh`。GPU 0 上的 Qwen 编码批大小为 2，占空比为 30%，按当时的空闲显存保留至少 2048 MiB。六条完整训练对话都处理完之后，`~/memskill-work/runs/paired-251-linked-eight/source-compression/turn-keys/` 下的 `forecast.json` 保存留一对话拟合与选技修正，`screen.json` 和 `screen-summary.json` 保存分对话及分题型的检索统计。
 
-`memskill-251-turn-key-reader` 运行 `scripts/experiments/run_turn_key_reader_251.sh`。受 GPU 0 租约保护的准备任务重建已完成窗口的真实记忆库。每个窗口的 `reader/<窗口>/jobs.json` 原子落盘后，评分任务即通过已有的 7 号卡 Llama 服务生成变化的提示，服务占空比为 22%。`pair.json` 保存逐题读入内容的指纹、答案、F1 和用量，同目录的 `usage.jsonl` 记录新调用。`reader-through-N.json` 保存按预登记顺序完成的前 N 个窗口，全部完成才产生 `reader-summary.json`。248 的 `memskill-248-pull-linked-eight` 定期收回整个目录。
+`memskill-251-turn-key-reader` 运行 `scripts/experiments/run_turn_key_reader_251.sh`。准备任务通过 GPU 1 租约重建真实记忆库，与原始四路径归档使用同一张编码卡。源端概率拟合固定在 GPU 0 的已有结果；回执分别记录两个后端，逐题核对原始检索排名、答案和 token 数。每个窗口的 `reader/<窗口>/jobs.json` 原子落盘后，评分任务即通过已有的 7 号卡 Llama 服务生成变化的提示，服务占空比为 22%。`pair.json` 保存逐题读入内容的指纹、答案、F1 和用量，同目录的 `usage.jsonl` 记录新调用。`reader-through-N.json` 保存按预登记顺序完成的前 N 个窗口，全部完成才产生 `reader-summary.json`。248 的 `memskill-248-pull-linked-eight` 定期收回整个目录。
