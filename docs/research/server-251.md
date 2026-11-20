@@ -479,3 +479,29 @@ done
 ```
 
 每条接受的问题保留真实回复和替换回复的缓存凭据、两种技能的原始轨迹哈希和读者上下文。有原始问答响应但状态为 `control_parity_failed` 的条目保留在该 session 的尝试分母中，辅助原始效应和选技信用都记零。`outcomes/` 的 `reads` 可核对实际答案、F1 和消耗的 token。`policy/{pilot,breadth,full}/fit.json` 给出有效数与分母，`later/`、`replica/` 和 `long-prefix/` 给出各自的配对诊断。
+
+### 问题向量迁移与早期标签复核
+
+`source-compression/query-displacement` 保存 179 道供样问题和 135 个不同来源 session。问题编码按对话分批，读取 `encoded.json` 所绑定的 `queries_by_history.npz`。物理卡 3 每批至多 2 条，编码 duty 为 0.30，保留 2 GiB 显存。完成后在同一卡上冻结全部目标和对照策略。`full/donors.json` 对应 452 条逐题观测；`full/mechanism.json` 记录各跨度与对照的可投票案例、方向反转数及需编码的条目数。`full/held-query-audit.json` 给出预测排名误差。`full/capacity/` 随真实轨迹增加而更新，每份上限都绑定其逐窗口来源。`prior-capacity/` 保存开始时原始奖励策略的参照快照。
+
+`source-compression/legacy-terminal-symmetry` 独立复核来自更早的 5 条末段标签。每条写入、编码和读者结果位于 `writers/`、`prepared/` 和 `outcomes/`。复核使用与自然问答实验相同的 5、6 双卡低负载写入与阅读服务，物理卡 3 负责 Qwen。终态中 `confirmed` 表示两侧回答复现且较弱动作的三项修补均未恢复，其他状态给出实际排除原因。248 的 `linked-eight-gpu/logs/` 保存两个目录的镜像。
+
+在 251 上恢复这两组任务的命令如下。各角色按已落盘的数据续跑。
+
+连续权重版本另存于 `query-displacement/support-mass/full/`。两种版本均在 `direction-capacity/` 保存固定预测方向后的上限，在 `later/through-07.json` 保存同一批 61 题的配对训练诊断。完整后期、四路径复测和长前缀报告均生成后才判断能否进入独立开发集。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+for role in encode policy mass writers prepared outcomes; do
+    case $role in
+        encode) unit=memskill-251-query-displacement-encode; worker=run_query_displacement_251.sh ;;
+        policy) unit=memskill-251-query-displacement; worker=run_query_displacement_251.sh ;;
+        mass) unit=memskill-251-query-support-mass; worker=run_query_displacement_251.sh ;;
+        *) unit="memskill-251-legacy-terminal-$role"; worker=run_legacy_terminal_251.sh ;;
+    esac
+    systemctl --user is-active --quiet "$unit" && continue
+    systemd-run --user --collect --unit="$unit" -p Restart=on-failure -p RestartSec=40 \
+        --working-directory="$PWD" bash "$PWD/scripts/experiments/$worker" "$role"
+done
+```

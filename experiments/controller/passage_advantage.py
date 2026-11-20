@@ -342,7 +342,16 @@ def summarize_panel(panel, full, arms=ARMS):
     return stats
 
 
-def evaluate(base, study, corpus, path, *, final_stage="witness", gate_controls=None):
+def evaluate(
+    base,
+    study,
+    corpus,
+    path,
+    *,
+    final_stage="witness",
+    gate_controls=None,
+    required_prefix=None,
+):
     trial = path.parent
     primary = base / "late-pairs"
     src = base / "source-compression"
@@ -445,6 +454,8 @@ def evaluate(base, study, corpus, path, *, final_stage="witness", gate_controls=
             register(out / "summary.json", result)
     later = trial / "later/summary.json"
     replica = trial / "replica/summary.json"
+    if required_prefix is not None and not required_prefix.is_file():
+        return
     if trial.name == final_stage and later.exists() and replica.exists():
         a = read(later)["all"]
         strict = read(later)["strict"]
@@ -476,6 +487,11 @@ def evaluate(base, study, corpus, path, *, final_stage="witness", gate_controls=
             {
                 "later": file_hash(later),
                 "replica": file_hash(replica),
+                **(
+                    {"prefix": file_hash(required_prefix)}
+                    if required_prefix is not None
+                    else {}
+                ),
                 "eligible_for_development": ok,
             },
         )
