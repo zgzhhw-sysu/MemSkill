@@ -244,7 +244,8 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial"])
+    parser.add_argument("--study-forecast", type=Path, help="Frozen training-only probabilities for four-path evaluation")
     parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
                         help="Last session of the completed training panel for the weaker-branch audit")
@@ -276,6 +277,8 @@ def main():
         parser.error("--study-probe-completed checks the whole training protocol")
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
+    if (options.study_phase == "training-factorial") != bool(options.study_forecast):
+        parser.error("--study-forecast is required exclusively for training-factorial")
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
     if (args.dataset != "locomo" or not args.api or args.enable_designer or not args.eval_f1_only
@@ -300,6 +303,15 @@ def main():
     set_seed(args.seed)
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
+    if options.study_phase == "training-factorial":
+        if args.device != "cuda" or not config.share_serial_encoders or torch.cuda.device_count() != 1:
+            parser.error("training-factorial requires a single leased GPU and serial encoders")
+        free, total = torch.cuda.mem_get_info()
+        budget = min(int(total * .76), free - 2048 * 2**20)
+        if budget < 2304 * 2**20:
+            raise RuntimeError("Insufficient free memory for the bounded factorial encoder")
+        torch.cuda.set_per_process_memory_fraction(budget/total)
+        print(f"Training factorial CUDA allocator limit {budget//2**20} MiB", flush=True)
     trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
     equal_sources = options.study_equal_sources or saved_protocol.get("equal_sources", False)
@@ -341,6 +353,12 @@ def main():
                 temporary.replace(path)
         else:
             raise ValueError("Run training first")
+    if options.study_phase == "training-factorial":
+        from experiments.controller.factorial_rollout import run
+        from src.rag_utils import reuse_qwen_retriever
+        with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
+            run(trainer, out, options.study_forecast, train, specs)
+        return
     if options.study_phase == "replay-validation-choices":
         from experiments.controller.replay_validation_choices import replay
         if options.study_reference is None:
