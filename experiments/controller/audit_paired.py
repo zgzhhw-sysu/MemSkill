@@ -389,13 +389,19 @@ if __name__ == "__main__":
     parser.add_argument("--arms", nargs="+", default=["native","terminal","credit"])
     parser.add_argument("--select-for-test", action="store_true",
                         help="Check the required development controls and publish selection.json before opening held-out data")
+    parser.add_argument("--stdout-only", action="store_true", help="Recompute a comparison without replacing an archived report")
     args = parser.parse_args()
     if args.select_for_test and args.phase != "validation":
         parser.error("--select-for-test requires validation")
+    if args.select_for_test and args.stdout_only:
+        parser.error("--select-for-test publishes a decision and cannot use --stdout-only")
     arms = ["native", "terminal", "credit", "always", "rate"] if args.select_for_test else args.arms
     if args.select_for_test and read(args.directory / "protocol.json").get("equal_sources"):
         arms.append("plain")
     result = audit(args.directory, args.dataset, args.phase, arms)
+    if args.stdout_only:
+        print(json.dumps(result, indent=2))
+        raise SystemExit(0)
     filename = "comparison-with-count.json" if "count" in arms else "comparison.json"
     if args.select_for_test:
         result["selection"] = development_decision(result)
