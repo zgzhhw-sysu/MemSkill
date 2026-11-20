@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import torch
 
 from experiments.controller.capped_source_policy import (
+    intersect_probes,
     probabilities,
     surviving_credit,
     targets,
@@ -143,6 +144,37 @@ class CappedSourceTests(unittest.TestCase):
         self.assertEqual(surviving_credit(1.0, partial, good, truth), 0.0)
         self.assertEqual(surviving_credit(1.0, good, weak, truth), 0.0)
         self.assertEqual(surviving_credit(0.0, weak, good, truth), 0.0)
+
+    def test_two_writer_probes_intersect_per_question_before_averaging(self):
+        ids = [15, 28, 97]
+        credits = [0.0, 0.5, -0.5]
+        probes = [
+            {
+                "qa_index": 1,
+                "original_index": 28,
+                "original_credit": 0.5,
+                "matched": True,
+                "status": "retained",
+                "credit": 0.25,
+            },
+            {
+                "qa_index": 2,
+                "original_index": 97,
+                "original_credit": -0.5,
+                "matched": True,
+                "status": "same_skill_recovery",
+                "credit": 0.0,
+            },
+        ]
+        self.assertEqual(intersect_probes(ids, credits, probes), [0.0, 0.25, 0.0])
+        for bad in (
+            probes[:1],
+            [probes[0], dict(probes[1], credit=-0.5)],
+            [probes[0], dict(probes[1], original_index=28)],
+            [dict(probes[0], credit=-0.2), probes[1]],
+        ):
+            with self.assertRaises(ValueError):
+                intersect_probes(ids, credits, bad)
 
     def test_mask_preserves_sample_weight_and_other_targets(self):
         w = {

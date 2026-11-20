@@ -117,6 +117,76 @@ def baseline(base, registered):
     return all_rows, contrasts, evidence
 
 
+def intersect_probes(ids, credits, measured):
+    updated = list(credits)
+    seen = set()
+    for row in measured:
+        i = row["qa_index"]
+        if (
+            not 0 <= i < len(ids)
+            or i in seen
+            or ids[i] != row["original_index"]
+            or not row["matched"]
+            or not credits[i]
+            or row["original_credit"] != credits[i]
+        ):
+            raise ValueError(
+                "Writer-block receipt differs from the original question credit"
+            )
+        retained = row["credit"]
+        if retained * credits[i] < 0 or abs(retained) > abs(credits[i]):
+            raise ValueError(
+                "A competing writer repair cannot add or reverse selection credit"
+            )
+        if row["status"] == "same_skill_recovery" and retained != 0:
+            raise ValueError("A verified same-skill recovery must veto extra credit")
+        seen.add(i)
+        updated[i] = retained
+    if seen != {i for i, v in enumerate(credits) if v}:
+        raise ValueError(
+            "A nonzero early terminal credit lacks its writer-block control"
+        )
+    return updated
+
+
+def joint_evidence(base, original, contrasts):
+    source = base / "source-compression"
+    checks = source / "writer-block-repair/credit"
+    ledger = read(checks / "summary.json")["files"]
+    checked, paired = [], []
+    for obs, (w, bits, credits) in zip(original, contrasts, strict=True):
+        verified = credits
+        if obs["early"] and obs["stage"] == 1:
+            name = w["name"]
+            path = checks / (name + ".json")
+            report = read(path)
+            if file_hash(path) != ledger[name] or report["repairs"] != file_hash(
+                source / "factorial-repairs" / (name + ".json")
+            ):
+                raise ValueError("Writer-block audit or original probe changed")
+            fixed_prefix = int(bits[0][0])
+            if bits != [f"{fixed_prefix}0", f"{fixed_prefix}1"]:
+                raise ValueError("Expected the two suffixes after the same prefix")
+            rows = [
+                r
+                for g in report["groups"]
+                if g["prefix"] == fixed_prefix
+                for r in g["questions"]
+            ]
+            verified = intersect_probes(w["questions"], credits, rows)
+        checked.append(dict(obs, credit=mean(verified)))
+        paired.append((w, bits, verified))
+    plan = Path(__file__).with_name("protocols") / "joint_source_credit.json"
+    return (
+        checked,
+        paired,
+        {
+            "writer_blocks": file_hash(checks / "summary.json"),
+            "joint_plan": file_hash(plan),
+        },
+    )
+
+
 def cell_scores(base, out, w, bits, corrected):
     physical = archive(base, w["panel"]) / w["name"] / bits / "scores.json"
     if file_hash(physical) != w["cells"][bits]["scores"]:
@@ -238,7 +308,7 @@ def evaluate(dest, late, assignments, models, weights, before, stage):
         all_stats, strict = metrics(panels), metrics(fresh)
         passed = False
         if (
-            stage == "repaired"
+            stage == "joint-repaired"
             and not donor
             and len(panels) == 40
             and all_stats["questions"] == 378
@@ -296,10 +366,18 @@ def run(base, study, corpus):
     mask = targets(base, out, original, contrasts, truths)
     weights = read(late / "frozen.json")["terminal"]
     assignments = read(late / "cohort.json")["assignments"]
-    for stage in ("mask", "repaired"):
-        chosen = mask
-        identity = dict(evidence)
-        if stage == "repaired":
+    verified, joint_contrasts, joint_inputs = joint_evidence(base, original, contrasts)
+    joint_mask = targets(base, out, verified, joint_contrasts, truths)
+    for stage in ("mask", "joint-mask", "repaired", "joint-repaired"):
+        joint = stage.startswith("joint-")
+        rows, comparisons, provisional = (
+            (verified, joint_contrasts, joint_mask)
+            if joint
+            else (original, contrasts, mask)
+        )
+        chosen = provisional
+        identity = dict(evidence, **(joint_inputs if joint else {}))
+        if stage.endswith("repaired"):
             path = out / "complete.json"
             if not path.exists():
                 continue
@@ -308,13 +386,14 @@ def run(base, study, corpus):
                 w["name"] + "/" + b for w, b in affected(manifest)
             }:
                 raise ValueError("Incomplete physical repair coverage")
-            chosen = targets(base, out, original, contrasts, truths, checked["scores"])
+            chosen = targets(base, out, rows, comparisons, truths, checked["scores"])
             identity["measured"] = file_hash(path)
         dest = out / "policy" / stage
         dest.mkdir(exist_ok=True, parents=True)
         models = {
             (sid, j): tuple(
-                support(rows, sid, j, "cuda") for rows in (chosen, original, mask)
+                support(rows, sid, j, "cuda")
+                for rows in (chosen, original, provisional)
             )
             for sid in sorted(spec["train"])
             for j in (0, 1)

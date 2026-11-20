@@ -89,7 +89,7 @@ def register_models(dest, root, output):
     return records, {k: v["fits"]["pilot"] for k, v in pilot.items()}, receipt
 
 
-def score_pair(root, w, r, weights, old, new):
+def verified_decision(root, w, r, versions=None):
     if r["dialogue"] != w["dialogue"] or r["end"] != w["end"] or r["held"] != w["held"]:
         raise ValueError("Mismatched long-prefix window")
     decisions = []
@@ -107,7 +107,20 @@ def score_pair(root, w, r, weights, old, new):
                 if (e := json.loads(line))["kind"] == "span"
             ]
         )
-    current = compare_prefixes(decisions, events, w["background"])
+    if versions is not None:
+        for (actions, _, _), spans in zip(decisions, events, strict=True):
+            for action, span in zip(actions, spans, strict=True):
+                low, high = action["plain"], action["grounded"]
+                picked = high if action["use"] else low
+                if (len(low) != 3 or len(high) != 3 or low[:2] != high[:2]
+                        or len(set(low)) != 3 or len(set(high)) != 3 or low[-1] == high[-1]
+                        or [versions[i] for i in picked] != [s["version"] for s in span["selected_skills"]]):
+                    raise ValueError("Long-prefix action differs from its fixed three ordered slots")
+    return compare_prefixes(decisions, events, w["background"])
+
+
+def score_pair(root, w, r, weights, old, new):
+    current = verified_decision(root, w, r)
 
     def probs(fits):
         return probabilities(current, w["background"][-1], r["features"], weights, fits)

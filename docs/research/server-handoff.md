@@ -211,3 +211,7 @@ systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experimen
 251 已在 conv-43 第 112 题实测出同技能修复使 F1 从 0 变为 1。查看 `logs/source-compression/capped-source-credit/conv-43_s11/01/questions/112.json` 的原答案和重测答案，邻近的 `inputs.json` 和 `writes.json` 保存检索输入、记忆版本及写入记录。检查同级 `complete.json` 确认 36 次分支问答全部到齐，再读取 `policy/repaired/` 的策略结果。策略对照的主要指标是目标 span 选择概率及其加权 F1，同时检查按对话的得分、等频对照、终局奖励对照和置信区间。独立开发和完整测试的准入条件见登记协议。[运行与断点恢复](server-251.md) · [控制器实验协议](../../experiments/controller/protocols/capped_source_credit.json)
 
 conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0.15714，换技能的原始平均优势从 0.21464 缩到 0.05750。临时将受影响的训练比较置零后，88 题回算的期望 F1 为 0.47455，原生为 0.47451，终局策略为 0.47981。正式目标仍待跨对话和独立数据检验。
+
+后续晋级依据使用 `policy/joint-repaired` 和 `rank-allocation/joint-repaired`。两者都逐题应用已测出的写入格式和截断修复。旧目录 `policy/mask` 中 conv-43 的两条历史负信用后来已被同技能修复否决。新的 `fit.json` 包含每个外层目标对话、内层供样历史和阈值，`calibration/summary.json` 是 88 题回算，`later/through-*.json` 中的 `strict` 只统计数值冻结后才出分的窗口。[251 恢复命令](server-251.md)
+
+排序版会继续处理 `rank-allocation/{joint-mask,joint-repaired}/long-prefix/`。这里的 `registration.json` 绑定 99 个端点、185 个跨 session 的问题和冻结时已经有分数的分支，每个端点有独立回执。88 题上的平均选技概率变化已达到 6.14 个百分点，F1 为 0.47301；信用相对只用回报增加 0.00071，整体仍低于原生 0.47451。后续要检查新出分窗口及跨 session 问题上的收益能否重复。
