@@ -349,3 +349,15 @@ systemd-run --user --collect --unit="memskill-251-capped-source-$role" --propert
 ```
 
 `registration.json` 固定原始路径与题目；`complete.json` 要求五条路径都完成同技能重测。`policy/{mask,repaired}/fit.json` 给出训练输入及拟合参数；`preexisting.json` 列出冻结时已经出分的路径。`calibration/summary.json` 是 88 题跨历史回算；`later/through-*.json` 同时列出当前全部窗口及在冻结后才出分的窗口。248 的 linked-eight 镜像定期回收该目录。
+
+### 使用率相同的信用排序实验
+
+`memskill-251-credit-rank-allocation` 复用已核验的 251 实际写入与问答记录，在物理 GPU 1 的租约中拟合，各阶段仅在父模型就绪或新配对窗口落盘时运行。结果位于 `source-compression/capped-source-credit/rank-allocation/{joint-mask,joint-repaired}/`。同级 `policy/{joint-mask,joint-repaired}/` 保存相同标签下按原核回归直接改变概率的对照。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+systemctl --user status memskill-251-credit-rank-allocation memskill-251-capped-source-policy
+# 单元已退出且完整后期汇总还未生成时恢复
+systemd-run --user --collect --unit=memskill-251-credit-rank-allocation --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_credit_rank_251.sh"
+```

@@ -21,7 +21,7 @@ if [[ ! -s "$out/registration.json" ]]; then
 fi
 if [[ $mode == policy ]]; then
     last=''
-    until [[ -s "$out/policy/repaired/later/summary.json" ]]; do
+    until [[ -s "$out/policy/joint-repaired/later/summary.json" ]]; do
         state=$(python3 - "$base" "$out" <<'PY'
 from pathlib import Path
 import sys
