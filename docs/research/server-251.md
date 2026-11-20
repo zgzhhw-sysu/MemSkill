@@ -14,7 +14,7 @@ python3 deploy/gpu_guard.py status
 
 训练集有 24 个两段 session 的窗口。每个窗口完整写入后发布 `rows.json`。两路训练退出后，同一服务评估开发集及各对照，开发筛选通过才运行两套正式测试。GPU 租约关闭后守护按显存余量恢复有限占用。
 
-独立的 `memskill-251-source-compression` 服务读取 22:06 冻结的选技概率，等第 5 至 8 个 session 的 12 个窗口全部完成后，使用 GPU 2 对照逐 span 的换技结果。`memskill-251-training-factorial` 在 GPU 1 上以单个 Qwen 模型、每批两条编码，GPU 7 的 Llama BF16 以 22% 目标占空比分别对四种选技顺序建库并回答问题。该单卡服务端口为 18774，结果保存在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/factorial/`。248 的回收服务每五分钟同步完整窗口及反馈，等主训练、来源概率核对、四路径、条件选技、问题原型、写入分解、后续配对及其复核八项服务全部退出后再做最后一次同步。
+独立的 `memskill-251-source-compression` 服务读取 22:06 冻结的选技概率，等第 5 至 8 个 session 的 12 个窗口全部完成后，使用 GPU 2 对照逐 span 的换技结果。`memskill-251-training-factorial` 在 GPU 1 上以单个 Qwen 模型、每批两条编码，GPU 7 的 Llama BF16 以 22% 目标占空比分别对四种选技顺序建库并回答问题。该单卡服务端口为 18774，结果保存在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/factorial/`。248 的回收服务每五分钟同步完整窗口及反馈，等主训练、来源概率核对、四路径、条件选技、问题原型、写入分解、后续配对、配对复核及条件概率校准九项服务全部退出后再做最后一次同步。
 
 第 9 个 session 以后的 52 个已登记窗口位于 `~/memskill-work/runs/paired-251-linked-eight/late-pairs/`。`memskill-251-late-pairs` 先在原 18774 串行服务上运行第一对完整干预。原 12 个四路径窗口收齐并归还 7 号卡后，它按相同模型、精度和 22% 目标占空比继续剩余窗口。真实轨迹由 2 号卡编码，每批最多两条，保留 2048 MiB 显存余量；窗口间交还编码租约。`memskill-251-audit-late-pairs` 在 0 号卡上复核实际记忆选择、概率、逐题 F1 和抽样权重。原方案与重采样方案分别在第一条新路径出分前冻结。调度脚本和复核脚本随代码发布。[配对调度](../../scripts/experiments/run_late_pairs_251.sh) · [逐窗口复核](../../scripts/experiments/audit_late_pairs_251.sh)
 
@@ -24,6 +24,10 @@ cd ~/memskill-work/runs/paired-251-linked-eight/late-pairs
 find outcomes -name pair.json | wc -l
 ls step-mixture/randomized-*.json
 ```
+
+用户服务 `memskill-251-prefix-return` 读取同一批真实轨迹，在 GPU 0 的短租约上拟合两种选技规则。结果分别写入 `late-pairs/prefix-return/` 和 `late-pairs/rank-return/`。每个目录的 `pilot/` 保存两条对话拟合的参数、冻结时间及当时已出分的文件。四路径收满 12 个窗口后，服务自动生成 `main/forecast.json`，含六套留一对话参数及一套全训练参数。查看 `progress-*.json` 的 `four_path_prospective` 和 `paired_prospective` 可区分数值冻结后的窗口。248 的回收服务等待这一服务和原有八项服务全部退出再做最后一次同步。[运行入口](../../scripts/experiments/run_prefix_return_251.sh)
+
+为尽早取得冻结后第一条先导留出对话的配对结果，一次性任务 `memskill-251-prefix-early-pairs` 在同一串行 18774 服务上，按既定次序补跑第 2 和第 3 个窗口。它只申请 GPU 2 的编码租约，生成端沿用 22% 目标占空比。三窗合计 18 题。主六对话交叉拟合在后面冻结时会将已经出分的前缀排除出严格前瞻估计，现有物理分配与提问顺序均可从 `late-pairs/cohort.json` 复核。
 
 ## 前序实验记录
 
