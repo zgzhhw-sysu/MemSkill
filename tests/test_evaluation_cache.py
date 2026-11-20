@@ -8,12 +8,36 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+import torch
 
 from src.evaluation_cache import encode_batch, history_embeddings, publish_response, read_response, response_path
 from src.llm_utils import get_llm_response_via_api
 
 
 class EvaluationCacheTest(unittest.TestCase):
+    def test_encoder_duty_limits_each_forward_and_preserves_order(self):
+        class Encoder(torch.nn.Module):
+            device = torch.device("cuda")
+
+            def __init__(self):
+                super().__init__()
+                self.transformer = torch.nn.Identity()
+
+            def encode(self, texts, *, batch_size, convert_to_numpy):
+                values = torch.tensor([ord(t) for t in texts])
+                return torch.cat([self.transformer(b) for b in values.split(batch_size)]).numpy()
+
+        model = Encoder()
+        with patch.dict(os.environ, MEMSKILL_ENCODER_DUTY=".25", MEMSKILL_ENCODER_MAX_BATCH="2"), \
+                patch("torch.cuda.synchronize") as sync, \
+                patch("src.evaluation_cache.time.monotonic", side_effect=[0., 2., 10., 11.]), \
+                patch("src.evaluation_cache.time.sleep") as sleep:
+            vector = encode_batch(model, ["c", "a", "b"], 256)
+        np.testing.assert_array_equal(vector, [99, 97, 98])
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [6., 3.])
+        self.assertEqual(sync.call_count, 4)
+        self.assertFalse(model.transformer._forward_hooks or model.transformer._forward_pre_hooks)
+
     def test_history_embeddings_require_identical_order_model_and_options(self):
         class Encoder:
             def encode(self, texts, **kwargs):
