@@ -2,7 +2,7 @@
 
 251 已接续 248 的训练。两台机器的 Python 均为 3.12.12，配对实验所用的 109 个 Python 依赖逐项版本一致。目标机的代码在 `~/memskill-work/MemSkill`，训练断点和模型路径见 [251 运行说明](server-251.md)。
 
-10:04，等来源策略另开了 GPU 编码训练。GPU 3、4 按窗口分工，GPU 5、6 提供限载生成。独立的 CPU 编码候选已进入完整 LoCoMo 测试，生成使用 GPU 7；其权重、开发结果和测试清单在首个测试任务前已核验并登记。查看 `systemctl --user status memskill-251-equal-gpu memskill-251-cpu-anchor-confirmation` 可分别追踪新训练和完整测试。
+当前从 `study-equal-sources-gpu` 续跑。GPU 3、4 按窗口分工，GPU 5、6 提供限载生成。CPU 编码的正式复核和外部开发作业已停止，保留原冻结清单、已有模型响应及已落盘的历史。GPU 候选单独完成开发筛选后，再运行完整 LoCoMo 和 LongMemEval-S。服务为 `memskill-251-equal-gpu`，训练、开发及通过筛选后的正式日志在 `~/memskill-work/runs/paired-251-equal-gpu/`。
 
 11 月 20 日 09:55，原候选队列已结束。训练写入与部署对齐的版本收齐 12 个窗口，但在两段开发对话上，信用、固定活动技能、匹配使用率三组同为 0.32039。原队列的三个候选均未通过。另登记一轮 CPU 编码策略的独立复核，其六组开发结果和四份冻结输入已有指纹。两套正式测试沿用此前清单，共 314 道可评分 LoCoMo 题和 105 条独立 LongMemEval-S 历史。结果无论正负均报告。[CPU 复核登记](../../experiments/controller/protocols/cpu_anchor_holdout.json)
 

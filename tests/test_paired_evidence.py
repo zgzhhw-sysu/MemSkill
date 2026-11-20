@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+import numpy as np
 import torch
 from itertools import permutations
 from pathlib import Path
@@ -73,7 +74,9 @@ class ReaderEvidenceTest(unittest.TestCase):
         windows = [{"dialogue": str(i), "start": j, "n": i+2, "state": [[v], [-v]],
                     "f1": dict(scores, **{"10": .8 if v > 0 else .1, "01": .1 if v > 0 else .8})}
                    for i in range(6) for j, v in ((1, 1.), (3, -1.))]
-        study = compare_granularity(windows)
+        for window in windows:
+            window["f1"] = {key: np.float64(value) for key, value in window["f1"].items()}
+        study = json.loads(json.dumps(compare_granularity(windows)))
         self.assertTrue(study["advance_to_full_writer_probes"])
         self.assertEqual(study["positive_conditional_folds_vs_uniform"], 6)
         self.assertAlmostEqual(study["aggregate"]["slot"]["given_one_f1"], .45)

@@ -1,6 +1,10 @@
 # 251 上的配对实验
 
-CPU 编码的冻结信用组另做 LongMemEval-S 独立验证。服务 `memskill-251-transfer-validation` 使用原 40% 占空比的生成服务，实时进度在 `~/memskill-work/runs/paired-251-external-validation/client.log`，历史断点在 `~/memskill-work/study-anchor/longmemeval-validation/`。正式候选选定并运行时，这组补充验证让出生成资源。17 条验证历史均按完整会话执行，首次运行前记录权重、协议、验证决定及样本清单的 SHA-256。
+自 11 月 20 日 10:13 起，模型实验统一走 CUDA。等来源训练由 GPU 3、4 编码和检索，GPU 5、6 做写入与问答。训练、开发及通过筛选后的完整测试均使用这套后端。配对启动脚本默认选择 CUDA，有限显存时在 GPU 租约处等待。CPU 负责 I/O、分词、调度和 F1 统计。
+
+旧 CPU 编码正式复核和两路外部开发作业已经停止，已有断点保留。等来源 CPU 训练保存了四个完整窗口，工作进程已暂停；其服务内的 18759 端口仍向 GPU 训练提供 5、6 号卡上的 Llama 生成。GPU 作业退出后一起释放该共享服务。查看当前工作使用 `systemctl --user status memskill-251-equal-gpu` 和 `python3 ~/memskill-work/deploy/gpu_guard.py status`。
+
+此前，CPU 编码的冻结信用组曾在 LongMemEval-S 独立开发集上运行。服务 `memskill-251-transfer-validation` 使用原 40% 占空比的生成服务，日志在 `~/memskill-work/runs/paired-251-external-validation/client.log`，历史断点在 `~/memskill-work/study-anchor/longmemeval-validation/`。原计划含 17 条完整历史，首次运行前已记录权重、协议、验证决定及样本清单的 SHA-256。
 
 研究工作区是 `~/memskill-work/MemSkill`，实验断点在 `~/memskill-work/study`，迁入的原始快照在 `~/span-credit-20261120`。独立环境 `~/memskill-work/venv` 使用 Python 3.12.12、PyTorch 2.10.0+cu128、Transformers 4.53.3 和 sentence-transformers 5.6.0。248 实际使用的配对实验依赖及其传递依赖共 109 个，已核对的版本在 [109 项环境清单](../../scripts/experiments/requirements-paired-cu128.txt)，目标机副本保存在 `~/memskill-work/deploy/requirements-248.txt`。研究数据的口径见[配对协议](span-credit-paired.md)。
 
@@ -99,7 +103,7 @@ source ~/memskill-work/deploy/env-251.sh
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 "$MEMSKILL_PYTHON" -m experiments.controller.audit_skill_embeddings \
     "$work/study-eight" "$CONTROLLER_CHECKPOINT" --development "$work/study-anchor" "$work/study-anchor-gpu"
 ```
-### 冻结 CPU 策略的完整测试
+### 已暂停的冻结 CPU 策略完整测试
 
 09:55 登记的 CPU 编码复核从原六组开发结果出发。运行器在读取测试对话前校验权重、开发报告、后端和两套测试清单，并将登记原文写入 `$STUDY_DIR/holdout/registration.json`。LoCoMo 六组完成后转入 LongMemEval-S，按照完整历史保存各组结果。两段 LoCoMo 对话共享各自的写入和检索历史，逐题差异须与逐对话结果一起解释。
 
@@ -118,4 +122,4 @@ bash scripts/experiments/paired_holdout.sh
 
 `memskill-251-equal-gpu` 通过 GPU 租约在 3、4 号卡分别执行正序和逆序训练窗口，Qwen 状态编码、技能编码及检索均使用对应的 GPU，生成请求共用 5、6 号卡的 BF16 服务。该实验以 `~/memskill-work/study-equal-sources-gpu` 保存独立的样本与权重。训练和开发时设置 `MEMSKILL_ENCODER_DUTY=.35` 和 `MEMSKILL_ENCODER_MAX_BATCH=2`，每批 Transformer 前向结束后同步当前设备，并按实际运行耗时休息。5、6 号卡生成服务继续使用 28% 占空比。每张卡的瞬时利用率会随前向和休息交替变化。
 
-启动前在两张卡上用相同的真实训练 span、同一检查点和九种技能分别做了 25% 和 35% 占空比的编码。四次运行的状态、技能向量、检索向量、两种有序动作及活动技能概率均一致。每卡的核对结果在 `~/memskill-work/runs/paired-251-equal-gpu/encoder-{3,4}.json`，工作日志为 `train-3.log` 和 `train-4.log`。原 CPU 策略的完整测试继续沿用选定时的 CPU 编码和 7 号卡生成配置。
+启动前在两张卡上用相同的真实训练 span、同一检查点和九种技能分别做了 25% 和 35% 占空比的编码。四次运行的状态、技能向量、检索向量、两种有序动作及活动技能概率均一致。每卡的核对结果在 `~/memskill-work/runs/paired-251-equal-gpu/encoder-{3,4}.json`，工作日志为 `train-3.log` 和 `train-4.log`。原 CPU 策略的复核已单独归档。

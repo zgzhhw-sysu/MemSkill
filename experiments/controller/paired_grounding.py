@@ -334,9 +334,11 @@ def main():
                                         deployment_writer=args.span_credit_deployment_writer)]
         with (out / "fit.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            terminal = fit_policy(rows, 0)
-            credit = fit_anchored_credit(rows, terminal) if protocol.get("anchor_abstentions") else fit_policy(rows, 1)
-            rate = match_training_probability(rows, terminal, credit)
+            with torch.device(args.device):
+                terminal = fit_policy(rows, 0)
+                credit = fit_anchored_credit(rows, terminal) if protocol.get("anchor_abstentions") else fit_policy(rows, 1)
+                rate = match_training_probability(rows, terminal, credit)
+            print(f"Fitted terminal, credit and rate policies on {credit.device}", flush=True)
             for arm, weights in (("terminal", terminal), ("credit", credit), ("rate", rate)):
                 with TemporaryDirectory(dir=out) as tmp:
                     temp = Path(tmp) / (arm + ".json")
