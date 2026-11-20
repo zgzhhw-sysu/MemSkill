@@ -45,6 +45,9 @@ def path_policies(decisions, forecast, terminal_weights, bits):
             "temporal": 0.0,
             "activity": 1.0,
         }
+        if "prefix_offsets" in pred:
+            node = 0 if i == 0 else 1 + bits[0]
+            current.update({key: logistic(base + values[node]) for key, values in pred["prefix_offsets"].items()})
         if "offsets" in pred:
             current["mixture"] = propensity(base, pred["weights"], pred["offsets"])
             current["mixture_permuted"] = propensity(base, pred["weights"], alternate["offsets"])
