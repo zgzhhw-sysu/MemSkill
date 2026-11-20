@@ -248,13 +248,19 @@ def forecast(base, study, corpus, stage):
     return existing
 
 
-def probabilities(d, m, terminal):
-    (bank, w, ys), offsets = m
+def anchor_logits(d, model, terminal):
+    bank, w, ys = model
     state = bank.new_tensor(d["state"])
     z = state.new_tensor(d["base_logit"])
     t = state.new_tensor(terminal)
     term = z + t[0] + t[1:] @ F.normalize(state, dim=0)
     raw = term + (kernel_effect(state[None], bank, w, ys)[0, 1] / 0.05).clamp(-2, 2)
+    return z, term, raw
+
+
+def probabilities(d, m, terminal):
+    model, offsets = m
+    z, term, raw = anchor_logits(d, model, terminal)
     return {
         k: float(v.sigmoid())
         for k, v in {
@@ -289,8 +295,8 @@ def matched_probabilities(logits, targets, weights):
     return (logits + (low + high) / 2).sigmoid()
 
 
-def report(panels):
-    a = summarize(panels, ARMS, "credit", ARMS[1:])
+def report(panels, arms=ARMS):
+    a = summarize(panels, arms, "credit", arms[1:])
     if not panels:
         return a
     by = defaultdict(list)

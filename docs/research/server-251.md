@@ -425,3 +425,25 @@ tail -n 8 "$o/four-paths/client.log"
 systemd-run --user --collect --unit=memskill-251-witness-passages --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_witness_passages_251.sh"
 systemd-run --user --collect --unit=memskill-251-witness-four-paths --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_witness_four_paths_251.sh"
 ```
+
+### 供样证据匹配、逐段收益和长前缀
+
+`memskill-251-passage-advantage` 计算新策略，分别核算首段概率变化和两个条件末段的贡献。`memskill-251-passage-prefix` 补齐长前缀所需的 7 个发言编码文件，逐题检查原始双臂回答、技能和记忆轨迹。`memskill-251-passage-reliability` 使用其他对话的四路径收益估计各供样题的可靠性。三者的数值计算均申请 1 号卡，进程使用至多 6% 显存并保留 2048 MiB 余量，密集匹配后等待三倍计算时长。补编码使用 4 号卡、batch 2 和 0.30 占空比。上述服务复用既有物理轨迹。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+o="$work/runs/paired-251-linked-eight/source-compression/witness-passages/evidence-advantage"
+systemctl --user status memskill-251-passage-{advantage,prefix,reliability}
+ls "$o/group"/{early,later,replica,long-prefix}/through-*.json
+ls "$o/case-reliability/group"/{early,later,replica,long-prefix}/through-*.json
+ls "$o/within-session"
+```
+
+单元退出后从上述运行目录恢复对应角色。已冻结预测、训练来源和结果会核对原有记录。
+
+```bash
+systemd-run --user --collect --unit=memskill-251-passage-advantage --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_passage_advantage_251.sh" local
+systemd-run --user --collect --unit=memskill-251-passage-prefix --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_passage_advantage_251.sh" prefix
+systemd-run --user --collect --unit=memskill-251-passage-reliability --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_passage_advantage_251.sh" case
+```

@@ -235,3 +235,9 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 当前模型计算位于 251；248 的用户服务 `memskill-248-pull-linked-eight` 定期收回逐题结果。新策略按目标对话留一，用训练时实际影响回答的读入文本匹配当前发言。已冻结的组级分支覆盖 128 个 session。五个后期窗口已收回 43 题，组级策略期望 F1 为 0.52568，原生为 0.51893。首次严格前瞻的 12 题上分别为 0.36041 和 0.35151，仅用回报为 0.36415，旋转标签为 0.40387。完整单名次干预和 378 题四路径面板尚在收集。本阶段读数仅用于训练诊断。[算法和分母](algorithm-notes.md)
 
 在 `source-compression/witness-passages/` 下，`group/forecast.json` 和 `witness/forecast.json` 分别保存两个阶段的预测；后者只在全部名次完成后生成。`group/later/` 是原随机两臂下的局部选技估计，`four-paths/cells/` 是另一套限载后端实测的四条完整路径，`four-paths/{group,witness}/` 是其整段策略估计。交接时保留原时间戳和各自的响应目录，恢复时对照注册文件；读取 `strict.questions` 可区分已有分数和预测冻结后的题数。[251 服务与恢复](server-251.md)
+
+### 按供样证据和案例可靠性选择技能
+
+251 新增了证据发言匹配、案例权重和长前缀核算。原版记忆匹配在 43 道后期题的期望 F1 为 0.52568，附加证据发言匹配得 0.51783，再按其他训练对话的实测收益衰减案例权重得 0.52263。完整前缀已分别冻结全部 99 个端点的预测，代表 185 道与局部面板不重复的问题。首个 10 题四路径复测窗口已完成，其原随机两臂的 20 个回答跨后端一致。仍在累积数据，尚未进入正式测试。[结果、对照与具体误判](algorithm-notes.md)
+
+在 `source-compression/witness-passages/evidence-advantage/` 下，`group/` 存放全部合格名次的结果，`witness/` 等待单名次干预完成，`case-reliability/{group,witness}/` 存放按案例加权的独立预测。各阶段的 `early`、`donor`、`replica` 给出实测四路径的整段期望收益，`calibration`、`later` 给出随机焦点收益，`long-prefix` 给出完整前缀最后一次选技的收益。阅读时同时查看 `strict.questions`、`all.questions` 和预测的 `exposure.json`。[运行入口](server-251.md)
