@@ -12,12 +12,14 @@ from experiments.controller.factorial_rollout import read
 from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import digest
 
-ALL = (*ARMS, "rate", "return_only", "native", "terminal")
+BASELINES = ("rate", "return_only", "native", "terminal")
 CHECKS = ("native", "terminal", "raw", "sham", "blind", "rate", "equal")
 
 
-def report(group, device):
-    summary, rows = evaluate_offsets(group, device, ALL, ARMS, CHECKS)
+def report(group, device, learned=ARMS, checks=CHECKS):
+    summary, rows = evaluate_offsets(
+        group, device, (*learned, *BASELINES), learned, checks
+    )
     if group:
         p = (
             [r["focal_probabilities"] for r in rows]
@@ -49,7 +51,15 @@ def gate(overall, fresh):
     )
 
 
-def audit(base):
+def audit(
+    base,
+    *,
+    experiment="evidence-transport",
+    stages=None,
+    learned=ARMS,
+    checks=CHECKS,
+    promotion=gate,
+):
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise RuntimeError("Select one capped CUDA device for evaluation")
     torch.cuda.set_per_process_memory_fraction(0.06)
@@ -58,8 +68,10 @@ def audit(base):
         w["window"]: w
         for w in read(src / "retrieval-competition/calibration.json")["windows"]
     }
-    dest = src / "evidence-transport"
-    for stage in ("pilot", "expanded"):
+    dest = src / experiment
+    if stages is None:
+        stages = {"pilot": (12, 52, False), "expanded": (0, 40, True)}
+    for stage, (early_total, late_total, primary) in stages.items():
         out = dest / stage
         donors = out / "donors.json"
         if not donors.exists():
@@ -103,12 +115,12 @@ def audit(base):
             folder.mkdir(exist_ok=True)
             stamp = digest([w["inputs"] for w in group])[:16]
             path = folder / f"through-{len(group):02d}-{stamp}.json"
-            total = 12 if panel == "factorial" else (52 if stage == "pilot" else 40)
+            total = early_total if panel == "factorial" else late_total
             if path.exists():
                 if len(group) == total and not (folder / "summary.json").exists():
                     register(folder / "summary.json", read(path))
                 continue
-            summary, rows = report(group, "cuda")
+            summary, rows = report(group, "cuda", learned, checks)
             result = {"donors": fingerprint, "all": summary, "windows": rows}
             if panel == "later":
                 later = [w for w in group if w["start"] >= 13]
@@ -117,8 +129,8 @@ def audit(base):
                     ("session13_plus", later),
                     ("strict_session13_plus", [w for w in later if w["strict"]]),
                 ):
-                    result[name], _ = report(subset, "cuda")
-                result["eligible_for_development"] = stage == "expanded" and gate(
+                    result[name], _ = report(subset, "cuda", learned, checks)
+                result["eligible_for_development"] = primary and promotion(
                     result["session13_plus"], result["strict_session13_plus"]
                 )
             register(path, result)

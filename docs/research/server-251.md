@@ -287,3 +287,16 @@ source ~/memskill-work/deploy/env-251.sh
 cd "$work/run-linked-questions-v1"
 python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.evidence_transport_capacity "$work/runs/paired-251-linked-eight"
 ```
+
+### 首段训练回报的模型辅助校正
+
+在 251 的 `~/memskill-work/runs/paired-251-linked-eight/source-compression/assisted-span-backup/` 中，`registration.json` 固定了实验方案及当时已有的物理分支，`masked-policy.json` 包含 64 种遮蔽分配下的实测策略结果。各阶段的 `donors.json`、`predictions/`、`factorial/` 和 `later/` 分别保存训练与代码指纹、数值预测、完整路径计分和随机计分。阶段名分别为 `interim`（45 道新增训练题）、`expanded`（88 道新增训练题）和 `resolved`（同 88 题的互补路径齐备）。各阶段只读取其指定训练题。守护由 251 的物理 GPU 1 计算，248 自动拉回。可用下列命令查询、恢复或复核。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+systemctl --user status memskill-251-assisted-span
+# 单元退出且任务未完成时恢复
+systemd-run --user --collect --unit=memskill-251-assisted-span --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_assisted_span_251.sh"
+python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.assisted_trial diagnose "$work/runs/paired-251-linked-eight" "$work/study-linked-eight-gpu" "$LOCOMO_DATA"
+```
