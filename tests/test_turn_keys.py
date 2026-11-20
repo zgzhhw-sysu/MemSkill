@@ -8,7 +8,12 @@ from experiments.controller.turn_key_credit import (
     offset,
     read_metrics,
 )
-from experiments.controller.turn_key_reader import live_keys, reorder, summarize
+from experiments.controller.turn_key_reader import (
+    live_keys,
+    reader_backend_matches,
+    reorder,
+    summarize,
+)
 from src.replay import dated_group_parts, dated_turn_groups
 
 
@@ -87,6 +92,18 @@ class TurnKeyTests(unittest.TestCase):
             ]
         )
         self.assertEqual(offset(model, [4.0, 5.0, 1.0]), 0.0)
+
+    def test_reader_replays_archive_on_original_card_with_frozen_source_fit(self):
+        source = "llama-duty22-gpu7-qwen0-shared-b2-duty30"
+        archive = "llama-duty22-gpu7-qwen1-shared-b2-duty30"
+        self.assertTrue(reader_backend_matches(source, archive, archive))
+        self.assertFalse(reader_backend_matches(source, archive, source))
+        self.assertFalse(
+            reader_backend_matches(source.replace("gpu7", "gpu5"), archive, archive)
+        )
+        self.assertFalse(
+            reader_backend_matches(source.replace("b2", "b4"), archive, archive)
+        )
 
     def test_f1_separates_index_effect_from_changing_skill_probability(self):
         arms = {
