@@ -99,3 +99,18 @@ source ~/memskill-work/deploy/env-251.sh
 CUDA_VISIBLE_DEVICES="" OMP_NUM_THREADS=1 "$MEMSKILL_PYTHON" -m experiments.controller.audit_skill_embeddings \
     "$work/study-eight" "$CONTROLLER_CHECKPOINT" --development "$work/study-anchor" "$work/study-anchor-gpu"
 ```
+### 冻结 CPU 策略的完整测试
+
+09:55 登记的 CPU 编码复核从原六组开发结果出发。运行器在读取测试对话前校验权重、开发报告、后端和两套测试清单，并将登记原文写入 `$STUDY_DIR/holdout/registration.json`。LoCoMo 六组完成后转入 LongMemEval-S，按照完整历史保存各组结果。两段 LoCoMo 对话共享各自的写入和检索历史，逐题差异须与逐对话结果一起解释。
+
+251 的服务为 `memskill-251-cpu-anchor-confirmation`，日志在 `~/memskill-work/runs/cpu-anchor-confirmation/` 和 `~/memskill-work/study-anchor/holdout/`。它复用 7 号卡的 18757 限载服务。该服务完成外部开发验证并退出后，复核程序可申请同一张卡，在 18760 端口以原 40% 占空比续跑。CPU 编码使用六线程。换机时先恢复开发快照和已完成的正式轨迹，准备好匹配的生成服务后运行以下命令。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+export STUDY_DIR="$work/study-anchor" MEMSKILL_DEVICE=cpu CUDA_VISIBLE_DEVICES=""
+export OMP_NUM_THREADS=6 MKL_NUM_THREADS=6 OPENBLAS_NUM_THREADS=1
+export MEMSKILL_BACKEND_ID=251-hf-llama3-bf16-pre16-duty40-qwen-cpu-fp16
+export MEMSKILL_API_BASE=http://127.0.0.1:18757/v1
+export MEMSKILL_HOLDOUT_REGISTRATION="$repo/experiments/controller/protocols/cpu_anchor_holdout.json"
+bash scripts/experiments/paired_holdout.sh
+```

@@ -14,12 +14,46 @@ exec 8<>"$STUDY_DIR/fit.lock"
 flock --shared 8
 runner=scripts/experiments/paired_grounding.sh
 arms=(native always credit terminal rate count)
+validation_options=()
 if "$python_bin" -c 'import json,sys; sys.exit(not json.load(open(sys.argv[1])).get("equal_sources", False))' "$STUDY_DIR/protocol.json"; then
     arms+=(plain)
 fi
+if [[ -n ${MEMSKILL_HOLDOUT_REGISTRATION:-} ]]; then
+    validation_options+=(--stdout-only)
+    "$python_bin" - "$STUDY_DIR" "$MEMSKILL_HOLDOUT_REGISTRATION" "${arms[@]}" <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+from tempfile import TemporaryDirectory
+
+study, manifest = map(Path, sys.argv[1:3])
+raw = manifest.read_bytes()
+spec = json.loads(raw)
+cohort = Path("experiments/controller/protocols/paired_grounding_cohort.json")
+def sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+if (os.environ.get("MEMSKILL_BACKEND_ID") != spec["backend"] or spec["arms"] != sys.argv[3:]
+        or sha(cohort) != spec["cohort_sha256"]
+        or any(sha(study / name) != value for name, value in spec["inputs"].items())):
+    raise ValueError("Held-out run differs from the registered inputs, backend or controls")
+dest = study / "holdout/registration.json"
+if dest.exists():
+    if dest.read_bytes() != raw:
+        raise ValueError("This assessment already has a different registration")
+else:
+    if any((study / phase).exists() for phase in ("test", "longmemeval")):
+        raise ValueError("Register a prospective assessment before opening its test cohorts")
+    with TemporaryDirectory(dir=dest.parent) as tmp:
+        receipt = Path(tmp) / dest.name
+        receipt.write_bytes(raw)
+        os.link(receipt, dest)
+PY
+fi
 "$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --select-for-test >"$report_dir/selection.log"
 bash "$runner" validation --study-arm count >"$report_dir/validation-count.log" 2>&1
-"$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms "${arms[@]}" >"$report_dir/validation.log"
+"$python_bin" -m experiments.controller.audit_paired "$STUDY_DIR" "$LOCOMO_DATA" validation --arms "${arms[@]}" "${validation_options[@]}" >"$report_dir/validation.log"
 (
     cd "$STUDY_DIR"
     if [[ -f holdout/frozen.sha256 ]]; then
