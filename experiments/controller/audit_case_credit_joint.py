@@ -135,6 +135,25 @@ def collect(base, name, w, choice, calibration):
 
 
 def evaluate(data, device):
+    windows = [
+        dict(
+            w,
+            node_offsets=[w["choice"][j]["offsets"] for j in (0, 1, 1)],
+            policy_details={"decision_usage": [c["usage"] for c in w["choice"]]},
+        )
+        for w in data
+    ]
+    return evaluate_offsets(
+        windows,
+        device,
+        ARMS,
+        ("credit", "semantic", "verified", "permuted"),
+        ("native", "terminal", "return_only", "permuted", "semantic", "rate"),
+    )
+
+
+def evaluate_offsets(data, device, arms, learned, comparisons):
+    """Score any frozen offsets on verified paths with matching by actual decision node."""
     if not data:
         return {"windows": 0, "questions": 0}, []
     ps = [{} for _ in data]
@@ -149,12 +168,9 @@ def evaluate(data, device):
         z = p.logit()
         preds = {
             k: (
-                z
-                + p.new_tensor(
-                    [data[i]["choice"][int(node != 0)]["offsets"][k] for i in ids]
-                )
+                z + p.new_tensor([data[i]["node_offsets"][node][k] for i in ids])
             ).sigmoid()
-            for k in ("credit", "semantic", "verified", "permuted")
+            for k in learned
         }
         shift = matched_offset(z, preds["credit"], torch.ones_like(z))
         preds["rate"] = (z + shift).sigmoid()
@@ -174,7 +190,7 @@ def evaluate(data, device):
             p,
             w["cases"],
             w["costs"],
-            ARMS,
+            arms,
             ("native", "terminal", "return_only"),
             pivot=w["pivot"],
             background=w["background"],
@@ -183,16 +199,11 @@ def evaluate(data, device):
             inputs=w["inputs"],
             strict=w["strict"],
             start=w["start"],
-            decision_usage=[c["usage"] for c in w["choice"]],
+            **w["policy_details"],
             state_hashes=w["states"],
         )
         reports.append(r)
-    return summarize(
-        reports,
-        ARMS,
-        "credit",
-        ("native", "terminal", "return_only", "permuted", "semantic", "rate"),
-    ), reports
+    return summarize(reports, arms, "credit", comparisons), reports
 
 
 def eligible(overall, fresh):

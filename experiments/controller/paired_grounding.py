@@ -246,6 +246,7 @@ def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only policy for paired trajectory evaluation")
+    parser.add_argument("--study-complete-donors", action="store_true", help="Measure only missing trajectories on the randomized earlier donor block")
     parser.add_argument("--study-pair-limit", type=int, help="Run the first N registered training pairs")
     parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
@@ -272,6 +273,8 @@ def main():
     parser.add_argument("--study-anchor-abstentions", action="store_true",
                         help="Penalize probability changes at training states with no verified local credit")
     options, remainder = parser.parse_known_args()
+    if options.study_complete_donors and options.study_phase != "training-late-pairs":
+        parser.error("--study-complete-donors requires training-late-pairs")
     if options.study_probe_completed and options.study_phase != "probe-omitted":
         parser.error("--study-probe-completed requires --study-phase probe-omitted")
     if options.study_probe_completed and options.study_probe_through is not None:
@@ -390,7 +393,7 @@ def main():
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
             elif options.study_phase == "training-late-pairs":
                 from experiments.controller.late_pair_trial import run
-                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
+                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit, complete_donors=options.study_complete_donors)
             else:
                 from experiments.controller.factorial_rollout import run
                 run(trainer, out, options.study_forecast, train, specs)

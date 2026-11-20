@@ -185,3 +185,7 @@ systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experimen
 ### 案例提示实验的状态
 
 在 248 的同步目录 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/case-credit/` 查看 `choices/`、`joint/choices/` 了解已完成多少组实际决策。核对 `joint/later/through-*.json` 的 `session13_plus` 和 `strict_session13_plus`、对话覆盖及分类型得分。模型在同一概率下的实际读写 token 与额外的选技推断开销分别记录。完整独立测试仍遵循原协议。[251 服务与恢复步骤](server-251.md)
+
+### 逐题证据匹配控制器
+
+251 是计算机，248 是源码与结果镜像机。接手时从 248 同步目录 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/evidence-transport/` 开始。先导策略已冻结 64 个窗口的数值预测。91 题的选技概率平均移动 4.16 个百分点，期望 F1 比原生低 0.00120。先看 `pilot/suffix-diagnostic.json` 了解首段训练目标对末段动作的敏感性，再检查 `late-pairs/selection-labels/through-*.json` 与 `late-pairs/donor-factorial/` 的原路径核验和互补路径进度。扩展策略须集齐 88 道训练题的原始核验记录，其冻结后评估范围是预先保留的 378 题。训练诊断与正式完整历史分别汇报。[详细实验记录](algorithm-notes.md) [251 查看、复算与恢复](server-251.md)
