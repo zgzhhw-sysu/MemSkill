@@ -342,7 +342,7 @@ def summarize_panel(panel, full, arms=ARMS):
     return stats
 
 
-def evaluate(base, study, corpus, path):
+def evaluate(base, study, corpus, path, *, final_stage="witness", gate_controls=None):
     trial = path.parent
     primary = base / "late-pairs"
     src = base / "source-compression"
@@ -445,7 +445,7 @@ def evaluate(base, study, corpus, path):
             register(out / "summary.json", result)
     later = trial / "later/summary.json"
     replica = trial / "replica/summary.json"
-    if trial.name == "witness" and later.exists() and replica.exists():
+    if trial.name == final_stage and later.exists() and replica.exists():
         a = read(later)["all"]
         strict = read(later)["strict"]
         f = read(replica)["all"]["f1"]
@@ -455,7 +455,10 @@ def evaluate(base, study, corpus, path):
                 and a["ht"]["credit"] > a["ht"][k]
                 for k in ("native", "terminal")
             )
-            and all(a["f1"]["credit"] > a["f1"][k] for k in arms[1:])
+            and all(
+                a["f1"]["credit"] > a["f1"][k]
+                for k in (arms[1:] if gate_controls is None else gate_controls)
+            )
             and a["f1"]["credit"] > a["matched"]
             and sum(
                 v["f1"]["credit"] > a["matched_by_history"][sid]

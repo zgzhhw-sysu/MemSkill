@@ -241,3 +241,7 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 251 新增了证据发言匹配、案例权重和长前缀核算。原版记忆匹配在 43 道后期题的期望 F1 为 0.52568，附加证据发言匹配得 0.51783，再按其他训练对话的实测收益衰减案例权重得 0.52263。完整前缀已分别冻结全部 99 个端点的预测，代表 185 道与局部面板不重复的问题。首个 10 题四路径复测窗口已完成，其原随机两臂的 20 个回答跨后端一致。仍在累积数据，尚未进入正式测试。[结果、对照与具体误判](algorithm-notes.md)
 
 在 `source-compression/witness-passages/evidence-advantage/` 下，`group/` 存放全部合格名次的结果，`witness/` 等待单名次干预完成，`case-reliability/{group,witness}/` 存放按案例加权的独立预测。各阶段的 `early`、`donor`、`replica` 给出实测四路径的整段期望收益，`calibration`、`later` 给出随机焦点收益，`long-prefix` 给出完整前缀最后一次选技的收益。阅读时同时查看 `strict.questions`、`all.questions` 和预测的 `exposure.json`。[运行入口](server-251.md)
+
+### 自然问答监督的交接位置
+
+当前新增的自然问答扩充实验在 251 的物理卡 3、5、6 上运行。248 的镜像位于 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/exchange-credit/`。先看 `registration.json` 的 234 个已登记来源，再看 `questions/` 的拒绝原因与 `outcomes/` 的真实选技和修补对照。允许单行引言的分析存于 `framed/`，与根目录共用教师响应。两套策略按阶段冻结，只有完整后期诊断过线才进入独立开发集，之后再运行锁定的两套正式测试。[251 的恢复和查数命令](server-251.md#训练对话内的问答与选技对照) · [算法和首轮诊断](algorithm-notes.md#用自然问答补充-span-选技监督)
