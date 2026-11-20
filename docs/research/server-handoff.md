@@ -157,3 +157,7 @@ LoCoMo 主测试含两段完整对话、55 个 session、314 道可评分题。�
 LongMemEval-S 的六组评估按同一条完整历史依次执行。对于冻结的 Qwen 编码器，只有编码实例、文本顺序、批大小和向量归一化设置全部一致时才复用该批向量。每条历史结束后释放缓存，运行日志记录命中和重新计算的批数。选技、记忆写入、读取的证据和逐题分数仍分别保存。
 
 在 251 用真实 Qwen 和原始 Controller 重建了 `conv-47` 的两个不同策略。原生策略首次计算 19 批向量，信用策略的 19 批中有 7 批与前一组完全相同，重新执行原生策略时 19 批均可复用。每组 6 次选技的完整状态、概率和动作、全部记忆修改、30 题的前五条检索、答案和 F1 均与历史产物一致。此次重放的读写回答取自相同请求的实测归档。原生和信用组 F1 分别为 0.1969 和 0.3411。
+
+### 251 上的相邻发言检索实验
+
+在 251 检查 `systemctl --user status memskill-251-turn-key-screen memskill-251-turn-key-reader`。数据目录为 `~/memskill-work/runs/paired-251-linked-eight/source-compression/turn-keys/`，先看 `screen-summary.json` 的证据覆盖，再看最新 `reader-through-N.json` 的配对题数和 F1。比较 `policy` 与 `new_native` 可度量仅移动选技概率的增益，比较 `policy` 与 `matched_rate` 可度量针对具体窗口选择的增益。`reader/<窗口>/jobs.json` 保留原始分支未能复现的原因。248 镜像位于项目父目录下的 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/turn-keys/`。[实验协议](../../experiments/controller/protocols/turn_key_credit.json)
