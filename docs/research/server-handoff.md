@@ -1,5 +1,7 @@
 # MemSkill 换机交接 · 2026-11-20
 
+11 月 21 日起继续在 251 做四路径的末段归因复核和同原文写入实验。248 在 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/` 收回 `factorial-repairs/`、`terminal-capacity/`、`semantic-writer/`。恢复实验时先核对原始四路径目录、已冻结的概率和各窗口回执。三个目录分别保存补写补检结果、固定使用率上界和关系技能的真实写入与回答。[251 服务与恢复命令](server-251.md)
+
 跨窗口补充训练面板有 185 道题、99 处末段干预。251 的 `memskill-251-cross-prefix` 保留每次干预之前的完整对话和记忆。248 的结果在 `linked-eight-gpu/logs/late-pairs/cross-window-prefix/`，保留 `manifest.json`、各条原始轨迹、响应缓存和 `through-*.json`。进度按已经发布的 `conv-*_to*/pair.json` 计数。单条路径出分后仍需另一条路径和逐题核对。[服务与恢复](server-251.md)
 
 251 的条件选技校准由 `memskill-251-prefix-return` 持续运行。248 在同一 `linked-eight-gpu/logs/late-pairs/` 备份目录收回 `prefix-return/` 和 `rank-return/`。每种方法均保存训练来源、概率参数、早于参数冻结的路径指纹及逐题 F1。恢复时先同步这两个目录及同级原始轨迹，再从部署脚本继续；已发布窗口会复用。当前先导的 52 个历史问题关联及 14 道完整四路径留出训练题均属于训练诊断。[实验结果](algorithm-notes.md) · [251 运行方法](server-251.md)

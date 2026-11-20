@@ -1,5 +1,31 @@
 # 251 上的配对实验
 
+## 11 月 21 日的两个训练实验
+
+`memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
+
+`memskill-251-semantic-writer` 用物理 GPU 0 编码，在相同原文下比较关系与时间技能。24 个早期训练 session 用于校准来源相似度。12 个目标 span 的概率修正保存在 `semantic-writer/source-forecast.json`。各窗口的 `choice.json` 在请求新写入之前保存，`write.json` 保存实际动作及记忆，`pair.json` 保存匹配状态和原始问题结果。首个窗口结束后等原四路径面板齐备再继续。这两个实验与四路径任务共用物理 GPU 7 上目标占空比 22% 的 Llama 3 8B BF16 服务。编码占空比为 30%，每批最多两条。
+
+平衡关系技能先验的追加计分由 `memskill-251-audit-semantic-writer` 完成。它用 GPU 0 冻结全部 12 个概率，此后按已有逐题答案汇总。恢复入口为 `scripts/experiments/audit_semantic_writer_251.sh`。
+
+`memskill-251-outcome-credit` 在补检窗口和随机配对窗口发布后，用 GPU 0 重算动作优势策略。参数、冻结时已出分的路径和逐题结果保存在 `source-compression/outcome-credit/pilot-*/`，12 个补检窗口齐备后另存 `main/`。恢复入口为 `scripts/experiments/audit_outcome_credit_251.sh`。
+
+在 251 查看或恢复服务时运行以下命令。已运行的服务可直接查看其日志。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+systemctl --user status memskill-251-factorial-repairs memskill-251-semantic-writer --no-pager
+base="$work/runs/paired-251-linked-eight/source-compression"
+tail -n 8 "$base/factorial-repairs/client.log" "$base/semantic-writer/client.log"
+python3 "$guard" status
+# 对已退出的服务，分别恢复对应的实验
+systemd-run --user --collect --unit=memskill-251-factorial-repairs bash "$PWD/scripts/experiments/run_factorial_repairs_251.sh"
+systemd-run --user --collect --unit=memskill-251-semantic-writer bash "$PWD/scripts/experiments/run_semantic_writer_251.sh"
+# 复算当前完整窗口在固定末段用技率下的 F1 上界
+python3 "$guard" run --gpus 0 -- "$MEMSKILL_PYTHON" -m experiments.controller.terminal_capacity "$base"
+```
+
 ## 11 月 20 日晚的运行
 
 `memskill-251-linked-eight.service` 使用 GPU 3、4 执行两个训练进程，逐个从训练窗口的两端取任务。GPU 5、6 共同承载一个 Llama 3 8B BF16 服务，端口为 18773，逐卡分配约 7658 MiB。编码器每批最多两条，目标占空比为 35%。生成服务逐 16 个输入 token 预填充并逐 token 解码，目标占空比为 28%。调度脚本位于 `~/memskill-work/deploy/run-linked-251.sh`。

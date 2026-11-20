@@ -244,7 +244,7 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only policy for paired trajectory evaluation")
     parser.add_argument("--study-pair-limit", type=int, help="Run the first N registered training pairs")
     parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
@@ -278,8 +278,8 @@ def main():
         parser.error("--study-probe-completed checks the whole training protocol")
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
-    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix")
-    if options.study_pair_limit is not None and (options.study_phase not in ("training-late-pairs", "training-cross-prefix") or options.study_pair_limit < 1):
+    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer")
+    if options.study_pair_limit is not None and (options.study_phase not in ("training-late-pairs", "training-cross-prefix", "training-semantic-writer") or options.study_pair_limit < 1):
         parser.error("--study-pair-limit requires a positive limit and a paired training panel")
     if paired_trial != bool(options.study_forecast):
         parser.error("--study-forecast is required exclusively for paired trajectory experiments")
@@ -312,9 +312,10 @@ def main():
             parser.error("Paired training trajectories require one leased GPU and serial encoders")
         free, total = torch.cuda.mem_get_info()
         budget = min(int(total * .76), free - 2048 * 2**20)
-        if budget < 2304 * 2**20:
-            if options.study_phase in ("training-late-pairs", "training-cross-prefix"):
-                print(f"Waiting for encoder headroom: CUDA reports {free//2**20} MiB free; need 4352 MiB", flush=True)
+        minimum_mib = 2048 if options.study_phase == "training-semantic-writer" else 2304
+        if budget < minimum_mib * 2**20:
+            if options.study_phase in ("training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer"):
+                print(f"Waiting for encoder headroom: CUDA reports {free//2**20} MiB free; need {minimum_mib + 2048} MiB", flush=True)
                 raise SystemExit(75)
             raise RuntimeError("Insufficient free memory for the bounded trajectory encoder")
         torch.cuda.set_per_process_memory_fraction(budget/total)
@@ -363,7 +364,13 @@ def main():
     if paired_trial:
         from src.rag_utils import reuse_qwen_retriever
         with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
-            if options.study_phase == "training-cross-prefix":
+            if options.study_phase == "training-semantic-writer":
+                from experiments.controller.semantic_writer import run
+                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
+            elif options.study_phase == "training-factorial-repairs":
+                from experiments.controller.factorial_repairs import run
+                run(trainer, out, options.study_forecast, train, specs)
+            elif options.study_phase == "training-cross-prefix":
                 from experiments.controller.cross_window_prefix import run
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
             elif options.study_phase == "training-late-pairs":
