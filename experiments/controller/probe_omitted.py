@@ -37,15 +37,21 @@ def check_responses(diagnosis):
             raise RuntimeError("Model request failed in omitted-question retrieval probe")
 
 
-def probe_training_windows(trainer, study, windows):
+def probe_training_windows(trainer, study, windows, *, completed_only=False):
     backend = os.environ.get("MEMSKILL_BACKEND_ID", trainer.args.api_base)
     work = study / "diagnostics" / "omitted-final" / hashlib.sha256(backend.encode()).hexdigest()[:16]
     work.mkdir(parents=True, exist_ok=True)
     totals = Counter()
+    pending = []
     with (work / "probe.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         os.environ["MEMSKILL_USAGE_LOG"] = str(work / "usage.jsonl")
         for conversation, episode in windows:
+            if completed_only and not episode.exists():
+                pending.append(episode.name)
+                continue
+            if completed_only and json.loads((episode / "backend.json").read_bytes())["inference"] != backend:
+                raise ValueError(f"Live training window and probe use different inference backends at {episode}")
             sid = conversation["sample_id"]
             ids = [q["original_index"] for q in conversation["qa"]]
             trace_file, = (episode / "traces").glob("*.jsonl")
@@ -94,4 +100,8 @@ def probe_training_windows(trainer, study, windows):
                         signed = q["controller_delta"] * (1 if rows[-1]["use"] else -1)
                         totals["selection_favors_grounded" if signed > 0 else "selection_favors_plain"] += 1
             print(episode.name, dict(totals), flush=True)
-        atomic_json(work / "summary.json", {"backend": backend, "counts": dict(totals)})
+        summary = {"backend": backend, "counts": dict(totals)}
+        if completed_only:
+            atomic_json(work / "progress.json", dict(summary, pending_windows=pending))
+        if not pending:
+            atomic_json(work / "summary.json", summary)

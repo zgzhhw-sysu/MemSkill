@@ -226,6 +226,8 @@ def main():
                         help="Last session of the completed training panel for the weaker-branch audit")
     parser.add_argument("--study-weaker-omitted", action="store_true",
                         help="Audit positive sampled-action credit in completed omitted-final question receipts")
+    parser.add_argument("--study-probe-completed", action="store_true",
+                        help="Probe saved training windows on their original backend while other windows are collecting")
     parser.add_argument("--study-dir", type=Path, required=True)
     parser.add_argument("--study-arm", choices=["native", "terminal", "credit", "always", "plain", "rate", "count", "all"], default="all")
     parser.add_argument("--study-reverse", action="store_true", help="Collect independent episodes in reverse order")
@@ -238,6 +240,10 @@ def main():
     parser.add_argument("--study-anchor-abstentions", action="store_true",
                         help="Penalize probability changes at training states with no verified local credit")
     options, remainder = parser.parse_known_args()
+    if options.study_probe_completed and options.study_phase != "probe-omitted":
+        parser.error("--study-probe-completed requires --study-phase probe-omitted")
+    if options.study_probe_completed and options.study_probe_through is not None:
+        parser.error("--study-probe-completed checks the whole training protocol")
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
     if (args.dataset != "locomo" or not args.api or args.enable_designer or not args.eval_f1_only
@@ -317,7 +323,7 @@ def main():
             probe_weaker_windows(trainer, out, windows, through, omitted=options.study_weaker_omitted)
         else:
             from experiments.controller.probe_omitted import probe_training_windows
-            probe_training_windows(trainer, out, windows)
+            probe_training_windows(trainer, out, windows, completed_only=options.study_probe_completed)
         return
     if options.study_phase == "train":
         root = out / "train"

@@ -123,3 +123,9 @@ bash scripts/experiments/paired_holdout.sh
 `memskill-251-equal-gpu` 通过 GPU 租约在 3、4 号卡分别执行正序和逆序训练窗口，Qwen 状态编码、技能编码及检索均使用对应的 GPU，生成请求共用 5、6 号卡的 BF16 服务。该实验以 `~/memskill-work/study-equal-sources-gpu` 保存独立的样本与权重。训练和开发时设置 `MEMSKILL_ENCODER_DUTY=.35` 和 `MEMSKILL_ENCODER_MAX_BATCH=2`，每批 Transformer 前向结束后同步当前设备，并按实际运行耗时休息。5、6 号卡生成服务继续使用 28% 占空比。每张卡的瞬时利用率会随前向和休息交替变化。
 
 启动前在两张卡上用相同的真实训练 span、同一检查点和九种技能分别做了 25% 和 35% 占空比的编码。四次运行的状态、技能向量、检索向量、两种有序动作及活动技能概率均一致。每卡的核对结果在 `~/memskill-work/runs/paired-251-equal-gpu/encoder-{3,4}.json`，工作日志为 `train-3.log` 和 `train-4.log`。原 CPU 策略的复核已单独归档。
+
+### 按已完成训练窗口补探与五条发言预算实验
+
+`memskill-251-live-omitted-gpu` 在 GPU 7 录得的编码、检索、技能向量及选技概率与 3、4 号卡核对一致后，补查末 span 关联、但原四题预算遗漏的全部训练题。使用生成该训练窗口时相同的双卡写入后端和规则 2。每个窗口单独落盘，进行中写 `diagnostics/omitted-final/<后端指纹>/progress.json`，待所有预定窗口都完成后再写 `summary.json`。已有实验可通过 GPU 租约运行 `bash scripts/experiments/paired_grounding.sh probe-omitted --study-probe-completed`。
+
+7 号卡的训练记忆库分组对照已完成，完整回答与对齐结果在 `~/memskill-work/runs/paired-251/writer-granularity-gpu/`。GPU 轮流运行 Qwen 检索和 Llama 问答，两者占空比分别为 30% 和 28%。另一个受五条发言预算约束的技能实验在 `semantic-turn-budget.json` 保存每个训练 span 的两个选择及覆盖率。服务 `memskill-251-budget-readers` 为 123 道训练问题构建真实写入库对照，在 `skill-budget-writer/` 保存选择、检索计划、逐题回答、实测 token 数和分数。2 号卡上的 Qwen 批大小为 2，使用当时可用显存扣除 2048 MiB 后的分配上限。生成使用现有的 5、6 号卡 28% 占空比服务。服务 `memskill-251-budget-policy` 等全部回答完成后在 GPU 上运行留一对话的概率比较，结果写入同目录的 `crossfit.json`。

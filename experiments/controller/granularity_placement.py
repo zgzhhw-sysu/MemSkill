@@ -23,7 +23,7 @@ def source_features(turns):
             mean(questions[i] and lengths[i + 1] <= 12 for i in pairs) if pairs else 0.]
 
 
-def load_panel(study, data_file, run, *, completed_only=False):
+def load_panel(study, data_file, run, *, completed_only=False, include_questions=False):
     protocol = json.loads((study / "protocol.json").read_text())
     raw = data_file.read_bytes()
     if hashlib.sha256(raw).hexdigest() != protocol["input_sha256"]:
@@ -45,13 +45,13 @@ def load_panel(study, data_file, run, *, completed_only=False):
         c = train[sid]
         sessions = [c["conversation"][f"session_{i}"] for i in (start, start + 1)]
         turns = {turn["dia_id"] for session in sessions for turn in session}
-        questions = [q for _, q in ev.filter_qa_list(c["qa"]) if q.get("evidence") and set(q["evidence"]) <= turns]
+        questions = [(i, q) for i, q in ev.filter_qa_list(c["qa"]) if q.get("evidence") and set(q["evidence"]) <= turns]
         scores = {key: {} for key in ("00", "01", "10", "11")}
         for task in prompts:
             qi = task["question_index"]
             key = f'{task["first_pair"]}{task["second_pair"]}'
             h = hashlib.sha256(task["prompt"].encode()).hexdigest()
-            q = questions[qi]
+            _, q = questions[qi]
             if task["question"] != q["question"] or task["hash"] != h or qi in scores[key]:
                 raise ValueError("Mismatched source-only question, prompt hash or repeated treatment cell")
             reply = json.loads((run / "granularity-predictions" / (h + ".json")).read_text())
@@ -64,6 +64,10 @@ def load_panel(study, data_file, run, *, completed_only=False):
         windows.append({"dialogue": sid, "start": start, "n": len(questions),
                         "state": [source_features(session) for session in sessions],
                         "f1": {key: mean(values.values()) for key, values in scores.items()}})
+        if include_questions:
+            windows[-1]["questions"] = {
+                original: {"question": q, "f1": {key: float(cell[i]) for key, cell in scores.items()}}
+                for i, (original, q) in enumerate(questions)}
     return windows
 
 
