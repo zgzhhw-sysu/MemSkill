@@ -3,6 +3,7 @@
 import argparse
 from itertools import product
 from pathlib import Path
+from statistics import mean
 
 import torch
 
@@ -198,9 +199,99 @@ def run(base, *, by_history=False):
     backup_diagnostics(src, training, packets, logits, dest)
 
 
+def focal_bound(rows):
+    # Moving probability within each pivot preserves the native mean usage there.
+    p = {}
+    for pos in sorted({r["pivot"] for r in rows}):
+        group = [r for r in rows if r["pivot"] == pos]
+        budget = sum(r["native_p"] for r in group)
+        for r in sorted(group, key=lambda r: -r["n"] * (r["activity"] - r["temporal"])):
+            p[r["name"]] = min(1.0, max(0.0, budget))
+            budget -= p[r["name"]]
+        if abs(budget) > 1e-9:
+            raise ValueError("The allocated probability mass differs from native use")
+    n = sum(r["n"] for r in rows)
+
+    def value(policy):
+        return (
+            sum(
+                r["n"] * (r["temporal"] + policy(r) * (r["activity"] - r["temporal"]))
+                for r in rows
+            )
+            / n
+        )
+
+    native = value(lambda r: r["native_p"])
+    matched = value(lambda r: p[r["name"]])
+    unrestricted = value(lambda r: float(r["activity"] > r["temporal"]))
+    return {
+        "windows": len(rows),
+        "questions": n,
+        "native": native,
+        "matched_usage_gain": matched - native,
+        "unrestricted_gain": unrestricted - native,
+        "matched_probabilities": p,
+    }
+
+
+def donor_bounds(base):
+    late = base / "late-pairs"
+    labels = late / "selection-labels"
+    manifest = labels / "through-12.json"
+    ledger = read(manifest)
+    split = read(labels / "split.json")["windows"]["donor"]
+    if set(ledger["files"]) != set(split) or ledger["questions"] != 88:
+        raise ValueError(
+            "The complete 88-question randomized training block is required"
+        )
+    rows = []
+    for name, indices in split.items():
+        label = labels / (name + ".json")
+        pair = late / "outcomes" / name / "pair.json"
+        if file_hash(label) != ledger["files"][name] or read(label)["inputs"][
+            "pair"
+        ] != file_hash(pair):
+            raise ValueError("The original paired score or verified labels changed")
+        v = read(pair)
+        if [q["original_index"] for q in v["questions"]] != indices:
+            raise ValueError("The randomized donor population changed")
+        probs = v["focal_probabilities"]["native"]
+        lo, hi = [mean(q[a] for q in v["questions"]) for a in ("temporal", "activity")]
+        native = mean(q["focal"]["native"] for q in v["questions"])
+        if abs(lo + probs * (hi - lo) - native) > 1e-10:
+            raise ValueError("Failed to reproduce the original focal policy score")
+        rows.append(
+            {
+                "name": name,
+                "dialogue": v["dialogue"],
+                "pivot": v["pivot"],
+                "n": len(indices),
+                "temporal": lo,
+                "activity": hi,
+                "native_p": probs,
+            }
+        )
+    report = {
+        "ledger": file_hash(manifest),
+        "rows": rows,
+        "all": focal_bound(rows),
+        "omit_history": {
+            s: focal_bound([r for r in rows if r["dialogue"] != s])
+            for s in sorted({r["dialogue"] for r in rows})
+        },
+    }
+    register(labels / "donor-focal-capacity.json", report)
+    print(report["all"], flush=True)
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("base", type=Path)
-    p.add_argument("--by-history", action="store_true")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--by-history", action="store_true")
+    mode.add_argument("--donor-window-bound", action="store_true")
     args = p.parse_args()
-    run(args.base, by_history=args.by_history)
+    if args.donor_window_bound:
+        donor_bounds(args.base)
+    else:
+        run(args.base, by_history=args.by_history)

@@ -311,6 +311,23 @@ cd "$work/run-linked-questions-v1"
 systemctl --user status memskill-251-temporal-update
 # 单元退出且仍有等待采集的窗口时恢复
 systemd-run --user --collect --unit=memskill-251-temporal-update --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_temporal_update_251.sh"
+# 复核 88 道训练题在固定另一段动作、保持分位置用技率时的事后上限
+"$MEMSKILL_PYTHON" -m experiments.controller.evidence_transport_capacity "$work/runs/paired-251-linked-eight" --donor-window-bound
 # 重算扩大动作范围的依据，结果保存在 assisted-span-backup/history-capacity.json
 python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.evidence_transport_capacity "$work/runs/paired-251-linked-eight" --by-history
+```
+
+### 旧项、新项与已核验的选技信用
+
+`memskill-251-temporal-update-audit` 逐窗口准备两个交叉库。Qwen 在物理 GPU 1 重放相同前缀、核验原始读出并冻结交叉检索。新的问答提示交给既有的 GPU 7 限载读者处理。每个窗口在 `source-compression/temporal-update-audit/` 写入 `inputs.json` 和 `result.json`，包含来源分支、记忆 ID、版本、单题交换效应，以及满足严格恢复条件时的同技能修复结果。汇总保留不可匹配的原始窗口。
+
+`memskill-251-temporal-partition` 使用该目录的 `controller/`。先检查 `registration.json`、`states.json` 及各阶段 `forecast.json` 的训练窗口与 25 个数值预测，再检查最新 `through-*.json` 中 `all`、`before_update` 和 `strict` 的题数、分数和读写成本。覆盖至少两条历史时，另列按完整对话成组重采样的配对差异区间。命令在 251 的运行工作树执行。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+systemctl --user status memskill-251-temporal-update-audit memskill-251-temporal-partition
+# 对应单元退出且仍有待处理窗口时恢复
+systemd-run --user --collect --unit=memskill-251-temporal-update-audit --property=Restart=on-failure --property=RestartSec=90 bash "$PWD/scripts/experiments/run_temporal_update_251.sh" audit
+systemd-run --user --collect --unit=memskill-251-temporal-partition --property=Restart=on-failure --property=RestartSec=90 bash "$PWD/scripts/experiments/run_temporal_partition_251.sh"
 ```
