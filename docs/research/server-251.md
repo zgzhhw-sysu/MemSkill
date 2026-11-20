@@ -402,3 +402,26 @@ systemd-run --user --collect --unit=memskill-251-reader-slot-prefix --property=R
 `reader`、`policy`、`prefix` 分别对应交换回答、局部随机面板、跨 session 面板。`verified-cases.json` 记录了七次保留信用的对照，`cohort.json` 保存全部 452 次比较及原始物理响应引用；`readers-complete.json` 产生后才能计算采用完整交换结果的策略。短窗口的 `preexisting.json` 和长前缀的 `registration.json` 分别记录冻结前已有分数的窗口。
 
 `memskill-251-reader-slot-witness` 使用同一限载读者，在 `single-rank/requests.json` 登记全部单名次双向交换。对应 `rank-00.json` 等文件保留两次真实回答以及必要性、充分性判定。该单元的脚本角色为 `witness`，`single-rank/summary.json` 只在所有名次完成后生成。
+
+### 用获胜与落败记忆文本匹配当前 span
+
+`memskill-251-witness-passages` 使用物理卡 4 的租约编码文本，使用卡 1 和 6% 显存上限计算、冻结策略概率修正和核算已收回的分数。Qwen 的 batch 至多为 2，编码占空比为 0.30。`memskill-251-witness-four-paths` 每个租约在同一卡上完成一条两步轨迹，复用卡 5、6 上端口 18773 的单请求 BF16 Llama。写入服务使用 0.28 占空比并预留每卡 4608 MiB，编码器保留 2048 MiB。启动时核对服务用户、模型路径、进程参数和两张物理卡上的 PID。卡 7 上原随机面板的响应单独保存。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+b="$work/runs/paired-251-linked-eight"
+o="$b/source-compression/witness-passages"
+systemctl --user status memskill-251-witness-{passages,four-paths}
+python3 "$guard" status
+ls "$o"/group/later/through-*.json
+find "$o/four-paths/cells" -mindepth 2 -maxdepth 2 -name complete.json | wc -l
+tail -n 8 "$o/four-paths/client.log"
+```
+
+每个窗口的四条路径核对完成后写入 `complete.json`，两端均有对照时另写 `backend-comparison.json`。窗口进度按完整路径数累计。单元退出后可在上述运行目录用以下命令恢复；已登记的路径会复用。
+
+```bash
+systemd-run --user --collect --unit=memskill-251-witness-passages --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_witness_passages_251.sh"
+systemd-run --user --collect --unit=memskill-251-witness-four-paths --property=Restart=on-failure --property=RestartSec=60 bash "$PWD/scripts/experiments/run_witness_four_paths_251.sh"
+```
