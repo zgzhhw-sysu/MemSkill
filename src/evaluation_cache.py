@@ -7,15 +7,57 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
+import time
 from urllib.parse import urlsplit
 
 
 _embedding_batches = ContextVar("paired_history_embedding_batches", default=None)
+_encoder_lock = Lock()
 
 
 def _encode(model, texts, batch_size, normalize):
     options = {"normalize_embeddings": True} if normalize else {}
-    return model.encode(texts, convert_to_numpy=True, batch_size=batch_size, **options)
+    options.update(convert_to_numpy=True, batch_size=batch_size)
+    value = os.environ.get("MEMSKILL_ENCODER_DUTY")
+    if value is None:
+        return model.encode(texts, **options)
+    duty = float(value)
+    if not 0 < duty <= 1:
+        raise ValueError("MEMSKILL_ENCODER_DUTY must be in (0, 1]")
+    if model.device.type != "cuda" or duty == 1 or not len(texts):
+        return model.encode(texts, **options)
+
+    # Keep the original encoder's sorting, padding, batch sizes and choices of kernels.
+    import torch
+    device = model.device
+    transformer = next(iter(model.children()))
+    started = 0.
+    batches = 0
+
+    def begin(module, args):
+        nonlocal started
+        torch.cuda.synchronize(device)
+        started = time.monotonic()
+
+    def rest(module, args, result):
+        nonlocal batches
+        torch.cuda.synchronize(device)
+        elapsed = time.monotonic() - started
+        time.sleep(elapsed * (1 / duty - 1))
+        batches += 1
+
+    with _encoder_lock:
+        before = transformer.register_forward_pre_hook(begin)
+        after = transformer.register_forward_hook(rest)
+        try:
+            embeddings = model.encode(texts, **options)
+            if not batches:
+                raise RuntimeError("No GPU encoder batch reached the configured duty limiter")
+            return embeddings
+        finally:
+            after.remove()
+            before.remove()
 
 
 @contextmanager
@@ -34,6 +76,12 @@ def history_embeddings():
 
 
 def encode_batch(model, texts, batch_size, *, normalize=False):
+    limit = os.environ.get("MEMSKILL_ENCODER_MAX_BATCH")
+    if limit is not None and model.device.type == "cuda":
+        limit = int(limit)
+        if limit < 1:
+            raise ValueError("MEMSKILL_ENCODER_MAX_BATCH must be positive")
+        batch_size = min(batch_size, limit)
     measured = _embedding_batches.get()
     if measured is None or not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
         return _encode(model, texts, batch_size, normalize)

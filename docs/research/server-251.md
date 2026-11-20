@@ -114,3 +114,8 @@ export MEMSKILL_API_BASE=http://127.0.0.1:18757/v1
 export MEMSKILL_HOLDOUT_REGISTRATION="$repo/experiments/controller/protocols/cpu_anchor_holdout.json"
 bash scripts/experiments/paired_holdout.sh
 ```
+### GPU 3、4 上的等来源选技实验
+
+`memskill-251-equal-gpu` 通过 GPU 租约在 3、4 号卡分别执行正序和逆序训练窗口，Qwen 状态编码、技能编码及检索均使用对应的 GPU，生成请求共用 5、6 号卡的 BF16 服务。该实验以 `~/memskill-work/study-equal-sources-gpu` 保存独立的样本与权重。训练和开发时设置 `MEMSKILL_ENCODER_DUTY=.35` 和 `MEMSKILL_ENCODER_MAX_BATCH=2`，每批 Transformer 前向结束后同步当前设备，并按实际运行耗时休息。5、6 号卡生成服务继续使用 28% 占空比。每张卡的瞬时利用率会随前向和休息交替变化。
+
+启动前在两张卡上用相同的真实训练 span、同一检查点和九种技能分别做了 25% 和 35% 占空比的编码。四次运行的状态、技能向量、检索向量、两种有序动作及活动技能概率均一致。每卡的核对结果在 `~/memskill-work/runs/paired-251-equal-gpu/encoder-{3,4}.json`，工作日志为 `train-3.log` 和 `train-4.log`。原 CPU 策略的完整测试继续沿用选定时的 CPU 编码和 7 号卡生成配置。
