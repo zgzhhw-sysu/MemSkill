@@ -251,3 +251,9 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 在同一个 248 镜像根目录下，`source-compression/query-displacement/full/` 保存两个完整冻结预测、各动作概率、实测 F1 与源问题排名核验；`source-compression/legacy-terminal-symmetry/` 保存前四个 session 的独立同技能复核。看后期成绩时，使用同一批窗口的 `through-*.json` 对齐题数，再比较 `raw`、`native` 和 `credit`。`strict` 为策略冻结后才首次出分的窗口。每个窗口的事后最佳得分是机会界，不能作为策略所得 F1。[251 启动和数据位置](server-251.md#问题向量迁移与早期标签复核)
 
 连续权重的冻结预测和逐题结果在 `source-compression/query-displacement/support-mass/full/`。第一批后期 61 题中，活动技能概率平均绝对变化 23.07 个百分点，期望 F1 从仅用回报的 0.55108 降至 0.54200，暂未达到独立开发条件。较弱动作复核的第一份回执为 `legacy-terminal-symmetry/outcomes/conv-26_s1_p1_q85.json`。五条末段候选全部完成后，`summary.json` 将列出每条的修补方向、竞争解释、最终信用以及按对话的分母。[训练诊断和机会界](algorithm-notes.md#用其他对话的问题预测选技后的证据排名)
+
+### 同一对话内的 span 收益排序
+
+251 的五条旧末段标签已全部复核，三条保留，两条有同技能修补的竞争解释。新结果在 248 镜像的 `logs/source-compression/matched-span-rank/`。查看 `consensus/original/later/through-08.json` 的同一批 74 题，核验信用投票 F1 为 0.529637，同种投票只用回报为 0.528751，原生为 0.515726，错配信用为 0.530109。信用相对同种回报投票的增益区间仍跨零。完整后期 378 题还在收集，正式测试继续留出。两条早期首段的后续轨迹需要在较弱技能上重放，当前位置为 `logs/source-compression/legacy-root-symmetry/`。[逐版本配对数据](algorithm-notes.md#同一对话内的-span-收益排序) · [251 恢复命令](server-251.md#同对话配对排序残差校准与删除供样对话投票)
+
+`legacy-root-symmetry/writers-complete.json` 已收回，两条首段替换均重现原解析动作。固定后续技能的修补与读者问答仍待测量。三技能可达收益在 `logs/late-pairs/semantic-writer/three-writer/capacity/through-09.json`，其中 6 个匹配窗口有 37 题，3 个执行异常的窗口保留原因。[三技能机会界及分母](algorithm-notes.md#同一对话内的-span-收益排序)

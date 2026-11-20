@@ -139,7 +139,7 @@ def source(job, reg, study):
         raise ValueError("Trace changed")
     events = [json.loads(l) for l in trace.read_bytes().splitlines()]
     spans = [e for e in events if e["kind"] == "span"]
-    diag = [e["diagnosis"] for e in events if e["kind"] == "span_credit"][1]
+    diag = [e["diagnosis"] for e in events if e["kind"] == "span_credit"][job["pivot"]]
     return spans, diag
 
 
@@ -162,7 +162,7 @@ def make_writer(p):
 
 def verify_writer(out, job, spans, d, p):
     ex = make_writer(p)
-    _prefix, event = spans
+    event = spans[job["pivot"]]
     for e in spans:
         if diagnose(ex, e) or execution_fault(
             e["parsed_actions"], e["applied"], e["skills"]

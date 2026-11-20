@@ -159,6 +159,23 @@ def encode_questions(queries, encoder):
     return keys, np.concatenate(blocks)
 
 
+def encode_groups(source, expected, h, sk, model):
+    record = {"source": expected, "ids": [t["dia_id"] for t in h[sk]]}
+    for k in (1, 2):
+        chunks = dated_group_parts(source, k)
+        texts = tuple(clean(t, h, h[sk + "_date_time"]) for t, _ in chunks)
+        memberships = np.zeros((len(chunks), len(h[sk])), dtype=bool)
+        for i, (_, parts) in enumerate(chunks):
+            for j, _ in parts:
+                memberships[i, j] = True
+        if not memberships.any(axis=0).all():
+            raise ValueError("Missing source turns")
+        record[f"texts{k}"] = digest(texts)
+        record[f"map{k}"] = memberships
+        record[f"vec{k}"] = model.encode(texts)
+    return record
+
+
 def encode(base, study, corpus, limit):
     reg = registration(base, study, corpus)
     out = reg.parent
@@ -195,20 +212,7 @@ def encode(base, study, corpus, limit):
         (source,) = proc._extract_session_chunks(h[sk], h[sk + "_date_time"])
         if digest(source) != expected:
             raise ValueError("Different pre-write source")
-        record = {"source": expected, "ids": [t["dia_id"] for t in h[sk]]}
-        for k in (1, 2):
-            chunks = dated_group_parts(source, k)
-            texts = tuple(clean(t, h, h[sk + "_date_time"]) for t, _ in chunks)
-            memberships = np.zeros((len(chunks), len(h[sk])), dtype=bool)
-            for i, (_, parts) in enumerate(chunks):
-                for j, _ in parts:
-                    memberships[i, j] = True
-            if not memberships.any(axis=0).all():
-                raise ValueError("Missing source turns")
-            record[f"texts{k}"] = digest(texts)
-            record[f"map{k}"] = memberships
-            record[f"vec{k}"] = model.encode(texts)
-        store_vectors(f, **record)
+        store_vectors(f, **encode_groups(source, expected, h, sk, model))
         count += 1
         if count == limit:
             break
