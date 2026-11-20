@@ -161,3 +161,15 @@ LongMemEval-S 的六组评估按同一条完整历史依次执行。对于冻结
 ### 251 上的相邻发言检索实验
 
 在 251 检查 `systemctl --user status memskill-251-turn-key-screen memskill-251-turn-key-reader`。数据目录为 `~/memskill-work/runs/paired-251-linked-eight/source-compression/turn-keys/`，先看 `screen-summary.json` 的证据覆盖，再看最新 `reader-through-N.json` 的配对题数和 F1。比较 `policy` 与 `new_native` 可度量仅移动选技概率的增益，比较 `policy` 与 `matched_rate` 可度量针对具体窗口选择的增益。`reader/<窗口>/jobs.json` 保留原始分支未能复现的原因。248 镜像位于项目父目录下的 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/turn-keys/`。[实验协议](../../experiments/controller/protocols/turn_key_credit.json)
+
+检索竞争策略与首段归因核查都在 251 上运行。248 定期镜像到论文工作目录的 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/`。在 `retrieval-competition` 中并列读取最新 `through-NN.json` 的 `all` 和 `prospective`；在 `root-write-repairs` 中查同一问题在两个后续动作条件下的独立核查。跨窗口、跨模型的数字分别保留原分母和后端。[251 服务与产物说明](server-251.md)
+
+251 重启、瞬时服务消失时，可从部署目录重新启动本轮三个任务。脚本复用已落盘的不可变回执与确定性模型响应。服务仍存在时可直接用 `systemctl --user status` 查看它。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+systemd-run --user --unit=memskill-251-retrieval-competition bash "$PWD/scripts/experiments/run_retrieval_competition_251.sh"
+systemd-run --user --unit=memskill-251-root-write-repairs bash "$PWD/scripts/experiments/run_root_write_repairs_251.sh"
+systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experiments/run_root_overlap_251.sh"
+```
