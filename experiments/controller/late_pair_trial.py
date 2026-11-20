@@ -207,7 +207,7 @@ def aggregate(reports, *, complete=False):
     return result
 
 
-def run(trainer, study, locked, train, specs, limit=None):
+def run(trainer, study, locked, train, specs, limit=None, *, complete_donors=False):
     dest = locked.parent
     cohort = read(dest / "cohort.json")
     frozen = read(locked)
@@ -230,6 +230,9 @@ def run(trainer, study, locked, train, specs, limit=None):
         "skill_versions": [s["version"] for s in specs],
     }
     register(root / "manifest.json", manifest)
+    if complete_donors:
+        from experiments.controller.complete_donor_paths import run as complete
+        return complete(trainer, locked, data, manifest, limit or 1)
     os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(root / "responses")
     forecast = {(r["dialogue"], r["session"]): r for r in frozen["forecasts"]}
     reports = []

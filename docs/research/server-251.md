@@ -263,3 +263,27 @@ systemd-run --user --collect --unit=memskill-251-audit-case-credit --property=Re
 ```
 
 `prompts.json` 保存全部目标与提示，`preexisting.json` 保存登记时已有的输出指纹，`responses/` 和 `choices/` 保存实际推断及数值偏移。`factorial/`、`later/` 保存逐题实测问答所得的策略得分。`bounds/` 与 `joint/capacity-*.json` 是只供诊断的事后区间。两个原有 GPU 7 生成服务结束后，如推断尚未完成且端口空闲，客户端可按相同模型和占空比在租约内启动服务。
+
+### 逐题证据匹配与后期训练轨迹补采
+
+251 的 GPU 1 用 Qwen3-Embedding-0.6B 编码证据发言，编码占空比 30%，批大小 2。拟合与统计在同一卡的单独租约运行。GPU 2 的补采器一次租约最多新增一条真实轨迹，读取原随机试验的两条已测路径，共用 GPU 7 上占空比 22% 的 BF16 写入与问答服务。248 定期拉回数值预测、实测问答、成本和日志。实验期间，守护器暂停所有项目空闲占用。
+
+在 251 查询进度或在相应瞬时单元退出后恢复未完成的工作。编码完成时编码单元正常退出。
+
+```bash
+cd ~/memskill-work/run-linked-questions-v1
+systemctl --user status memskill-251-evidence-turns memskill-251-evidence-transport memskill-251-donor-factorial
+systemd-run --user --collect --unit=memskill-251-evidence-turns --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_evidence_turns_251.sh"
+systemd-run --user --collect --unit=memskill-251-evidence-transport --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/audit_evidence_transport_251.sh"
+systemd-run --user --collect --unit=memskill-251-donor-factorial --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_donor_factorial_251.sh"
+```
+
+产物根目录为 `~/memskill-work/runs/paired-251-linked-eight/`。进入 `source-compression/evidence-transport/`，查看 `turns/` 的 128 份来源、`pilot/predictions/` 的 64 份冻结预测、`pilot/factorial/summary.json` 的 91 题结果与 `pilot/sign-capacity.json`、`pilot/suffix-diagnostic.json` 的事后方向诊断。全部 88 题获得原路径与规则 2 回执后，`expanded/` 自动冻结剩余 40 个窗口的预测。查看最新 `later/through-*.json` 的 `strict_session13_plus` 和 `eligible_for_development`。独立补采位于 `late-pairs/donor-factorial/`，各窗口的 `complete.json` 含四条真实路径的问答、读写成本指纹和逐题精确期望。原验证标准及登记划分继续适用。
+
+复算先导策略的步长上限与随机末段误差时运行以下命令。
+
+```bash
+source ~/memskill-work/deploy/env-251.sh
+cd "$work/run-linked-questions-v1"
+python3 "$guard" run --gpus 1 -- "$MEMSKILL_PYTHON" -m experiments.controller.evidence_transport_capacity "$work/runs/paired-251-linked-eight"
+```
