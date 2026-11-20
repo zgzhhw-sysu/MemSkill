@@ -32,6 +32,7 @@ class PairedPolicy(nn.Module):
         self.weights = None
         self.decisions = []
         self.schedule = None
+        self.common_schedule = None
 
     def forward(self, state, candidates, deterministic=False, new_op_mask=None, *, record_noise=None, replay_noise=None):
         with torch.no_grad():
@@ -45,7 +46,13 @@ class PairedPolicy(nn.Module):
             if self.alternative is not None:
                 others = logits.clone()
                 others[[self.target, self.alternative]] = -torch.inf
-                plain = others.topk(k - 1).indices.tolist() + [self.alternative]
+                common = others.topk(k - 1).indices.tolist()
+                if getattr(self, "common_schedule", None) is not None:
+                    common = self.common_schedule[len(self.decisions)]
+                    if (self.mode != "count" or len(common) != k-1 or len(set(common)) != len(common)
+                            or any(i < 0 or i >= logits.numel() or i in (self.target, self.alternative) for i in common)):
+                        raise ValueError("Invalid fixed ordered background skills")
+                plain = common + [self.alternative]
                 slot = k - 1
             elif self.target in plain:
                 slot = plain.index(self.target)

@@ -215,3 +215,9 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 后续晋级依据使用 `policy/joint-repaired` 和 `rank-allocation/joint-repaired`。两者都逐题应用已测出的写入格式和截断修复。旧目录 `policy/mask` 中 conv-43 的两条历史负信用后来已被同技能修复否决。新的 `fit.json` 包含每个外层目标对话、内层供样历史和阈值，`calibration/summary.json` 是 88 题回算，`later/through-*.json` 中的 `strict` 只统计数值冻结后才出分的窗口。[251 恢复命令](server-251.md)
 
 排序版会继续处理 `rank-allocation/{joint-mask,joint-repaired}/long-prefix/`。这里的 `registration.json` 绑定 99 个端点、185 个跨 session 的问题和冻结时已经有分数的分支，每个端点有独立回执。88 题上的平均选技概率变化已达到 6.14 个百分点，F1 为 0.47301；信用相对只用回报增加 0.00071，整体仍低于原生 0.47451。后续要检查新出分窗口及跨 session 问题上的收益能否重复。
+
+### 最早和最后证据的比较
+
+251 正在为历史训练面板的 185 道跨 session 问题补测最早证据位置的技能干预。248 镜像的 `logs/late-pairs/first-evidence/` 中，`first-writes/` 收到的写入和每组 `forecast.json` 表示中间步骤，完整延迟回答以该组 `pair.json` 为准。比较同一批问题上的 `first_f1` 和 `last_f1` 各自相对原生的差；跨历史区间以对话为单位。四路径诊断已说明在最初 91 道训练题上，单靠在两种前置记忆之间重新分配末段用技概率，最多提高 0.00421。独立开发和完整测试仍待候选达到原晋级标准。[251 服务和恢复命令](server-251.md)
+
+已实测 conv-26 第 2 个 session 和 conv-30 第 1 个 session 的早段写入。活动技能换成时间技能后，成功动作数分别从 19 到 28、从 22 到 35。可从 `first-writes/conv-26_s02/` 追到两次提示与新模型响应。判断是否已经测到回答，请看对应终点目录下的 `pair.json`。有些问题共用相同的最早决策而最后证据位于不同 session。
