@@ -1,5 +1,7 @@
 # MemSkill 换机交接 · 2026-11-20
 
+251 的 `memskill-251-conditional-credit` 和 `memskill-251-query-prototypes` 会在四路径收齐后用 GPU 2 复核已冻结的候选。权重、概率、执行计划及逐题结果位于 `~/memskill-work/runs/paired-251-linked-eight/source-compression/{conditional-credit,query-prototypes}/`。六条训练对话的邻句读取筛选位于同一运行根下的 `neighbor-read/`。248 回收服务同步这些子目录。候选冻结时间、可用前瞻题数和当前判断见[算法实验笔记](algorithm-notes.md)。
+
 251 已接续 248 的训练。两台机器的 Python 均为 3.12.12，配对实验所用的 109 个 Python 依赖逐项版本一致。目标机的代码在 `~/memskill-work/MemSkill`，训练断点和模型路径见 [251 运行说明](server-251.md)。
 
 11 月 20 日 21:56，251 已启动新训练 `memskill-251-linked-eight`。运行目录为 `~/memskill-work/study-linked-eight-gpu`，逐卡日志在 `~/memskill-work/runs/paired-251-linked-eight/`。旧四题预算实验已完成，75 题开发集上的信用、原策略及终局奖励 F1 均为 0.41787。248 的私有备份 `runs/span_credit/251-bf16/recovered-20261120-2040/` 包含 4,292 个逐文件核对 SHA-256 的普通文件。新实验的进度按已原子发布的训练窗口计数。前瞻选技概率保存在新实验日志的 `source-compression/frozen.json`，SHA-256 为 `a9d72d31f2716b05ef4d860307a6d46a4e5eed028d38114cc0d455f103e6be5d`。路径级对照使用独立的 GPU 7 生成后端；四种选技顺序的真实回答均由同一后端采集。248 的副本位于 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/`。

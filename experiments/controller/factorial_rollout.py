@@ -71,8 +71,13 @@ def measure_cell(trainer, convo, root, bits, specs):
             (folder / "decisions.json").write_text(json.dumps(policy.decisions))
             usage.rename(folder / "usage.jsonl")
             folder.rename(path)
+    return load_cell(trainer, convo, path, bits, specs)
+
+
+def load_cell(trainer, convo, path, bits, specs):
+    """Verify an archived rollout without invoking the writer or reader."""
     decisions = read(path / "decisions.json")
-    if [r["use"] for r in decisions] != schedule:
+    if [r["use"] for r in decisions] != list(map(bool, bits)):
         raise ValueError("Saved path differs from its assigned pair of actions")
     verify_rollout(trainer, path, convo, decisions, specs)
     trace, = (path / "traces").glob("*.jsonl")
