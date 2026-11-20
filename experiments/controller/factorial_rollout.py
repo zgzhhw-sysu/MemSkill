@@ -25,6 +25,22 @@ def read(path):
     return json.loads(path.read_bytes())
 
 
+def record_scored_paths(archive, forecast):
+    """Bind any public path scores present by the forecast's creation to immutable content hashes."""
+    receipt = forecast.with_name("scored-at-freeze.json")
+    fingerprint = file_hash(forecast)
+    if not receipt.exists():
+        cutoff = forecast.stat().st_mtime_ns
+        paths = {str(p.relative_to(archive)): file_hash(p) for p in archive.glob("*/*/scores.json")
+                 if p.parent.name in {"00", "01", "10", "11"} and p.stat().st_mtime_ns <= cutoff}
+        register(receipt, {"forecast": fingerprint, "cutoff_ns": cutoff, "scored_paths": paths})
+    saved = read(receipt)
+    if saved["forecast"] != fingerprint or any(file_hash(archive / path) != digest
+                                              for path, digest in saved["scored_paths"].items()):
+        raise ValueError("Published path scores changed after registration")
+    return {Path(path).parts[0] for path in saved["scored_paths"]}
+
+
 def path_mass(bits, p, q):
     a, b = bits
     return (p if a else 1-p) * (q if b else 1-q)

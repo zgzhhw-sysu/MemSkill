@@ -14,7 +14,7 @@ python3 deploy/gpu_guard.py status
 
 训练集有 24 个两段 session 的窗口。每个窗口完整写入后发布 `rows.json`。两路训练退出后，同一服务评估开发集及各对照，开发筛选通过才运行两套正式测试。GPU 租约关闭后守护按显存余量恢复有限占用。
 
-独立的 `memskill-251-source-compression` 服务读取 22:06 冻结的选技概率，等第 5 至 8 个 session 的 12 个窗口全部完成后，使用 GPU 2 对照逐 span 的换技结果。`memskill-251-training-factorial` 在 GPU 1 上以单个 Qwen 模型、每批两条编码，GPU 7 的 Llama BF16 以 22% 目标占空比分别对四种选技顺序建库并回答问题。该单卡服务端口为 18774，结果保存在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/factorial/`。248 的回收服务每五分钟同步完整窗口及反馈，等主训练、来源概率核对、四路径、条件选技及问题原型五项服务全部退出后再做最后一次同步。
+独立的 `memskill-251-source-compression` 服务读取 22:06 冻结的选技概率，等第 5 至 8 个 session 的 12 个窗口全部完成后，使用 GPU 2 对照逐 span 的换技结果。`memskill-251-training-factorial` 在 GPU 1 上以单个 Qwen 模型、每批两条编码，GPU 7 的 Llama BF16 以 22% 目标占空比分别对四种选技顺序建库并回答问题。该单卡服务端口为 18774，结果保存在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/factorial/`。248 的回收服务每五分钟同步完整窗口及反馈，等主训练、来源概率核对、四路径、条件选技、问题原型及写入分解六项服务全部退出后再做最后一次同步。
 
 ## 前序实验记录
 

@@ -1,5 +1,7 @@
 # MemSkill 换机交接 · 2026-11-20
 
+251 的 `memskill-251-write-components` 复用主训练的 18773 限载读者，每次提交一条请求。11 个历史训练窗口的四组记忆库共对应 119 道题，计划、提示、逐题回答和策略结果在 `~/memskill-work/runs/paired-251-linked-eight/write-components/`。查看 `answers/` 可获知已完成的题，`eligible-labels.json` 包含所有能改变末段权重的问题。GPU 2 负责检索和策略拟合。达到拟合门槛时生成 `frozen.json`，否则生成 `screened-out.json`。完整读者分解写入 `summary.json`。248 每五分钟收回文件。[算法与判据](algorithm-notes.md)
+
 251 的 `memskill-251-conditional-credit` 和 `memskill-251-query-prototypes` 会在四路径收齐后用 GPU 2 复核已冻结的候选。权重、概率、执行计划及逐题结果位于 `~/memskill-work/runs/paired-251-linked-eight/source-compression/{conditional-credit,query-prototypes}/`。六条训练对话的邻句读取筛选位于同一运行根下的 `neighbor-read/`。248 回收服务同步这些子目录。候选冻结时间、可用前瞻题数和当前判断见[算法实验笔记](algorithm-notes.md)。
 
 251 已接续 248 的训练。两台机器的 Python 均为 3.12.12，配对实验所用的 109 个 Python 依赖逐项版本一致。目标机的代码在 `~/memskill-work/MemSkill`，训练断点和模型路径见 [251 运行说明](server-251.md)。

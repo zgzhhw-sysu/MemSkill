@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from experiments.controller.audit_source_compression import check_forecasts, panel
-from experiments.controller.factorial_rollout import CELLS, load_cell, summarize_window
+from experiments.controller.factorial_rollout import CELLS, load_cell, record_scored_paths, summarize_window
 from experiments.controller.granularity_placement import load_panel
 from experiments.controller.paired_grounding import window
 from experiments.controller.source_compression import file_hash, register
@@ -165,7 +165,7 @@ def orientation_support(forecasts):
     }
 
 
-def score_questions(windows, predictions):
+def score_questions(windows, predictions, *, partial_cohort=False):
     by_key = {(r["dialogue"], r["start"]): r for r in predictions}
     if len(by_key) != len(predictions) or len({(w["dialogue"], w["start"]) for w in windows}) != len(
         windows
@@ -238,12 +238,15 @@ def score_questions(windows, predictions):
         types[cat] = {"questions": len(group), "means": averages(group)}
     # Exact enumeration of the empirical cluster bootstrap over the six whole dialogues.
     ordered = sorted(groups)
-    if len(ordered) != 6:
+    if not (1 <= len(ordered) <= 6) or (not partial_cohort and len(ordered) != 6):
         raise ValueError("Expected six held training dialogues")
     counts = np.array([sum(r["dialogue"] == sid for r in rows) for sid in ordered])
-    draws = np.array(list(itertools.product(range(6), repeat=6)))
+    draws = np.array(list(itertools.product(range(len(ordered)), repeat=len(ordered))))
     intervals = {}
     for baseline in ("independent", "favor_same", "favor_different", "shuffled_sign"):
+        if len(ordered) == 1:
+            intervals[baseline] = None
+            continue
         totals = counts * [dialogues[sid]["conditional"] - dialogues[sid][baseline] for sid in ordered]
         means = totals[draws].sum(axis=1) / counts[draws].sum(axis=1)
         intervals[baseline] = np.quantile(means, [0.025, 0.975]).tolist()
@@ -353,6 +356,7 @@ def run(phase, previous, current, corpus, proxy, source):
                 raise RuntimeError("A later full window was already scored before coupling registration")
             check_coupling(report, features, probs)
             register(locked, report)
+            record_scored_paths(source / "factorial", locked)
             register(
                 dest / "orientation.json",
                 {
@@ -372,6 +376,18 @@ def run(phase, previous, current, corpus, proxy, source):
             result = score_questions(windows, locked["forecasts"])
             register(
                 dest / "prospective.json", {"forecast_sha256": file_hash(dest / "frozen.json"), **result}
+            )
+            early = record_scored_paths(source / "factorial", dest / "frozen.json")
+            fresh = [w for w in windows if f"{w['dialogue']}_s{w['start']}" not in early]
+            register(
+                dest / "strictly-later.json",
+                {
+                    "forecast": file_hash(dest / "frozen.json"),
+                    "windows_with_any_early_scores": sorted(early),
+                    "result": score_questions(fresh, locked["forecasts"], partial_cohort=True)
+                    if fresh
+                    else None,
+                },
             )
 
 
