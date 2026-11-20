@@ -26,6 +26,61 @@ from src.data_processing.locomo import LoCoMoProcessor
 from src.eval import get_evaluator
 
 
+class LinkedQuestionTests(unittest.TestCase):
+    def test_selection_requires_count_control_gain_when_present(self):
+        good = {"f1_change": .02, "control_to_credit_on_same_states": {"greedy_switches": 1},
+                "changed_question_evidence": [{"f1_delta": .2, "actions_changed_in_history": True,
+                                               "reader_prompt_changed": True}]}
+        report = {"phase": "validation", "credit_minus": dict.fromkeys(("native", "terminal", "always", "rate"), good)}
+        self.assertTrue(development_decision(report)["advance"])
+        report["credit_minus"]["count"] = dict(good, f1_change=0.)
+        self.assertFalse(development_decision(report)["advance"])
+
+    def test_all_question_coverage(self):
+        from experiments.controller.paired_grounding import verify_linked_questions
+        questions = [{"evidence": ["a", "b"], "original_index": 12}, {"evidence": ["b"], "original_index": 31}]
+        events = [{"kind": "qa", "query_id": f"q_{i}", "success": True} for i in range(2)]
+        for i, (turn, ids) in enumerate((("a", [0]), ("b", [0, 1]))):
+            events.append({"kind": "span", "span_id": i, "source_turns": [turn]})
+            rows = [{"qa_index": j, "original_index": questions[j]["original_index"]} for j in ids]
+            events.append({"kind": "span_credit", "diagnosis": {"span_id": i, "evidence_rule_version": 2, "questions": rows}})
+        verify_linked_questions(events, questions)
+        events[-1]["diagnosis"]["questions"].pop()
+        with self.assertRaisesRegex(ValueError, "Incomplete"):
+            verify_linked_questions(events, questions)
+        with self.assertRaisesRegex(ValueError, "factual"):
+            verify_linked_questions(events[1:], questions)
+
+    def test_evidence_forecasts_exclude_held_rewards(self):
+        from experiments.controller.evidence_preference import dialogue_fits
+        entries = [{"dialogue": sid, "session": k, "activity": 0., "temporal": gain,
+                    "contrast": torch.tensor([feature], dtype=torch.float64)}
+                   for sid in ("a", "b", "c") for k, gain, feature in ((1, .1, 1.), (2, 0., 0.))]
+        before, fitted = dialogue_fits(entries)
+        changed = [dict(r, temporal=-r["temporal"]) if r["dialogue"] == "a" else r for r in entries]
+        after, _ = dialogue_fits(changed)
+        self.assertEqual([r for r in before if r["dialogue"] == "a"], [r for r in after if r["dialogue"] == "a"])
+        self.assertEqual(fitted["a"]["training_dialogues"], ["b", "c"])
+        self.assertTrue(all(r["p"] == .5 for r in before if r["session"] == 2))
+        self.assertTrue(all(r["p"] > .5 for r in before if r["session"] == 1))
+
+    def test_serial_encoder_scope(self):
+        from src import rag_utils as rag
+        with TemporaryDirectory() as work, patch.dict(os.environ, {"MEMSKILL_QWEN_EMBEDDING_PATH": work}):
+            model = SimpleNamespace(device=torch.device("cuda"))
+            base = SimpleNamespace(model_name=work, model=model, _use_qwen_embedding=True,
+                                   use_flash_attn=rag._RETRIEVER_USE_FLASH_ATTN)
+            with self.assertRaisesRegex(RuntimeError, "simulated"):
+                with rag.reuse_qwen_retriever(base, "qwen3-embedding-0.6b"):
+                    for load in (rag.init_context_model, rag.init_query_model):
+                        self.assertIs(load("qwen3-embedding-0.6b")[1], model)
+                    raise RuntimeError("simulated")
+            self.assertIsNone(rag._serial_qwen.get())
+            with self.assertRaises(ValueError):
+                with rag.reuse_qwen_retriever(base, "contriever"):
+                    pass
+
+
 class ReaderEvidenceTest(unittest.TestCase):
     def test_held_reader_answers_do_not_change_that_dialogues_policy_probabilities(self):
         windows = {str(i): [{"start": 1, "state": [1., 0.], "n": i+1, "temporal": .8, "activity": .1},

@@ -1,4 +1,6 @@
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import List
 
 import torch
@@ -33,6 +35,22 @@ _MODEL_CACHE_LOCK = threading.RLock()
 _MODEL_CACHE_LOADING = {}
 _QWEN_RETRIEVER_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 _RETRIEVER_USE_FLASH_ATTN = True
+_serial_qwen = ContextVar("serial_qwen_retriever", default=None)
+
+
+@contextmanager
+def reuse_qwen_retriever(base, retriever):
+    """Use a serial worker's frozen state encoder for the same Qwen query and context checkpoint."""
+    path = os.environ.get("MEMSKILL_QWEN_EMBEDDING_PATH")
+    if (not _is_qwen_embedding_retriever(retriever) or not path or not os.path.samefile(base.model_name, path)
+            or not base._use_qwen_embedding or base.use_flash_attn != _RETRIEVER_USE_FLASH_ATTN
+            or base.model.device.type != "cuda"):
+        raise ValueError("Serial retrieval requires the same CUDA Qwen checkpoint and attention configuration")
+    token = _serial_qwen.set(base.model)
+    try:
+        yield
+    finally:
+        _serial_qwen.reset(token)
 
 
 def _canonicalize_retriever_name(retriever: str) -> str:
@@ -149,6 +167,8 @@ def mean_pooling(token_embeddings: torch.Tensor, mask: torch.Tensor) -> torch.Te
 def init_context_model(retriever: str):
     """Initialize context encoder with global caching."""
     retriever = _canonicalize_retriever_name(retriever)
+    if retriever == _QWEN_RETRIEVER_MODEL and _serial_qwen.get() is not None:
+        return None, _serial_qwen.get()
     cache_key = f"{retriever}_context"
     while True:
         with _MODEL_CACHE_LOCK:
@@ -221,6 +241,8 @@ def init_context_model(retriever: str):
 def init_query_model(retriever: str):
     """Initialize query encoder with global caching."""
     retriever = _canonicalize_retriever_name(retriever)
+    if retriever == _QWEN_RETRIEVER_MODEL and _serial_qwen.get() is not None:
+        return None, _serial_qwen.get()
     cache_key = f"{retriever}_query"
     while True:
         with _MODEL_CACHE_LOCK:

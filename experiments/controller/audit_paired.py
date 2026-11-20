@@ -366,8 +366,7 @@ def development_decision(report):
         raise ValueError("Policy selection requires development data")
     reason = []
     controls = ["native", "terminal", "always", "rate"]
-    if "plain" in report["credit_minus"]:
-        controls.append("plain")
+    controls.extend(arm for arm in ("plain", "count") if arm in report["credit_minus"])
     for arm in controls:
         diff = report["credit_minus"][arm]
         if diff["f1_change"] <= 0:
@@ -396,8 +395,12 @@ if __name__ == "__main__":
     if args.select_for_test and args.stdout_only:
         parser.error("--select-for-test publishes a decision and cannot use --stdout-only")
     arms = ["native", "terminal", "credit", "always", "rate"] if args.select_for_test else args.arms
-    if args.select_for_test and read(args.directory / "protocol.json").get("equal_sources"):
-        arms.append("plain")
+    if args.select_for_test:
+        protocol = read(args.directory / "protocol.json")
+        if protocol.get("equal_sources"):
+            arms.append("plain")
+        if protocol.get("all_linked_questions"):
+            arms.append("count")
     result = audit(args.directory, args.dataset, args.phase, arms)
     if args.stdout_only:
         print(json.dumps(result, indent=2))

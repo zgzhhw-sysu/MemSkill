@@ -293,3 +293,17 @@ GPU 重测中，纯原文库与实际写入库都改变 F1 的题有 10 道，�
 读者分数收齐后，在每次留出一整段训练对话的六折实验中，用其他五段对话的两种末段干预 F1 和决策前状态拟合概率。留出对话的概率只由本 span 的原始状态计算。比较信用概率、训练平均概率、同一对话内置换概率、贪心选择及等次数置换。晋级完整 Controller 实验的条件是期望 F1 同时超过两种固定技能和两种概率对照，至少四段对话的位置分差为正，贪心策略实际使用两种技能且胜过固定和等次数对照，同时逐窗口实测上限比最好的固定技能至少高 0.02。
 
 GPU 证据覆盖筛选入口为 `experiments.controller.skill_source_budget`。真实写入库对照可通过 `experiments.controller.writer_granularity --skill-budget` 生成，六折读者比较入口为 `experiments.controller.audit_budget_policy`。
+
+## 五条发言的读者结果与后续完整关联问题实验
+
+123 道训练诊断题的单卡和双卡 BF16 读者得到相同的汇总分数。依据读者 F1 训练的留一对话策略，期望 F1 为 0.35279，固定活动技能为 0.35579，逐窗口最优选择上限为 0.36104，未达到预设晋级条件。另一个策略按候选发言的证据覆盖差训练，在读者打分完成前冻结了 156 个概率。其采样期望 F1 为 0.35442，贪心 F1 为 0.35956，同一对话内随机放置相同次数的贪心选择为 0.35841。原始证据训练与重算入口为 `experiments.controller.evidence_preference freeze` 和 `score`。
+
+四题预算下，12 个训练窗口的末段有 24 道关联问题未进入初次归因。同后端补查找到 3 条支持选择活动技能的反馈。新实验在相同的六条训练对话中使用前八个 session，每两个 session 构成一个窗口，共 48 个 span。214 道窗口内可回答的问题对应 223 个问题与 span 的关联。两项预先设定的改动是逐一检查全部关联问题，以及对训练状态中心化、按训练集均方根距离缩放后拟合信用修正。规则 2 继续检查执行和检索能否解释分差。实验同时改变了训练窗口数量、问题覆盖与拟合方式，整体分差无法单独归因到其中任一项。
+
+```bash
+bash scripts/experiments/paired_grounding.sh train --study-train-sessions 8 \
+    --study-all-linked-questions --study-equal-sources --study-deployment-writer \
+    --study-anchor-abstentions --study-center-credit
+```
+
+协议会保存实际问题上界，本批最大窗口有 18 题。已保存的窗口在复用前逐 span 核对关联题编号、实际应答及规则版本。新协议在开发阶段也要求信用策略胜过在同一对话内放置相同使用次数的对照，并核对选择变化和读者输入变化。正式样本仍为预先锁定的 LoCoMo 314 题与 LongMemEval-S 105 条独立历史。
