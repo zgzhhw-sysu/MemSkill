@@ -189,3 +189,7 @@ systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experimen
 ### 逐题证据匹配控制器
 
 251 是计算机，248 是源码与结果镜像机。接手时从 248 同步目录 `runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/evidence-transport/` 开始。先导策略已冻结 64 个窗口的数值预测。91 题的选技概率平均移动 4.16 个百分点，期望 F1 比原生低 0.00120。先看 `pilot/suffix-diagnostic.json` 了解首段训练目标对末段动作的敏感性，再检查 `late-pairs/selection-labels/through-*.json` 与 `late-pairs/donor-factorial/` 的原路径核验和互补路径进度。扩展策略须集齐 88 道训练题的原始核验记录，其冻结后评估范围是预先保留的 378 题。训练诊断与正式完整历史分别汇报。[详细实验记录](algorithm-notes.md) [251 查看、复算与恢复](server-251.md)
+
+### 首段收益估计与跨对话方向
+
+在 248 的镜像目录下读取 `logs/source-compression/assisted-span-backup/masked-policy.json`。相同四路径题给出了两种不同检验：能否估准供样题上的首段收益，以及所得策略能否把正确方向迁移到其他对话。首个候选已冻结 58 个窗口，91 题期望 F1 为 0.46137，原生为 0.46189。正式判断查 `expanded/later/` 和 `resolved/later/` 的覆盖、严格前瞻结果、固定基准与等频对照；仅在既有条件全部通过后进入完整历史验证。[251 运行与恢复](server-251.md)

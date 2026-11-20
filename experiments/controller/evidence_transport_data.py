@@ -94,14 +94,18 @@ def factorial(base, turns, data):
     return donors
 
 
-def randomized(base, turns, data):
+def randomized(base, turns, data, *, first_session_only=False):
     late = base / "late-pairs"
     folder = late / "selection-labels"
     split = read(folder / "split.json")["windows"]["donor"]
-    if not all((folder / (name + ".json")).exists() for name in split):
-        return None
     if len(split) != 12 or sum(map(len, split.values())) != 88:
         raise ValueError("Different expanded donor population")
+    if first_session_only:
+        split = {n: qs for n, qs in split.items() if n.endswith("_s9")}
+        if len(split) != 6 or sum(map(len, split.values())) != 45:
+            raise ValueError("Different first chronological donor block")
+    if not all((folder / (name + ".json")).exists() for name in split):
+        return None
     donors = {}
     for name, qs in split.items():
         label_path = folder / (name + ".json")
