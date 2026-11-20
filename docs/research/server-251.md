@@ -14,6 +14,8 @@ python3 deploy/gpu_guard.py status
 
 训练集有 24 个两段 session 的窗口。每个窗口完整写入后发布 `rows.json`。两路训练退出后，同一服务评估开发集及各对照，开发筛选通过才运行两套正式测试。GPU 租约关闭后守护按显存余量恢复有限占用。
 
+独立的 `memskill-251-source-compression` 服务读取 22:06 冻结的选技概率，等第 5 至 8 个 session 的 12 个窗口全部完成后，使用 GPU 2 对照逐 span 的换技结果。`memskill-251-training-factorial` 在 GPU 1 上以单个 Qwen 模型、每批两条编码，GPU 7 的 Llama BF16 以 22% 目标占空比分别对四种选技顺序建库并回答问题。该单卡服务端口为 18774，结果保存在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/factorial/`。248 的回收服务每五分钟同步完整窗口及反馈，在这三项服务全部退出后做最后一次同步。
+
 ## 前序实验记录
 
 自 11 月 20 日 10:13 起，模型实验统一走 CUDA。等来源训练由 GPU 3、4 编码和检索，GPU 5、6 做写入与问答。训练、开发及通过筛选后的完整测试均使用这套后端。配对启动脚本默认选择 CUDA，有限显存时在 GPU 租约处等待。CPU 负责 I/O、分词、调度和 F1 统计。
