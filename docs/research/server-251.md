@@ -206,3 +206,17 @@ bash scripts/experiments/paired_holdout.sh
 `retrieval-competition/design-variance.json` 保存有完整路径的训练窗口中四种随机分配下的方差核查。`retrieval-competition/return-control/` 保存对照常数、各自的数值冻结时点及后续面板原始 HT 与校正读数。两个冻结时点之前已产生过路径分数的窗口分别记录。
 
 `root-overlap/question-influence.json` 在全部首段核查和主策略冻结之后生成。它为每一道产生首段额外信用的训练题保存独立留出后的 F1 和首段概率改变量，主策略继续使用预登记的全部训练题。
+
+### 后期 25 个窗口的三技能实测
+
+251 在 GPU 1 上限载运行 Qwen 编码，共用 GPU 7 上端口 18774 的 BF16 Llama。编码计算占空比为 0.30，生成占空比为 0.22。两个服务按窗口申请租约。模型计算等待可用 GPU。251 的结果目录为 `~/memskill-work/runs/paired-251-linked-eight/late-pairs/semantic-writer/`，248 在 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/late-pairs/semantic-writer/` 保存副本，路径相对仓库根目录。
+
+```bash
+cd ~/memskill-work/run-linked-questions-v1
+systemctl --user status memskill-251-late-semantic-writer memskill-251-three-writer
+# 服务退出后，若仍有缺失的窗口，可从已保存的回执继续。
+systemd-run --user --collect --unit=memskill-251-late-semantic-writer bash "$PWD/scripts/experiments/run_late_semantic_writer_251.sh"
+systemd-run --user --collect --unit=memskill-251-three-writer bash "$PWD/scripts/experiments/audit_three_writer_251.sh"
+```
+
+`panel.json` 固定问题、首段动作和窗口顺序，`forecast.json` 保存两种关系概率。一个窗口的 `choice.json`、`write.json` 和 `pair.json` 分别代表已选技、已建库和已完成该组问答。三路结果保存在 `three-writer/through-*.json`，等待该窗口原始活动路径及其冻结策略预测一并到齐才发布。两个目录都有最终的 `summary.json`。恢复时还需同一父目录中的 `outcomes/` 和 `../source-compression/retrieval-competition/` 的原始回执。

@@ -120,8 +120,8 @@ def measured_readers(folder, cache):
     return result
 
 
-def trial(trainer, convo, folder, cache, specs, forecast, out):
-    control = checked_cell(trainer, convo, folder, (0, 0), specs, cache)
+def trial(trainer, convo, folder, cache, specs, forecast, out, *, prefix_action=0):
+    control = checked_cell(trainer, convo, folder, (prefix_action, 0), specs, cache)
     prefix, event = control["spans"]
     original = event["selected_skills"]
     receipt = {
