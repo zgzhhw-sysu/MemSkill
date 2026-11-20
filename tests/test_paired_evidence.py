@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import unittest
 import numpy as np
 import torch
@@ -12,8 +13,11 @@ from types import SimpleNamespace
 
 from experiments.controller.audit_paired import answer_change, development_decision, reader_inputs
 from experiments.controller.audit_duration_credit import duration_alias
+from experiments.controller.audit_budget_policy import crossfit as crossfit_budget
+from experiments.controller.audit_granularity_transfer import placement_ceiling
+from experiments.controller.skill_source_budget import dialogue_recall, retained_turns
 from experiments.controller.replay_validation_choices import verified_schedule
-from experiments.controller.probe_omitted import check_responses, omitted_final_indices
+from experiments.controller.probe_omitted import check_responses, omitted_final_indices, probe_training_windows
 from experiments.controller.audit_training_replays import probability_placement
 from experiments.controller.granularity_placement import compare as compare_granularity, measured_return
 from experiments.controller.transfer_grounding import external_histories
@@ -23,6 +27,59 @@ from src.eval import get_evaluator
 
 
 class ReaderEvidenceTest(unittest.TestCase):
+    def test_held_reader_answers_do_not_change_that_dialogues_policy_probabilities(self):
+        windows = {str(i): [{"start": 1, "state": [1., 0.], "n": i+1, "temporal": .8, "activity": .1},
+                            {"start": 3, "state": [0., 1.], "n": i+2, "temporal": .1, "activity": .8}]
+                   for i in range(6)}
+        baseline = crossfit_budget(windows, "cpu")
+        self.assertTrue(baseline["advance_to_full_controller"])
+        for row in windows["0"]:
+            row["temporal"], row["activity"] = row["activity"], row["temporal"]
+        changed = crossfit_budget(windows, "cpu")
+        def probabilities(report):
+            return [r["temporal_probability"] for r in report["rows"] if r["dialogue"] == "0"]
+        self.assertEqual(probabilities(changed), probabilities(baseline))
+        self.assertLess(changed["folds"]["0"]["greedy"], baseline["folds"]["0"]["greedy"])
+
+    def test_fixed_turn_budget_preserves_source_order_and_allows_only_distinct_turns(self):
+        turns = [{"dia_id": str(i), "speaker": "A", "text": f"utterance {i}"} for i in range(3)]
+        processor = LoCoMoProcessor(chunk_mode="full-session")
+        picks = {"activity": ["2", "0"], "temporal": ["1", "2"]}
+        result = retained_turns(turns, "May 4", picks, processor, 2)
+        self.assertEqual(result["activity"], [f'May 4 | A said, "utterance {i}"' for i in (0, 2)])
+        with self.assertRaisesRegex(ValueError, "turn budget"):
+            retained_turns(turns, "May 4", dict(picks, temporal=["2", "2"]), processor, 2)
+        entries = [{"covered_question_mass": {"activity": 1., "temporal": 0.}},
+                   {"covered_question_mass": {"activity": 0., "temporal": 1.}}]
+        recall = dialogue_recall(entries, 2)["recall"]
+        self.assertEqual(recall["best_per_span"], 1.)
+        self.assertEqual(recall["same_count_within_dialogue"], .5)
+
+    def test_grouping_ceiling_chooses_once_for_all_questions_in_a_window(self):
+        def row(pair, single, source):
+            return {"dialogue": "one", "source_delta": source, "writer_delta": pair-single,
+                    "writer_f1": {"pair": pair, "single": single}}
+        scores = placement_ceiling({"first": [row(1., 0., 1.), row(0., .5, 1.)],
+                                    "second": [row(0., 1., -1.)]})
+        self.assertAlmostEqual(scores["f1"]["best_per_window"], 2/3)
+        self.assertAlmostEqual(scores["f1"]["source_count_within_dialogue"], 1.25/3)
+        self.assertEqual(scores["windows_with_exchangeable_choices"], 2)
+
+    def test_live_probe_waits_for_publication_and_checks_original_backend(self):
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, MEMSKILL_BACKEND_ID="gpu"):
+            study = Path(tmp)
+            episode = study / "train" / "example"
+            trainer = SimpleNamespace(args=SimpleNamespace(api_base="unused"))
+            windows = [({"sample_id": "example"}, episode)]
+            probe_training_windows(trainer, study, windows, completed_only=True)
+            progress, = study.rglob("progress.json")
+            self.assertEqual(json.loads(progress.read_bytes())["pending_windows"], ["example"])
+            self.assertFalse(progress.with_name("summary.json").exists())
+            episode.mkdir(parents=True)
+            (episode / "backend.json").write_text('{"inference": "different"}')
+            with self.assertRaisesRegex(ValueError, "different inference backends"):
+                probe_training_windows(trainer, study, windows, completed_only=True)
+
     def test_multiline_repair_preserves_the_omitted_speaker_date_and_image(self):
         with patch("src.data_processing.locomo.tiktoken.get_encoding"):
             processor = LoCoMoProcessor(chunk_mode="full-session")

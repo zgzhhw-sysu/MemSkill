@@ -64,7 +64,7 @@ def missing_multiline_turns(processor, turns, date, recorded_source):
     return missing
 
 
-def build_jobs(study, data_path, *, repair_multiline=False):
+def build_jobs(study, data_path, *, repair_multiline=False, skill_budget=None):
     protocol = json.loads((study / "protocol.json").read_text())
     raw = data_path.read_bytes()
     train = set(protocol["train"])
@@ -72,7 +72,16 @@ def build_jobs(study, data_path, *, repair_multiline=False):
         raise ValueError("The saved training split and input corpus must match")
     data = {c["sample_id"]: c for c in json.loads(raw) if c["sample_id"] in train}
     ev = get_evaluator("locomo", SimpleNamespace())
-    processor = LoCoMoProcessor(chunk_mode="full-session") if repair_multiline else None
+    processor = LoCoMoProcessor(chunk_mode="full-session") if repair_multiline or skill_budget is not None else None
+    if skill_budget is not None:
+        from experiments.controller.skill_source_budget import SKILLS, retained_turns
+        descriptions = {s["name"]: s["description"] for s in protocol["skills"] if s["name"] in SKILLS.values()}
+        picks = {(r["dialogue"], r["session"]): r for r in skill_budget["rows"]}
+        if (repair_multiline or skill_budget["checkpoint"] != protocol["checkpoint_sha256"]
+                or skill_budget["turn_budget_per_skill"] != protocol["retrieval_k"][1]
+                or skill_budget["skill_descriptions"] != descriptions or len(picks) != len(skill_budget["rows"])
+                or {sid for sid, _ in picks} != train):
+            raise ValueError("Skill turn selections differ from the training study")
     jobs, windows = [], {}
     set_retriever_flash_attn(False)
     for start, end in protocol["train_sessions"]:
@@ -87,9 +96,23 @@ def build_jobs(study, data_path, *, repair_multiline=False):
             spans = [e for e in events if e["kind"] == "span"]
             variants = source_variants(spans)
             windows[episode.name] = {"trace": hashlib.sha256(raw_trace).hexdigest(), "source_inserted": variants is not None}
-            if variants is None:
+            if variants is None and skill_budget is None:
                 continue
-            live, fixed, tails = variants
+            if variants is None:
+                live = restore_text(spans)
+                fixed, tails = list(live.values()), {}
+            else:
+                live, fixed, tails = variants
+            if skill_budget is not None:
+                session = f"session_{end}"
+                turns = convo["conversation"][session]
+                date = convo["conversation"][session + "_date_time"]
+                recorded, = processor._extract_session_chunks(turns, date)
+                if recorded != spans[-1]["source"]:
+                    raise ValueError("Frozen turn choices and the original writer saw different sessions")
+                tails = retained_turns(turns, date, picks[sid, end]["selected"], processor, protocol["retrieval_k"][1])
+                # Include the factual bank to verify retrieval, without generating an extra reader answer.
+                tails["original"] = list(live.values())[len(fixed):]
             snapshot, = [e for e in events if e["kind"] == "snapshot"]
             versions = {c["memory_id"]: c["version"] for e in events if e["kind"] == "span" for c in e["changes"]}
             bank_hash = hashlib.sha256(json.dumps(list(live.items()), ensure_ascii=False).encode()).hexdigest()
@@ -130,8 +153,11 @@ def build_jobs(study, data_path, *, repair_multiline=False):
                     raise ValueError("The recorded question differs from the corpus")
                 contexts = {name: bank.retrieve(vector)[0] for name, bank in banks.items()}
                 archived = [live[mid] for mid, _ in measured[i]["refs"]]
-                job = {"episode": episode.name, "original_index": ids[i], "question": q,
-                       "pair_retrieval_reproduced": archived == contexts["pair"],
+                if skill_budget is None:
+                    agreement = {"pair_retrieval_reproduced": archived == contexts["pair"]}
+                else:
+                    agreement = {"original_retrieval_reproduced": archived == contexts.pop("original")}
+                job = {"episode": episode.name, "original_index": ids[i], "question": q, **agreement,
                        "prompts": {a: ev.build_prompt(q["question"], ctx, q) for a, ctx in contexts.items()}}
                 if repair_multiline:
                     job["omitted_turns_retrieved"] = {a: [tid for tid, text in missing.items() if text in ctx]
@@ -148,9 +174,14 @@ def measured_answer(prompt, model, q, ev, cache):
     return {"answer": answer, "tokens": [n_in, n_out], "f1": ev.compute_f1(answer, ev.get_ground_truth(q), q)}
 
 
-def run(study, data_path, output, *, repair_multiline=False):
+def run(study, data_path, output, *, repair_multiline=False, skill_budget=None):
+    plan = build_jobs(study, data_path, repair_multiline=repair_multiline, skill_budget=skill_budget)
+    score_jobs(plan, output, repair_multiline=repair_multiline)
+
+
+def score_jobs(plan, output, *, repair_multiline=False):
+    """Score the saved reader prompts after the GPU used for retrieval has been released."""
     output.mkdir(parents=True, exist_ok=True)
-    plan = build_jobs(study, data_path, repair_multiline=repair_multiline)
     if not plan["jobs"]:
         raise ValueError("The saved training panel contains no eligible source writes and questions")
     backend = os.environ["MEMSKILL_BACKEND_ID"]
@@ -174,7 +205,8 @@ def run(study, data_path, output, *, repair_multiline=False):
         row["scores"] = scores
         rows.append(row)
         atomic_json(output / f'{job["episode"]}-q{job["original_index"]}.json', row)
-    summary = {"questions": len(rows), "original_retrieval_matches": sum(r["pair_retrieval_reproduced"] for r in rows),
+    ref_key = "original_retrieval_reproduced" if "original_retrieval_reproduced" in rows[0] else "pair_retrieval_reproduced"
+    summary = {"questions": len(rows), "original_retrieval_matches": sum(r[ref_key] for r in rows),
                "mean_f1": {a: mean(r["scores"][a]["f1"] for r in rows) for a in rows[0]["scores"]}}
     atomic_json(output / "summary.json", summary)
 
@@ -185,5 +217,7 @@ if __name__ == "__main__":
         parser.add_argument(name, type=Path)
     parser.add_argument("--repair-multiline", action="store_true",
                         help="Independently repeat both answers to every training question linked to an omitted utterance")
+    parser.add_argument("--skill-budget", type=Path, help="Measured equal-budget source turn selections from skill_source_budget")
     args = parser.parse_args()
-    run(args.study, args.locomo, args.output, repair_multiline=args.repair_multiline)
+    selections = json.loads(args.skill_budget.read_bytes()) if args.skill_budget else None
+    run(args.study, args.locomo, args.output, repair_multiline=args.repair_multiline, skill_budget=selections)
