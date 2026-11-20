@@ -248,3 +248,18 @@ systemd-run --user --collect --unit=memskill-251-reply-placement --property=Rest
 ```
 
 运行产物位于 `~/memskill-work/runs/paired-251-linked-eight/source-compression/reply-placement/`。每个 session 的 `sources/` 回执含来源指纹、可用回复数、实际目标与同说话者错配目标的四个特征。`fit.json` 固定按对话留出的权重和训练输入指纹，`preexisting.json` 登记拟合时已经落盘的原始问答路径。`calibration.json` 和 `through-NN.json` 保存逐题 F1、各节点选技概率与期望读写 token。查看 `prospective_session13_plus` 可得到冻结后在较晚 session 中的覆盖和 F1。248 定期把该目录拉回论文工作区。
+
+### 案例提示的选技试验
+
+251 的物理 GPU 7 串行运行现有 22% 占空比 BF16 Llama，两个客户端复用同一个服务。GPU 1 在单独的限额租约中计算概率、枚举可行分数区间并核对已观测的写入和问答轨迹。每条推断原子保存，客户端可从已有响应恢复。主输出目录为 `~/memskill-work/runs/paired-251-linked-eight/source-compression/case-credit/`。两阶段追加登记和结果在其 `joint/` 子目录。
+
+```bash
+cd ~/memskill-work/run-linked-questions-v1
+systemctl --user status memskill-251-case-credit memskill-251-case-credit-joint memskill-251-audit-case-credit
+# 瞬时服务已退出、仍有未完成的窗口时，按需恢复对应任务。
+systemd-run --user --collect --unit=memskill-251-case-credit --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_case_credit_251.sh"
+systemd-run --user --collect --unit=memskill-251-case-credit-joint --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_case_credit_joint_251.sh"
+systemd-run --user --collect --unit=memskill-251-audit-case-credit --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/audit_case_credit_251.sh"
+```
+
+`prompts.json` 保存全部目标与提示，`preexisting.json` 保存登记时已有的输出指纹，`responses/` 和 `choices/` 保存实际推断及数值偏移。`factorial/`、`later/` 保存逐题实测问答所得的策略得分。`bounds/` 与 `joint/capacity-*.json` 是只供诊断的事后区间。两个原有 GPU 7 生成服务结束后，如推断尚未完成且端口空闲，客户端可按相同模型和占空比在租约内启动服务。
