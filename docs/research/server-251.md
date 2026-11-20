@@ -505,3 +505,28 @@ for role in encode policy mass writers prepared outcomes; do
         --working-directory="$PWD" bash "$PWD/scripts/experiments/$worker" "$role"
 done
 ```
+
+### 同对话配对排序、残差校准与删除供样对话投票
+
+结果根目录为 `$work/runs/paired-251-linked-eight/source-compression/matched-span-rank`。根下的 `original/` 和 `expanded/` 是直接信用排序，`calibrated/` 和 `consensus/` 各自也有这两个版本。展开版读取 `legacy-terminal-symmetry/summary.json` 的五条较弱技能复核及早期 12 个窗口。编码和策略拟合均使用物理 GPU 3 的租约。模型写入和问答继续沿用已限载的物理轨迹采集任务。
+
+恢复时执行下面的命令，已有的每个阶段会读取落盘记录续跑。各处的 `later/through-*.json`、`replica/` 和 `long-prefix/` 对应随机焦点、四条路径复测与完整前缀。比较版本时对齐题数和物理窗口，并查看 `strict.questions`。`raw_rank` 表示同种算法仅使用实测回报，`raw` 表示原始回报底座。对投票的信用归因以 `credit` 相对 `raw_rank` 的差为准。每个供样删除模型的分数在 `votes.json`。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+for phase in encode original expanded calibrated-original calibrated-expanded consensus-original consensus-expanded; do
+    unit="memskill-251-matched-span-$phase"
+    systemctl --user is-active --quiet "$unit" && continue
+    systemd-run --user --collect --unit="$unit" -p Restart=on-failure -p RestartSec=40 \
+        --working-directory="$PWD" bash "$PWD/scripts/experiments/run_matched_span_251.sh" "$phase"
+done
+```
+
+首段写入的独立重放在 `source-compression/legacy-root-symmetry/`，两次后续选技相同但检索和写入均已改变。`writers-complete.json` 仅证明两个候选的首段写入检查已经结束，逐条查看 `writers/*.json` 的 `writer.status`。在相同的 5、6 双卡服务上恢复这一阶段可以执行下面的命令。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+bash scripts/experiments/run_legacy_terminal_251.sh root-pivots
+```

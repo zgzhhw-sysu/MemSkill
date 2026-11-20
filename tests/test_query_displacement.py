@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.legacy_terminal_symmetry import measure, report
+from experiments.controller.legacy_terminal_symmetry import measure, report, source
 from experiments.controller.policy_capacity import window_capacity
 from experiments.controller.query_displacement_audit import score
 from experiments.controller.query_displacement_data import encode_questions
@@ -26,6 +26,22 @@ from experiments.controller.source_compression import file_hash
 
 
 class QueryDisplacementTest(unittest.TestCase):
+    def test_archived_root_and_terminal_writers_use_their_own_decision(self):
+        with TemporaryDirectory() as tmp:
+            study = Path(tmp)
+            directory = study / "train" / "conv-a_s1" / "traces"
+            directory.mkdir(parents=True)
+            trace = directory / "run.jsonl"
+            events = [{"kind": "span", "span_id": i} for i in (0, 1)] + [
+                {"kind": "span_credit", "diagnosis": {"pivot": i}} for i in (0, 1)
+            ]
+            trace.write_text("\n".join(json.dumps(e) for e in events))
+            reg = {"windows": {"conv-a_s1": {"trace": file_hash(trace)}}}
+            for i in (0, 1):
+                spans, d = source({"window": "conv-a_s1", "pivot": i}, reg, study)
+                self.assertEqual(len(spans), 2)
+                self.assertEqual(d, {"pivot": i})
+
     def test_terminal_summary_checks_receipts_and_keeps_empty_histories(self):
         packet = {
             "jobs": [{"id": "a1", "history": "a", "weak": "swap"}],

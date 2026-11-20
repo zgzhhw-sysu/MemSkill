@@ -12,6 +12,7 @@ import torch
 from experiments.controller.factorial_rollout import read
 from experiments.controller.semantic_writer import REL, TEMP, sha
 from experiments.controller.source_compression import file_hash, register
+from experiments.controller.third_skill_capacity import run as measure_capacity
 from src.credit_assignment import _digest
 from src.evaluation_cache import digest
 from src.replay import restore_text
@@ -384,6 +385,8 @@ def run(base, corpus):
         register(out / f"through-{len(rows):02d}.json", result)
         if len(rows) == len(panel):
             register(out / "summary.json", result)
+        if (base / "late-pairs/selection-labels/split.json").is_file():
+            measure_capacity(base)
 
 
 if __name__ == "__main__":
