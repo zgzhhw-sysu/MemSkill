@@ -1,5 +1,7 @@
 # MemSkill 换机交接 · 2026-11-20
 
+后续配对实验的两个用户级服务为 `memskill-251-late-pairs` 和 `memskill-251-audit-late-pairs`。数据在 `~/memskill-work/runs/paired-251-linked-eight/late-pairs/`，248 收回到 `runs/span_credit/251-bf16/linked-eight-gpu/logs/late-pairs/`。保留 `cohort.json`、`features.json`、`frozen.json`、`step-mixture/` 和完整的 `outcomes/`。重跑时逐路径校验已经落盘的分数和写入，只计算缺失路径。首轮借用现有 7 号卡读者，后续由同配置的独立读者接续。终局、原生、两个校准版本及置换对照共用同一批真实轨迹。[251 运行说明](server-251.md) · [实验判据](algorithm-notes.md)
+
 251 的 `memskill-251-write-components` 复用主训练的 18773 限载读者，每次提交一条请求。11 个历史训练窗口的四组记忆库共对应 119 道题，计划、提示、逐题回答和策略结果在 `~/memskill-work/runs/paired-251-linked-eight/write-components/`。查看 `answers/` 可获知已完成的题，`eligible-labels.json` 包含所有能改变末段权重的问题。GPU 2 负责检索和策略拟合。达到拟合门槛时生成 `frozen.json`，否则生成 `screened-out.json`。完整读者分解写入 `summary.json`。248 每五分钟收回文件。[算法与判据](algorithm-notes.md)
 
 251 的 `memskill-251-conditional-credit` 和 `memskill-251-query-prototypes` 会在四路径收齐后用 GPU 2 复核已冻结的候选。权重、概率、执行计划及逐题结果位于 `~/memskill-work/runs/paired-251-linked-eight/source-compression/{conditional-credit,query-prototypes}/`。六条训练对话的邻句读取筛选位于同一运行根下的 `neighbor-read/`。248 回收服务同步这些子目录。候选冻结时间、可用前瞻题数和当前判断见[算法实验笔记](algorithm-notes.md)。

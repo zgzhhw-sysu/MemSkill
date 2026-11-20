@@ -51,6 +51,16 @@ def compression_features(singles, pairs):
     return torch.stack((loss.mean(), loss.topk(math.ceil(len(loss)/4)).values.mean(), crowding(pairs) - crowding(singles)))
 
 
+def measure_source(source, retriever):
+    a, b = (dated_turn_groups(source, size) for size in (1, 2))
+    texts = list(dict.fromkeys(a + b))
+    vectors = torch.as_tensor(get_embeddings(retriever, texts, "context", batch_size=2), device="cuda")
+    index = {text: i for i, text in enumerate(texts)}
+    features = compression_features(vectors[[index[t] for t in a]], vectors[[index[t] for t in b]])
+    return {"source_sha256": hashlib.sha256(source.encode()).hexdigest(), "singles": len(a), "pairs": len(b),
+            "features": features.tolist()}
+
+
 def collect_features(study, corpus, dest):
     protocol = json.loads((study / "protocol.json").read_bytes())
     raw = corpus.read_bytes()
@@ -88,13 +98,7 @@ def collect_features(study, corpus, dest):
         for n in range(1, 9):
             k = f"session_{n}"
             source, = proc._extract_session_chunks(convo["conversation"][k], convo["conversation"][k + "_date_time"])
-            a, b = (dated_turn_groups(source, size) for size in (1, 2))
-            texts = list(dict.fromkeys(a + b))
-            vectors = torch.as_tensor(get_embeddings(retriever, texts, "context", batch_size=2), device="cuda")
-            index = {text: i for i, text in enumerate(texts)}
-            features = compression_features(vectors[[index[t] for t in a]], vectors[[index[t] for t in b]])
-            rows.append({"dialogue": sid, "session": n, "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
-                         "singles": len(a), "pairs": len(b), "features": features.tolist()})
+            rows.append(dict(dialogue=sid, session=n, **measure_source(source, retriever)))
     if len({(r["dialogue"], r["session"]) for r in rows}) != 48:
         raise ValueError("Incomplete training features")
     register(dest, {**identity,

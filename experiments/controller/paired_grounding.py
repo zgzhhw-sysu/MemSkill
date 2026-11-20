@@ -244,8 +244,9 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only probabilities for four-path evaluation")
+    parser.add_argument("--study-pair-limit", type=int, help="Run the first N registered later training pairs")
     parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
                         help="Last session of the completed training panel for the weaker-branch audit")
@@ -277,8 +278,11 @@ def main():
         parser.error("--study-probe-completed checks the whole training protocol")
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
-    if (options.study_phase == "training-factorial") != bool(options.study_forecast):
-        parser.error("--study-forecast is required exclusively for training-factorial")
+    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs")
+    if options.study_pair_limit is not None and (options.study_phase != "training-late-pairs" or options.study_pair_limit < 1):
+        parser.error("--study-pair-limit requires a positive limit and training-late-pairs")
+    if paired_trial != bool(options.study_forecast):
+        parser.error("--study-forecast is required exclusively for paired trajectory experiments")
     sys.argv[1:] = remainder
     args = get_agentic_memory_args()
     if (args.dataset != "locomo" or not args.api or args.enable_designer or not args.eval_f1_only
@@ -303,12 +307,15 @@ def main():
     set_seed(args.seed)
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = args.inference_workers == args.inference_session_workers == 1
-    if options.study_phase == "training-factorial":
+    if paired_trial:
         if args.device != "cuda" or not config.share_serial_encoders or torch.cuda.device_count() != 1:
             parser.error("training-factorial requires a single leased GPU and serial encoders")
         free, total = torch.cuda.mem_get_info()
         budget = min(int(total * .76), free - 2048 * 2**20)
         if budget < 2304 * 2**20:
+            if options.study_phase == "training-late-pairs":
+                print(f"Waiting for encoder headroom: CUDA reports {free//2**20} MiB free; need 4352 MiB", flush=True)
+                raise SystemExit(75)
             raise RuntimeError("Insufficient free memory for the bounded factorial encoder")
         torch.cuda.set_per_process_memory_fraction(budget/total)
         print(f"Training factorial CUDA allocator limit {budget//2**20} MiB", flush=True)
@@ -353,11 +360,15 @@ def main():
                 temporary.replace(path)
         else:
             raise ValueError("Run training first")
-    if options.study_phase == "training-factorial":
-        from experiments.controller.factorial_rollout import run
+    if paired_trial:
         from src.rag_utils import reuse_qwen_retriever
         with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
-            run(trainer, out, options.study_forecast, train, specs)
+            if options.study_phase == "training-late-pairs":
+                from experiments.controller.late_pair_trial import run
+                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
+            else:
+                from experiments.controller.factorial_rollout import run
+                run(trainer, out, options.study_forecast, train, specs)
         return
     if options.study_phase == "replay-validation-choices":
         from experiments.controller.replay_validation_choices import replay
