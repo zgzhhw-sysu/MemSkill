@@ -19,27 +19,37 @@ def read_locked_json(path, expected_hash):
     return json.loads(data)
 
 
-def load_cohort(dataset, path, spec):
+def load_split_cohort(dataset, path, spec, split="test"):
+    cohort = spec
+    if split != "test":
+        if dataset != "locomo" or split not in spec["development_splits"]:
+            raise ValueError(f"Unsupported {dataset} split: {split}")
+        cohort = spec["development_splits"][split]
     data = read_locked_json(path, spec["data_sha256"])
     questions = {}
     if dataset == "locomo":
-        for index in spec["test_indices"]:
-            dialogue = data[index]
+        indices = spec["test_indices"] if split == "test" else cohort["indices"]
+        samples = [data[i] for i in indices]
+        for dialogue in samples:
             for i, qa in enumerate(dialogue["qa"]):
                 if qa["category"] != spec["excluded_category"]:
                     questions[dialogue["sample_id"], i] = qa
     else:
-        split = read_locked_json(ROOT / spec["split_file"], spec["split_sha256"])
-        for index in split["test"]:
-            row = data[index]
+        splits = read_locked_json(ROOT / spec["split_file"], spec["split_sha256"])
+        samples = [data[i] for i in splits["test"]]
+        for row in samples:
             sample_id = row["question_id"]
             if not sample_id.endswith(spec["excluded_id_suffix"]):
                 questions[sample_id, 0] = {"question": row["question"], "answer": row["answer"]}
     keys = json.dumps(list(questions), separators=(",", ":")).encode()
     digest = hashlib.sha256(keys).hexdigest()
-    if len(questions) != spec["scored_questions"] or digest != spec["scored_key_sha256"]:
-        raise ValueError(f"{dataset}: question IDs differ from the locked cohort")
-    return questions
+    if len(questions) != cohort["scored_questions"] or digest != cohort["scored_key_sha256"]:
+        raise ValueError(f"{dataset}/{split}: question IDs differ from the locked cohort")
+    return samples, questions
+
+
+def load_cohort(dataset, path, spec):
+    return load_split_cohort(dataset, path, spec)[1]
 
 
 def question_scores(dataset, questions, answer_files):

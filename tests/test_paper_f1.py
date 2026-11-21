@@ -1,13 +1,37 @@
+import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from experiments.controller.paper_f1 import PROTOCOL, run_baseline, score_answers
+from experiments.controller.paper_f1 import PROTOCOL, load_cohort, load_split_cohort, run_baseline, score_answers
 
 
 class PaperF1Test(unittest.TestCase):
+    def test_development_ids_are_separate_from_paper_test_ids(self):
+        def key_hash(sid):
+            return hashlib.sha256(json.dumps([[sid, 1]], separators=(",", ":")).encode()).hexdigest()
+
+        data = [{"sample_id": sid, "qa": [{"category": 5}, {"category": 2}]} for sid in ("a", "b", "c")]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "data.json"
+            path.write_text(json.dumps(data))
+            spec = {"data_sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "excluded_category": 5,
+                    "test_indices": [2], "scored_questions": 1, "scored_key_sha256": key_hash("c"),
+                    "development_splits": {s: {"indices": [i], "scored_questions": 1, "scored_key_sha256": key_hash(sid)}
+                                           for i, (s, sid) in enumerate((("train", "a"), ("validation", "b")))}}
+            for split, sid in (("train", "a"), ("validation", "b"), ("test", "c")):
+                samples, questions = load_split_cohort("locomo", path, spec, split)
+                self.assertEqual([s["sample_id"] for s in samples], [sid])
+                self.assertEqual(list(questions), [(sid, 1)])
+            self.assertEqual(list(load_cohort("locomo", path, spec)), [("c", 1)])
+            spec["development_splits"]["train"]["indices"] = [2]
+            with self.assertRaisesRegex(ValueError, "locked cohort"):
+                load_split_cohort("locomo", path, spec, "train")
+            with self.assertRaisesRegex(ValueError, "Unsupported"):
+                load_split_cohort("longmemeval", path, {}, "validation")
+
     def test_complete_history_shards_rescore_native_baseline(self):
         from experiments.designer.paper_date_pair import summarize_if_complete
 
@@ -27,6 +51,11 @@ class PaperF1Test(unittest.TestCase):
             self.assertEqual(result["native_f1"], 75)
             self.assertEqual(result["f1_by_type"]["1"], {"questions": 1, "native": 50})
             self.assertAlmostEqual(result["difference_from_paper_points"], 54.41)
+            summarize_if_complete("locomo", out, questions, {}, ["native"], None, split="train")
+            training = json.loads(out.read_bytes())
+            self.assertEqual(training["split"], "train")
+            self.assertEqual(training["native_f1"], 75)
+            self.assertNotIn("paper_f1", training)
 
     def test_native_scores_use_original_keys_and_references(self):
         questions = {("a", 2): {"answer": "red, blue", "category": 1},

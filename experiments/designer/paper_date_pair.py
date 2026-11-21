@@ -1,5 +1,6 @@
-"""Run the frozen date skill and its original checkpoint on the locked paper test cohort."""
+"""Evaluate the locked paper cohorts and collect original LoCoMo development trajectories."""
 import copy
+from contextlib import contextmanager, nullcontext
 import fcntl
 import hashlib
 import json
@@ -9,10 +10,10 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
 
-from experiments.controller.paper_f1 import PROTOCOL, load_cohort, question_scores, score_answers
+from experiments.controller import file_hash
+from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores, score_answers
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
-from src.data_processing.datasets import load_dataset, split_data
 from src.episode_trace import skill_spec
 from src.inference.text import infer_text_dataset_memories
 from src.rag_utils import reuse_qwen_retriever
@@ -55,7 +56,51 @@ def inspect_trace(trace_dir, sample_id):
     return {"spans": spans, "spans_with_date_inserts": applied}
 
 
-def summarize_if_complete(dataset, output, questions, types, active_arms, published):
+@contextmanager
+def collect_policy_inputs(trainer, directory):
+    """Save the actual inputs from each native decision and verify them against its trace."""
+    import numpy as np
+    import torch
+
+    ops = trainer.operation_bank.get_candidate_operations()
+    names = [op.name for op in ops]
+    vectors = np.asarray([op.embedding for op in ops], dtype=np.float32)
+    states = []
+
+    def capture(module, inputs):
+        state, candidates = inputs
+        if not state.is_cuda or not candidates.is_cuda:
+            raise ValueError("Development policy inputs must come from the GPU Controller")
+        if not np.array_equal(candidates.detach().cpu().numpy(), vectors):
+            raise ValueError("Candidate vectors changed within a frozen history")
+        states.append(state.detach().cpu().numpy().copy())
+
+    with trainer.controller.register_forward_pre_hook(capture):
+        yield
+    trace, = (directory / "traces").glob("*.jsonl")
+    with trace.open() as stream:
+        spans = [(r["span_id"], r["policy"], [op["name"] for op in r["selected_skills"]])
+                 for line in stream if (r := json.loads(line))["kind"] == "span"]
+    if not states or len(states) != len(spans):
+        raise ValueError("Controller forwards and completed spans differ in count")
+    path = directory / "controller-inputs.npz"
+    np.savez_compressed(path, states=np.stack(states), candidate_vectors=vectors,
+                        candidate_names=names, span_ids=[sid for sid, _, _ in spans])
+    with np.load(path, allow_pickle=False) as saved, torch.no_grad():
+        matrix = torch.from_numpy(saved["candidate_vectors"]).to(trainer.device)
+        for state, (_, observed, selected) in zip(saved["states"], spans, strict=True):
+            if names != observed["candidates"] or hashlib.sha256(state.tobytes()).hexdigest() != observed["state_sha256"]:
+                raise ValueError("Archived input differs from the recorded selection state")
+            policy = {}
+            chosen, log_prob, _ = trainer.controller(torch.from_numpy(state).to(trainer.device), matrix,
+                                                      deterministic=True, policy_trace=policy)
+            if ([names[i] for i in chosen] != selected or log_prob != observed["ordered_log_probability"]
+                    or policy["logits"] != observed["logits"]
+                    or policy["first_draw_probabilities"] != observed["first_draw_probabilities"]):
+                raise ValueError("Archived inputs did not reproduce the native policy")
+
+
+def summarize_if_complete(dataset, output, questions, types, active_arms, published, split="test"):
     histories = dict.fromkeys(sid for sid, _ in questions)
     reports = {arm: [output.parent / arm / sid / "scores.json" for sid in histories] for arm in active_arms}
     if any(not path.exists() for paths in reports.values() for path in paths):
@@ -70,8 +115,12 @@ def summarize_if_complete(dataset, output, questions, types, active_arms, publis
         for group, values in grouped.items():
             by_type.setdefault(group, {"questions": len(values)})[arm] = 100 * mean(values)
     native = 100 * mean(scores_by_arm["native"].values())
-    summary = {"questions": len(questions), "native_f1": native, "paper_f1": published,
-               "difference_from_paper_points": native - published, "f1_by_type": by_type}
+    summary = {"questions": len(questions), "native_f1": native}
+    if split == "test":
+        summary.update(paper_f1=published, difference_from_paper_points=native - published)
+    else:
+        summary["split"] = split
+    summary["f1_by_type"] = by_type
     if "dated" in scores_by_arm:
         arms = {arm: {"answers": [{"sample_id": sid, "qa_index": i, "f1": v} for (sid, i), v in scores.items()]}
                 for arm, scores in scores_by_arm.items()}
@@ -84,8 +133,12 @@ def summarize_if_complete(dataset, output, questions, types, active_arms, publis
 def run(args, root, rank, workers):
     paper = json.loads(PROTOCOL.read_text())
     spec = paper["datasets"][args.dataset]
-    questions = load_cohort(args.dataset, Path(args.data_file), spec)
-    if hashlib.sha256(Path(args.load_checkpoint).read_bytes()).hexdigest() != CHECKPOINT_SHA:
+    split = os.environ.get("MEMSKILL_PAPER_SPLIT", "test")
+    samples, questions = load_split_cohort(args.dataset, Path(args.data_file), spec, split)
+    if split != "test" and (os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") != "1"
+                            or os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") != "1" or args.device != "cuda"):
+        raise ValueError("Development collection requires native GPU inference and policy traces")
+    if file_hash(Path(args.load_checkpoint)) != CHECKPOINT_SHA:
         raise ValueError("Unexpected conversation Controller checkpoint")
     model_info = json.loads(Path(os.environ["MEMSKILL_MODEL_MANIFEST"]).read_text())
     if (model_info["model"], model_info["revision"]) != (MODEL, REVISION):
@@ -113,12 +166,17 @@ def run(args, root, rank, workers):
             memory_search = "cuda-skylakex-fp32-v1"
         else:
             memory_search = "cuda-native-ties-v1"
-    plan = {"dataset": args.dataset, "test_keys": spec["scored_key_sha256"],
+    plan = {"dataset": args.dataset,
             "model": model_info, "backend": os.environ["MEMSKILL_BACKEND_ID"],
             "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": paper["inference_defaults"],
             "seed": args.seed, "temperature": args.temperature, "max_writer_tokens": args.max_new_tokens,
             "history_workers": workers, "memory_search": memory_search,
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
+    if split == "test":
+        plan["test_keys"] = spec["scored_key_sha256"]
+    else:
+        plan.update(split=split, question_keys=spec["development_splits"][split]["scored_key_sha256"],
+                    policy_inputs="verified-fp32-v1")
     if os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") == "1":
         plan["native_policy_trace"] = "first-draw-logits-v1"
     prefill_only = os.environ.get("MEMSKILL_QWEN_PREFILL_ONLY") == "1"
@@ -156,11 +214,10 @@ def run(args, root, rank, workers):
         base.model[0].auto_model.config.use_cache = False
     trainer.load_checkpoint(args.load_checkpoint)
     skill = trainer.operation_bank.operations[SKILL]
-    _, _, test = split_data(load_dataset(args.data_file, args.dataset), args.dataset)
-    types = {row["question_id"]: row["question_type"] for row in test} if args.dataset == "longmemeval" else {}
+    types = {row["question_id"]: row["question_type"] for row in samples} if args.dataset == "longmemeval" else {}
     active_arms = ("native",) if os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") == "1" else tuple(VERSIONS)
     with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
-        for index, sample in enumerate(test):
+        for index, sample in enumerate(samples):
             sid = trainer.data_processor.get_sample_id(sample)
             if sid not in assigned:
                 continue
@@ -179,15 +236,22 @@ def run(args, root, rank, workers):
                         local.out_file = str(staged / "scores.json")
                         local.trace_dir = str(staged / "traces")
                         os.environ["MEMSKILL_USAGE_LOG"] = str(staged / "usage.jsonl")
-                        infer_text_dataset_memories(trainer, [sample], local)
+                        with collect_policy_inputs(trainer, staged) if split != "test" else nullcontext():
+                            infer_text_dataset_memories(trainer, [sample], local)
                         stats = inspect_trace(Path(local.trace_dir), sid)
+                        if split != "test":
+                            stats["policy_inputs_sha256"] = file_hash(staged / "controller-inputs.npz")
                         subset = {k: q for k, q in questions.items() if k[0] == sid}
                         stats["f1_percent"] = score_answers(args.dataset, subset, [Path(local.out_file)])
                         save(staged / "audit.json", stats)
                         staged.rename(directory)
-                print(f"Complete {args.dataset} {index+1}/{len(test)} {sid} {arm}", flush=True)
+                elif split != "test":
+                    audit = json.loads((directory / "audit.json").read_bytes())
+                    if file_hash(directory / "controller-inputs.npz") != audit["policy_inputs_sha256"]:
+                        raise ValueError(f"Archived policy inputs changed for {sid}")
+                print(f"Complete {args.dataset} {index+1}/{len(samples)} {sid} {arm}", flush=True)
     published = paper["reported_f1"]["Llama-3.1-8B-Instruct"][args.dataset]
-    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published)
+    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published, split)
 
 
 if __name__ == "__main__":

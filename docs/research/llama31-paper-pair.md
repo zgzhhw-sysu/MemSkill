@@ -61,6 +61,10 @@
 
 ## Forward-only 论文能检验的假设
 
+训练和验证沿用原版 LoCoMo 的对话划分。训练为 `conv-26/30/41/42/43/44` 共 885 题，验证为 `conv-47/48` 共 341 题。两个入口分别锁定题号和数据散列，从空库执行原选技、写入和回答。训练、验证和 314 题测试各用独立的输出目录。开发集的 F1 按其自身题目汇总。[固定划分](../../experiments/controller/protocols/memskill_paper_f1.json)
+
+每段开发对话保存 `native/<对话>/controller-inputs.npz`，其中 `span_ids` 对应轨迹中的分块编号，`states` 保存每次实际进入 Controller 的 FP32 状态，`candidate_names` 和 `candidate_vectors` 保存有序技能与编码。该段发布前在 GPU 上读回文件，核对每个状态的散列，重算九个 logits、首选概率、有序 top-7 及其联合对数概率。这样后续可以只替换 Controller 参数，在同一个输入上检查概率如何变化。251 用 18 个已保存的训练发言向量、空记忆和固定 NOOP 写入做过归档回读检查，18 次全部一致。这次检查只测量 Controller 记录与回放。
+
 Huang、Balashankar 和 Aminifar 用小批输入前向计算激活的角度集中程度，找出小奇异值方向贡献较分散的权重矩阵，再在验证集上选矩阵和保留的秩比例。执行时保留较大的奇异值。文章表 2 的 36.7 倍是 GPT-J 层级搜索相对 LASER 穷举的平均计算加速。它没有给出 MemSkill 的问答 F1，也不能据此估计本项目的增益。[算法 1 与表 2](https://arxiv.org/html/2611.10610v1)
 
 **优先检验 Controller。** 在一次前向中，`state_net` 投影当前 span 和已检索记忆的状态，`op_net` 投影候选技能，`actor_head` 对每个状态与技能组合打分。正式推理按分数选取有序 top-K。可以先在训练对话上收集这些激活，比较 `actor_head[0]` 的原始权重与几个预先固定的截秩版本。该层结合状态和技能，最后的标量输出层只有一个奇异值。[Controller 实现](../../src/controller.py) · [正式选技入口](../../src/inference/memory.py)
