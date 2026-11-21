@@ -8,7 +8,7 @@ from statistics import mean
 
 import torch
 
-from experiments.controller.case_credit import KINDS, corrections, vote
+from experiments.controller.case_credit import KINDS, corrections, possible_offsets, vote, vote_request
 from experiments.controller.factorial_rollout import read
 from experiments.controller.outcome_credit import matched_offset
 from experiments.controller.retrieval_competition import budgets, summarize
@@ -43,12 +43,7 @@ def verified_choice(dest, name, target, registration):
         for reverse, text in enumerate(target["prompts"][kind]):
             key = choice["responses"][2 * j + reverse]
             rec = read(dest / "responses" / (key + ".json"))
-            req = {
-                "model": "llama3-8b",
-                "temperature": 0,
-                "max_tokens": 3,
-                "messages": [{"role": "user", "content": text}],
-            }
+            req = vote_request(text)
             if rec["request"] != key or key != digest(req):
                 raise ValueError("Wrong intervention response")
             votes[kind].append(vote(rec["reply"], bool(reverse)))
@@ -246,6 +241,47 @@ def score(windows, device):
     return summary, reports
 
 
+def interval(nodes, offsets, device):
+    # One source offset applies to both realized prefixes and every question.
+    p = torch.tensor([n["native"] for n in nodes], dtype=torch.float64, device=device)
+    reach = p.new_tensor([n["weight"] for n in nodes])
+    outcomes = p.new_tensor([n["cases"] for n in nodes])
+    delta = outcomes[:, 1] - outcomes[:, 0]
+    probs = (p.logit() + p.new_tensor(offsets)[:, None]).sigmoid()
+    values = (
+        reach[None, :, None] * (outcomes[None, :, 0] + probs[:, :, None] * delta[None])
+    ).sum(1)
+    baseline = (reach[:, None] * (outcomes[:, 0] + p[:, None] * delta)).sum(0)
+    means = values.mean(1)
+    return {
+        "min": float(means.min()),
+        "max": float(means.max()),
+        "native": float(baseline.mean()),
+        "question_oracle": float(values.amax(0).mean()),
+        "affected": int((delta.abs().amax(0) > 1e-12).sum()),
+        "native_rows": baseline.tolist(),
+    }
+
+
+def bounds(w, dest, target, device):
+    offsets, observed = possible_offsets(target, dest)
+    result = interval(w["nodes"], offsets, device)
+    if any(
+        abs(a - b) > 1e-10
+        for a, b in zip(result.pop("native_rows"), w["native_f1"], strict=True)
+    ):
+        raise ValueError("Capacity baseline differs from actual measured native return")
+    return dict(
+        result,
+        window=w["window"],
+        questions=len(w["indices"]),
+        observed=len(observed),
+        responses=observed,
+        offsets=offsets,
+        paths=w["inputs"]["paths"],
+    )
+
+
 def run(base):
     src = base / "source-compression"
     dest = src / "case-credit"
@@ -261,7 +297,6 @@ def run(base):
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise RuntimeError("Use one bounded GPU lease for propensity calculations")
     torch.cuda.set_per_process_memory_fraction(0.06)
-    from experiments.controller.case_credit_bounds import bounds
 
     groups = {"factorial": [], "later": []}
     envelopes = {"factorial": [], "later": []}
