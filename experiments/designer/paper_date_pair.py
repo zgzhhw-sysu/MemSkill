@@ -101,17 +101,28 @@ def run(args, root, rank, workers):
     args.temperature, args.seed, args.max_new_tokens = 0.0, 42, 2048
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = True
+    memory_search = os.environ.get("MEMSKILL_MEMORY_SEARCH", "numpy")
+    if memory_search not in {"numpy", "cuda"}:
+        raise ValueError("Unknown memory search device")
+    if memory_search == "cuda":
+        import torch
+        if args.device != "cuda" or not torch.cuda.is_available():
+            raise RuntimeError("CUDA memory search requires the encoder GPU lease")
+        torch.set_float32_matmul_precision("highest")
+        memory_search = "cuda-native-ties-v1"
     plan = {"dataset": args.dataset, "test_keys": spec["scored_key_sha256"],
             "model": model_info, "backend": os.environ["MEMSKILL_BACKEND_ID"],
             "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": paper["inference_defaults"],
             "seed": args.seed, "temperature": args.temperature, "max_writer_tokens": args.max_new_tokens,
-            "history_workers": workers,
+            "history_workers": workers, "memory_search": memory_search,
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if protocol.exists():
-            if json.loads(protocol.read_text()) != plan:
+            existing = json.loads(protocol.read_text())
+            existing.setdefault("memory_search", "numpy")
+            if existing != plan:
                 raise ValueError("Existing runs use a different protocol")
         else:
             save(protocol, plan)

@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import torch
 from src.episode_trace import EpisodeTrace, calendar_proposal, confirmed_proposal, reference_match, reference_recovered, skill_spec
 from src.designer import Designer, DesignerCase
 from src.executor import Executor
@@ -17,6 +19,23 @@ from src.revision_validation import check_exposure, compare_revisions
 
 
 class ReplayTest(unittest.TestCase):
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA memory ranking requires a GPU")
+    def test_cuda_search_preserves_native_ids_for_tied_memories(self):
+        bank = MemoryBank()
+        for index in range(40):
+            vector = np.array([1, index % 3], dtype=np.float32)
+            bank.add_memory(str(index), vector, state_encoder_embedding=vector)
+        for use_state in (False, True):
+            for k in (0, 1, 20, 40):
+                with self.subTest(use_state=use_state, k=k):
+                    options = dict(top_k=k, use_state_encoder=use_state, return_embeddings=True)
+                    with patch.dict(os.environ, MEMSKILL_MEMORY_SEARCH="numpy"):
+                        expected = bank.retrieve([1, 1], **options)
+                    with patch.dict(os.environ, MEMSKILL_MEMORY_SEARCH="cuda"):
+                        actual = bank.retrieve([1, 1], **options)
+                    self.assertEqual(actual[:2], expected[:2])
+                    np.testing.assert_array_equal(actual[2], expected[2])
+
     def test_executor_records_the_response_used_for_a_write(self):
         args = SimpleNamespace(retriever="unused", model="local", api_base="local", api_key="test",
                                max_new_tokens=32, temperature=0)
