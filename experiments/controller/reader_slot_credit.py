@@ -67,7 +67,7 @@ def reader_key(model, prompt):
     return request_cache(os.environ["MEMSKILL_API_BASE"], params, "reader")[1]
 
 
-def endpoint(cell, cache, expected, qa, ev, model):
+def measured_contexts(cell, cache, expected, questions, ev, model):
     (trace,) = (cell / "traces").glob("*.jsonl")
     scores = cell / "scores.json"
     if expected["trace"] != file_hash(trace) or expected["scores"] != file_hash(scores):
@@ -76,7 +76,7 @@ def endpoint(cell, cache, expected, qa, ev, model):
     spans = [s for s in events if s["kind"] == "span"]
     queries = {q["query_id"]: q for q in events if q["kind"] == "qa"}
     rows = read(scores)["answers"]
-    inputs = reader_inputs(events, rows, dict(enumerate(qa)), ev)
+    inputs = reader_inputs(events, rows, questions, ev)
     versions = {
         (c["memory_id"], c["version"]): (i, c["after"])
         for i, s in enumerate(spans)
@@ -91,7 +91,7 @@ def endpoint(cell, cache, expected, qa, ev, model):
     by_key = {}
     for call in calls:
         by_key.setdefault(call["cache_key"], []).append(call)
-    for i, (q, row) in enumerate(zip(qa, rows, strict=True)):
+    for (i, q), row in zip(questions.items(), rows, strict=True):
         ctx = [versions[tuple(ref)] for ref in queries[i]["refs"]]
         prompt = ev.build_prompt(q["question"], [text for _, text in ctx], q)
         key = reader_key(model, prompt)
@@ -131,7 +131,12 @@ def endpoint(cell, cache, expected, qa, ev, model):
         )
     if any(by_key.values()):
         raise ValueError("Unmatched physical reader calls")
-    return spans, contexts, answers, read(cell / "decisions.json")
+    return spans, contexts, answers
+
+
+def endpoint(cell, cache, expected, qa, ev, model):
+    values = measured_contexts(cell, cache, expected, dict(enumerate(qa)), ev, model)
+    return *values, read(cell / "decisions.json")
 
 
 def prepare(base, study, corpus, *, verify=False):
@@ -355,6 +360,103 @@ def measured_hybrids(base, out, corpus):
     )
 
 
+def matched_reader_slots(target, lengths):
+    """Match disjoint slots by total absolute token-length difference, then rank distance."""
+    from scipy.optimize import linear_sum_assignment
+
+    others = [i for i in range(len(lengths)) if i not in target]
+    if len(others) < len(target):
+        return None
+    if not target:
+        return []
+    stride = len(lengths) ** 2 + 1
+    cost = [[abs(lengths[i] - lengths[j]) * stride + abs(i-j) for j in others] for i in target]
+    _, selected = linear_sum_assignment(cost)
+    return [others[j] for j in selected]
+
+
+def paper_reader_ablation(native, output, corpus, sid):
+    from transformers import AutoTokenizer
+    from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort
+
+    spec = read(PROTOCOL)
+    cell = spec["training_boundary_swap"]["histories"][sid]
+    meta = read(native / "locomo/protocol.json")
+    setting = spec["datasets"]["locomo"]
+    _, training = load_split_cohort("locomo", corpus, setting, "train")
+    questions = {i: q for (sample, i), q in training.items() if sample == sid}
+    if (meta["split"] != "train" or meta["question_keys"] != setting["development_splits"]["train"]["scored_key_sha256"]
+            or meta["backend"] != os.environ["MEMSKILL_BACKEND_ID"] or meta["encode_batch_size"] != 64
+            or meta["model"]["model"] != "meta-llama/Llama-3.1-8B-Instruct" or len(questions) != cell["questions"]):
+        raise ValueError("Reader diagnostic requires the locked native training run")
+    model = meta["model"]["model"]
+    tokenizer_dir = Path(os.environ["MEMSKILL_MODEL_MANIFEST"]).parent
+    if (read(tokenizer_dir / "verified-model.json") != meta["model"]
+            or file_hash(tokenizer_dir / "tokenizer.json") != meta["model"]["sha256"]["tokenizer.json"]):
+        raise ValueError("Reader tokenizer or model revision differs from the native run")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
+    cache = native / "greedy-cache"
+    trial = output / sid
+    trial.mkdir(parents=True, exist_ok=True)
+    fresh = trial / "greedy-cache"
+    if fresh.resolve() == cache.resolve():
+        raise ValueError("The native repeat requires an independent request cache")
+    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(fresh)
+    base = native / "locomo/native" / sid
+    trace, = (base / "traces").glob("*.jsonl")
+    expected = {"trace": file_hash(trace), "scores": file_hash(base / "scores.json")}
+    ev = LoCoMoEvaluator(SimpleNamespace())
+    spans, contexts, archived = measured_contexts(base, cache, expected, questions, ev, model)
+    pivot = cell["span"]
+    linked = [i for i,q in questions.items() if set(q.get("evidence") or []) & set(spans[pivot]["source_turns"])]
+    if (len(spans) != cell["total_spans"] or spans[pivot]["span_id"] != pivot
+            or sha(spans[pivot]["source"]) != cell["source_sha256"] or linked != cell["linked_question_indices"]):
+        raise ValueError("Focal span or evidence question registration differs")
+    rows = {}
+    for (i, q), ctx, orig in zip(questions.items(), contexts, archived, strict=True):
+        target = [j for j,(origin, _) in enumerate(ctx) if origin == pivot]
+        lengths = [len(ids) for ids in tokenizer([text for _, text in ctx], add_special_tokens=False)["input_ids"]]
+        rows[i] = {"target": target, "sham": matched_reader_slots(target, lengths), "lengths": lengths,
+                   "linked": i in linked, "archived": orig}
+    register(trial / "plan.json", {"protocol": spec["native_reader_ablation"], "native": expected,
+             "backend": meta["backend"], "history": sid, "span": pivot, "rows": rows})
+    os.environ["MEMSKILL_USAGE_LOG"] = str(trial / "usage.jsonl")
+    rows_out = []
+    arms = ["repeat", "target", "sham"]
+    for ordinal, ((i,q), ctx) in enumerate(zip(questions.items(), contexts, strict=True)):
+        record = rows[i]
+        answers = {"archived": record["archived"]}
+        for arm in arms[ordinal % 3:] + arms[:ordinal % 3]:
+            remove = [] if arm == "repeat" else record[arm]
+            if remove is None:
+                continue
+            if not record["target"]:
+                answers[arm] = record["archived"]
+                continue
+            prompt = ev.build_prompt(q["question"], [txt for j,(_,txt) in enumerate(ctx) if j not in remove], q)
+            key = reader_key(model, prompt)
+            measured = measured_answer(prompt, model, q, ev, fresh)
+            receipt = read_response(fresh, key)
+            if not receipt or receipt["payload"]["prompt_sha256"] != sha(prompt):
+                raise ValueError("Missing measured Reader response")
+            if arm == "repeat" and key != record["archived"]["key"]:
+                raise ValueError("Native repeat request changed")
+            answers[arm] = {**measured, "key": key, "response_sha256": receipt["sha256"], "prompt_sha256": sha(prompt)}
+        rows_out.append({"qa_index": i, "linked": record["linked"], "direct": bool(record["target"]), "answers": answers})
+    register(trial / "scores.json", rows_out)
+    groups = {"all": rows_out, "direct": [r for r in rows_out if r["direct"]],
+              "linked": [r for r in rows_out if r["linked"]],
+              "direct_unlinked": [r for r in rows_out if r["direct"] and not r["linked"]]}
+    summary = {}
+    for name, group in groups.items():
+        matched = [r for r in group if "sham" in r["answers"]]
+        summary[name] = {"questions": len(group), "matched_questions": len(matched),
+                         "f1": {a:100*mean(r["answers"][a]["f1"] for r in group) for a in ["archived","repeat","target"]} if group else {},
+                         "matched_f1": {a:100*mean(r["answers"][a]["f1"] for r in matched) for a in arms} if matched else {}}
+    register(trial / "summary.json", {"history": sid, "span": pivot, "groups": summary,
+             "plan_sha256": file_hash(trial / "plan.json"), "scores_sha256": file_hash(trial / "scores.json")})
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("base", type=Path)
@@ -362,7 +464,11 @@ if __name__ == "__main__":
     p.add_argument("corpus", type=Path)
     p.add_argument("--read", action="store_true")
     p.add_argument("--verify", action="store_true")
+    p.add_argument("--paper-history", help="Measure the preassigned training span using a native run, output directory and corpus")
     a = p.parse_args()
+    if a.paper_history:
+        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history)
+        raise SystemExit(0)
     o = prepare(a.base, a.study, a.corpus, verify=a.verify)
     if a.read:
         with (o / "reader.lock").open("a") as f:
