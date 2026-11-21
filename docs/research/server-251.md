@@ -669,3 +669,17 @@ done
 在 `source-compression/writer-format-credit/sampling/` 查看 `frame.json` 的固定题号与纳入概率，`sample1.json`、`sample2.json` 给出一题或两题校正，`census.json` 保存与全窗测量的误差。每窗中途失败会列明原因，该窗不进入对应拟合。三路时间/活动/关系技能的逐题复核在同级 `shared/outcomes/`。后期策略目录均位于 `late-pairs/semantic-writer/three-writer/`。在 `temporal-gate/budgets-NN.json` 看概率分配上限和变化来源，在 `outlier-*/skill-effects-NN.json` 看每项技能对逐题 F1 的贡献。早期同名策略的 `evaluation/switches-*.json` 列出实际换技、匹配的问题、两臂实测 F1 和该技能对的归因复核。
 
 三个允许时间概率变化的策略在各自的 `population/bounds-*.json` 中记录 18 窗、161 题全分母界。按修改时间查看最新快照；`known` 按时间、活动、关系顺序给出已有实测值数目。三路尚未齐全时，可从已完成的真实双路问答先核实两个技能的回报。输入回执的哈希保存在同一文件中。
+
+### 早期同一弱技能的修补复用
+
+下面的命令沿用本页的 `resume` 函数。物理 3 号卡依次处理 Qwen 排名，有新提示词时由限载的 5、6 号卡回答。移交或中断后可重启当前阶段，已匹配回执会复用。GPU 0 完成留一对话的两次拟合及后期评估。
+
+```bash
+resume early-shared-credit run_early_shared_251.sh
+for stage in initial final; do
+    resume "outlier-$stage-policy" run_three_skill_margin_251.sh "outlier-$stage"
+    resume "outlier-$stage-evaluation" run_earliest_three_251.sh "outlier-$stage"
+done
+```
+
+在 `source-compression/earliest-three-skills/shared-weak-credit/registration.json` 核对首批 6 窗的哈希和全体 123 个题号。`certified/` 列出需要复核的较弱写入和每项判定，`outcomes/` 保存通过判定的题在三种指令、两种原文分组下的实测答案。两个批次的结算文件是 `initial.json` 和 `final.json`。后期 `outlier-initial` 与 `outlier-final` 目录里的 `models.json` 含逐题供样和按对话排除的拟合记录。`zero_new` 是相同新增样本、清零新增信用的对照，`previous` 是加入早期窗口前的六路模型。

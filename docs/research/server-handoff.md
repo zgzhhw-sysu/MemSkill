@@ -309,3 +309,11 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 接手时先查看 `source-compression/writer-format-credit/sampling/frame.json` 和 `shared/outcomes/`。前者固定了每个窗口要随机复测的两题，后者保存时间技能补测后六种写入/分组路径的回执。再比较后期 `temporal-gate`、`outlier-total`、`outlier-components` 三个目录中同一进度的 `through-NN.json` 和 `decisions/evaluation-NN.json`。早期同名目录的 `evaluation/switches-*.json` 可以逐题查明抽样 F1 的来源。[本轮实验笔记](algorithm-notes.md#当时间技能的概率也可以改变) · [251 恢复命令](server-251.md#随机抽题时间技能概率与共享题目回执)
 
 六路实测现已完成。248 镜像里的 `source-compression/writer-format-credit/shared/outcomes-complete.json` 索引三道原题。第 110 题的活动技能 +1 在与另外两种技能分别比较后，分为指令 +0.56579 和分组 +0.43421。最终分项策略的后期 36 题期望 F1 为 0.551747，比同设计清零高 0.000728；早期 39 题为 0.478911，比清零低 0.003585。尚未晋级。全分母界和逐题贡献分别在 `outlier-components/population/` 和 `outlier-components/skill-effects-12.json`。跨 10 个窗口的随机读者队列仍在 251 继续。
+
+### 早期第三段对话的选技证据
+
+251 负责 GPU 实验。248 的结果镜像位于 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/`。先看 `source-compression/earliest-three-skills/shared-weak-credit/` 的登记、判定及六路逐题结果，再看 `late-pairs/semantic-writer/three-writer/outlier-initial/` 中的 `through-NN.json`、`decisions/evaluation-NN.json` 与 `population/bounds-*.json`。分别对照 `raw`、`zero_new` 与 `previous`，可区分全部信用、仅新增信用和增加训练窗口产生的变化。两个策略的抽样结果使用同一随机数。全批 12 窗齐备后，`outlier-final` 自动按相同条件再拟合一次。
+
+本轮复核发现，早期备选写入的操作清单会省略控制器选中但不执行的 `noop`。当前回放从原始决策行恢复全部三个有序技能，同时核验删去 `noop` 后的实际操作与物理写入回执相同。旧快照中该备选的有序清单可能只有两项。这个修正影响动作清单的呈现，原始答案、token 和 F1 可以由同一回执复核。[实验笔记](algorithm-notes.md#一道题只审一次相同弱技能的修补) · [251 恢复命令](server-251.md#早期同一弱技能的修补复用)
+
+首批六路已完成，conv-44 第 7 题的活动技能获得指令、分组各 −0.46 的信用。后期 5 窗 60 题的期望 F1 为 0.479582，新增信用清零为 0.479104，固定抽样未换技。早期 47 题上该策略低于两种清零对照。核心回执在 `shared-weak-credit/initial.json`、`shared-weak-credit/outcomes/conv-44_s1.json` 和后期 `outlier-initial/through-13.json`。正式测试继续留出。

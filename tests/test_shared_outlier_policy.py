@@ -74,3 +74,64 @@ class SharedQuestionCreditTests(unittest.TestCase):
             .softmax(1)
         )
         self.assertAlmostEqual(float(p[0, 0] / p[0, 2]), float(p[1, 0] / p[1, 2]))
+
+
+class SharedWeakRepairTests(unittest.TestCase):
+    def test_unique_loss_reuses_one_weak_arm_but_unique_win_needs_two(self):
+        from experiments.controller.early_shared_credit import (
+            candidate,
+            missing_comparisons,
+        )
+
+        hit = {"answer": "Tuesday", "f1": 1.0, "ok": True}
+        miss = {"answer": "Thursday", "f1": 0.0, "ok": True}
+        low = {"temporal": hit, "activity": miss, "relation": hit}
+        c = candidate(low, True, "Tuesday")
+        self.assertEqual(c["weak"], {"activity": ["temporal", "relation"]})
+        self.assertEqual(c["edges"], [-1, 0, 1])
+        high = {"temporal": miss, "activity": hit, "relation": miss}
+        c = candidate(high, True, "Tuesday")
+        self.assertEqual(
+            c["weak"], {"temporal": ["activity"], "relation": ["activity"]}
+        )
+        self.assertEqual(
+            missing_comparisons({"temporal": [], "relation": ["confirmed"]}),
+            ["temporal"],
+        )
+        self.assertEqual(
+            missing_comparisons({"temporal": [], "relation": ["veto"]}), []
+        )
+        self.assertIsNone(candidate(low, False, "Tuesday"))
+        self.assertIsNone(candidate(low, True, "Wednesday"))
+
+    def test_controller_noop_keeps_its_selected_slot_during_replay(self):
+        from types import SimpleNamespace
+
+        from experiments.controller.earliest_three_skills import alternate_slots
+        from src.episode_trace import skill_spec
+
+        bank = [
+            skill_spec(
+                SimpleNamespace(
+                    name=name,
+                    description=name,
+                    instruction_template=name,
+                    update_type=kind,
+                    source_rule=rule,
+                )
+            )
+            for name, kind, rule in (
+                ("insert", "insert", None),
+                ("noop", "noop", None),
+                ("capture_activity_details", "insert", "dated_adjacent_turns"),
+                ("capture_temporal_context", "insert", "dated_single_turns"),
+            )
+        ]
+        row = {"grounded": [0, 1, 2], "plain": [0, 1, 3], "use": True}
+        event = {"selected_skills": bank[:3]}
+        selected = alternate_slots(
+            row, bank, event, {"writer_skills": [bank[0], bank[3]]}
+        )
+        self.assertEqual(selected, [bank[0], bank[1], bank[3]])
+        with self.assertRaises(ValueError):
+            alternate_slots(row, bank, event, {"writer_skills": [bank[0], bank[2]]})

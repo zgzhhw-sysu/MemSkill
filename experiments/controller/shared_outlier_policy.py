@@ -22,7 +22,8 @@ from experiments.controller.writer_format_policy import (
     scores_at,
 )
 
-MODES = ("outlier-total", "outlier-components")
+EARLY_MODES = ("outlier-initial", "outlier-final")
+MODES = ("outlier-total", "outlier-components", *EARLY_MODES)
 
 
 def original(job):
@@ -111,6 +112,76 @@ def donors(base, mode):
             }
         )
     return rows, cases
+
+
+def early_donors(early, marker):
+    folder = marker.parent
+    batch = read(marker)
+    reg = folder / "registration.json"
+    roster = read(reg)
+    if (
+        file_hash(reg) != batch["registration"]
+        or file_hash(early / "forecast.json") != roster["inputs"]["forecast"]
+    ):
+        raise ValueError("Different early action cohort")
+    names = roster["windows"] if marker.stem == "final" else roster["initial"]
+    if set(batch["outcomes"]) != set(names):
+        raise ValueError("Incomplete early wave")
+    ws = read(early / "forecast.json")["windows"]
+    rows, cases = [], []
+    for name, checksum in batch["outcomes"].items():
+        path = folder / "outcomes" / (name + ".json")
+        packet = read(path)
+        if checksum != file_hash(path) or packet["inputs"] != {
+            "registration": file_hash(reg),
+            "parent": file_hash(folder / "prepared" / path.name),
+        }:
+            raise ValueError("Changed early six-cell outcome")
+        if packet["status"] != "matched":
+            continue
+        w = ws[name]
+        n = len(w["questions"])
+        credit = [[0.0, 0.0] for _ in SKILLS]
+        for idx, c in packet["candidates"].items():
+            r = packet["rows"].get(idx, {})
+            status = r.get("status", c["status"])
+            case = {"window": name, "index": idx, "status": status}
+            if status == "unique":
+                skill = SKILLS.index(r["outlier"])
+                shares = r["credit"]
+                raw = r["mean"]["raw"]
+                if (
+                    int(idx) not in w["questions"]
+                    or c["status"] != "certified"
+                    or c["outlier"] != r["outlier"]
+                    or abs(sum(shares) - raw) > 1e-10
+                ):
+                    raise ValueError("Changed physical unique-question return")
+                for k in range(2):
+                    credit[skill][k] += shares[k] / n
+                case.update(skill=r["outlier"], raw=raw, components=shares)
+            cases.append(case)
+        rows.append(
+            {
+                "node": name,
+                "history": w["history"],
+                "features": w["features"],
+                "points": n,
+                "credit": credit,
+                "raw": 0.0,
+            }
+        )
+    return rows, cases
+
+
+def expanded_corrections(model, old, features, total):
+    upd = corrections(model, features, "cuda", total)
+    if old is not None:
+        upd["previous"] = corrections(old, features, "cuda", False)["credit"]
+        upd["zero_new"] = corrections(model["zero_new"], features, "cuda", False)[
+            "credit"
+        ]
+    return upd
 
 
 def fit_correction(rows, held, device):
@@ -229,6 +300,13 @@ def freeze(base, mode):
     total = mode == "outlier-total"
     if not total:
         inputs["six"] = file_hash(reg.parent / "outcomes-complete.json")
+    expanded = mode in EARLY_MODES
+    previous = None
+    if expanded:
+        marker = early / "shared-weak-credit" / (mode.split("-")[1] + ".json")
+        prior = p / "outlier-components/models.json"
+        inputs.update(wave=file_hash(marker), previous=file_hash(prior))
+        previous = read(prior)["models"]
     f = folder / "forecast.json"
     ef = eo / "forecast.json"
     if f.exists() and ef.exists():
@@ -239,7 +317,12 @@ def freeze(base, mode):
         ):
             raise ValueError("Changed unique-question fit")
         return f
-    rows, cases = donors(base, mode)
+    rows, cases = donors(base, "outlier-components" if expanded else mode)
+    if expanded:
+        more, added = early_donors(early, marker)
+        zeroed = rows + [dict(r, credit=[[0.0, 0.0] for _ in SKILLS]) for r in more]
+        rows += more
+        cases += added
     parent = read(gate)
     ep = read(gate_early)
     if ep["parent"] != inputs["gate"] or parent["models"] != inputs["models"]:
@@ -252,12 +335,23 @@ def freeze(base, mode):
     for h in sorted(gm):
         with limited():
             m = fit_correction(rows, h, "cuda")
+            old = previous[h] if expanded else None
+            if expanded:
+                comparison = fit_correction(zeroed, h, "cuda")
+                has_new_credit = any(
+                    any(any(shares) for shares in r["credit"])
+                    for r in more
+                    if r["history"] != h
+                )
+                if not has_new_credit and m != comparison:
+                    raise ValueError("A held dialogue changed its own credit model")
+                m["zero_new"] = comparison
             models[h] = m
             for k, w in parent["windows"].items():
                 if k.rsplit("_s", 1)[0] != h:
                     continue
                 s = w["scores"]
-                upd = corrections(m, s["source_features"], "cuda", total)
+                upd = expanded_corrections(m, old, s["source_features"], total)
                 later[k] = {**w, "scores": {**s, "outlier": upd}}
             for k, w in ep["windows"].items():
                 if w["history"] != h:
@@ -266,7 +360,7 @@ def freeze(base, mode):
                 ps = w["probabilities"]
                 n = torch.tensor(ps["native"], dtype=torch.float64, device="cuda")
                 raw = utilities(gm[h], scores_at(rm[h], x, "cuda"), x, "cuda")["raw"]
-                upd = corrections(m, x, "cuda", total)
+                upd = expanded_corrections(m, old, x, total)
                 prob = simplex(n, corrected_utilities(raw, upd))
                 if not torch.allclose(
                     prob["raw"], n.new_tensor(ps["gate_raw"]), rtol=0, atol=1e-12
@@ -414,8 +508,9 @@ if __name__ == "__main__":
         f,
         allocate,
         extra_controls=(
-            ("undivided", "swapped", "equal") if a.mode == "outlier-components" else ()
+            ("undivided", "swapped", "equal") if a.mode != "outlier-total" else ()
         )
+        + (("zero_new", "previous") if a.mode in EARLY_MODES else ())
         + ("old_gate", "fixed_t_credit", "joint_graph"),
         replay_choices=True,
     )

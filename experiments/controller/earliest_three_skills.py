@@ -18,6 +18,7 @@ from experiments.controller.legacy_terminal_symmetry import (
     prepare,
 )
 from experiments.controller.relation_skill_repairs import candidates
+from experiments.controller.resume_status import check_equal_source_choice
 from experiments.controller.semantic_writer import REL, TEMP, sha
 from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import ACTIVITY
@@ -34,6 +35,16 @@ ACCEPTED = {
     "pairs": "matched",
     "repairs": "prepared_repairs",
 }
+
+
+def alternate_slots(row, skills, event, alternate):
+    selected = [skills[i] for i in row["plain" if row["use"] else "grounded"]]
+    check_equal_source_choice(row, skills, event["selected_skills"], selected)
+    if [skill_spec(s) for s in ops(selected)] != alternate["writer_skills"]:
+        raise ValueError(
+            "Recorded controller slots and deployed writer operations differ"
+        )
+    return selected
 
 
 def write_relation(out, event, forecast, proto):
@@ -184,6 +195,8 @@ def repair_jobs(
     forecast,
     proto,
     history,
+    *,
+    comparison="relation",
 ):
     if not any(pair["jobs"].values()):
         return {"status": "prepared_repairs", "jobs": []}
@@ -224,7 +237,7 @@ def repair_jobs(
     for kind, items in pair["jobs"].items():
         diag = {
             "control": branches[kind],
-            "swap": branches["relation"],
+            "swap": branches[comparison],
             "questions": [
                 {"qa_index": i, "original_index": q["original_index"]}
                 for i, q in enumerate(questions)

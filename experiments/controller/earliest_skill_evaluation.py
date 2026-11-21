@@ -8,7 +8,10 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.earliest_three_skills import verify_response
+from experiments.controller.earliest_three_skills import (
+    alternate_slots,
+    verify_response,
+)
 from experiments.controller.factorial_rollout import read
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.skill_choice_replay import decisions, uniform
@@ -138,9 +141,18 @@ def arm_data(out, earlier, study, name, w, inputs):
             if w["native_activity"]
             else ("temporal", "activity")
         )
+        decisions_file = trace.parent.parent / "rows.json"
+        if file_hash(decisions_file) != w["rows"]:
+            raise ValueError("Different three-slot controller action")
+        selected = alternate_slots(
+            read(decisions_file)[1],
+            read(study / "protocol.json")["skills"],
+            spans[-1],
+            alternate,
+        )
         for arm, skills in (
             (factual, spans[-1]["selected_skills"]),
-            (other, alternate["writer_skills"]),
+            (other, selected),
             ("relation", w["selected"]),
         ):
             ordered_skills[arm] = [
@@ -492,7 +504,15 @@ if __name__ == "__main__":
     model = cli.add_mutually_exclusive_group()
     model.add_argument("--state", action="store_true")
     model.add_argument("--gate", action="store_true")
-    model.add_argument("--outlier", choices=("outlier-total", "outlier-components"))
+    model.add_argument(
+        "--outlier",
+        choices=(
+            "outlier-total",
+            "outlier-components",
+            "outlier-initial",
+            "outlier-final",
+        ),
+    )
     model.add_argument(
         "--factor",
         choices=(
