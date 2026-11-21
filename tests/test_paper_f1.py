@@ -56,6 +56,53 @@ class PaperF1Test(unittest.TestCase):
             events()
         self.assertEqual(events(), original)
 
+    def test_matched_state_credit_changes_only_the_measured_boundary(self):
+        import torch
+        from types import SimpleNamespace
+        from experiments.controller.controller_credit_study import credit_targets, fit_state_credit, learned_skill_boundary, match_skill_rate, state_features
+
+        measurement = {"questions": 3, "f1_deltas": {"0": 1, "1": -0.5, "2": -0.5}, "difference_points": 0}
+        self.assertEqual(credit_targets(measurement, [0], 4), [0, 0.2])
+        x = torch.tensor([[1., 0., 0., 0.], [-1., 0., 0., 0.]])
+        w, bias = fit_state_credit(x, torch.tensor([[0., .2], [0., -.2]]), .25)
+        pred = state_features(x) @ w + bias
+        self.assertTrue(torch.equal(pred[:, 0], torch.zeros(2, dtype=pred.dtype)))
+        self.assertGreater(pred[0, 1], 0)
+        self.assertLess(pred[1, 1], 0)
+
+        class Actor(torch.nn.Module):
+            action_top_k = 2
+            def __init__(self):
+                super().__init__()
+                self.actor_head = torch.nn.Identity()
+            def forward(self, state, logits):
+                return self.actor_head(logits.reshape(1, -1, 1)).flatten()
+
+        actor = Actor()
+        ops = [SimpleNamespace(name=n) for n in ("first", "relationship", "delete", "last")]
+        bank = SimpleNamespace(get_candidate_operations=lambda: ops)
+        trainer = SimpleNamespace(device="cpu", controller=actor, operation_bank=bank)
+        model = {"treatments": ["terminal", "span"], "weight": w.T.tolist(), "bias": bias.tolist(),
+                 "spec": {"incoming": "delete", "outgoing": "relationship", "reward_scale": .05, "max_logit_shift": .1}}
+        original = torch.tensor([1., 0.02, 0., -1.])
+        with learned_skill_boundary(trainer, model, "span") as records:
+            changed = actor(x[0], original)
+            self.assertEqual(changed.topk(2).indices.tolist(), [0, 2])
+            self.assertEqual(changed[[0, 3]].tolist(), original[[0, 3]].tolist())
+            self.assertTrue(torch.equal(actor(x[1], original), original))
+            outside = torch.tensor([1., 0.02, -1., 0.])
+            self.assertTrue(torch.equal(actor(x[0], outside), outside))
+        self.assertEqual([r["eligible"] for r in records], [True, True, False])
+        with learned_skill_boundary(trainer, model, "terminal"):
+            self.assertTrue(torch.equal(actor(x[0], original), original))
+        self.assertTrue(torch.equal(actor(x[0], original), original))
+        # The fixed-bias control matches count even when it must choose a different history.
+        logits = torch.tensor([[1., .02, 0., -1.], [1., .04, 0., -1.], [1., .08, 0., -1.]])
+        static = match_skill_rate(logits, torch.tensor([0., .1, 0.]), 1, 2, 2, .1)
+        self.assertEqual((static["span_selected"], static["rate_selected"], static["disagreement_with_span"]), (1, 1, 2))
+        tied = match_skill_rate(logits[:1].expand(2, -1), torch.tensor([.1, 0.]), 1, 2, 2, .1)
+        self.assertEqual((tied["span_selected"], tied["rate_selected"], tied["shift"]), (1, 0, 0.))
+
     def test_independent_repeat_seeds_only_preceding_writes_and_checks_them_on_resume(self):
         from experiments.designer.paper_date_pair import seed_writer_prefix
         from src.evaluation_cache import publish_response, read_response

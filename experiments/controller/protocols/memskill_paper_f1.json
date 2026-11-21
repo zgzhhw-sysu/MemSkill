@@ -25,6 +25,13 @@
       "conv-44": {"span": 31, "total_spans": 64, "questions": 123, "linked_question_indices": [31], "source_sha256": "3e2e29f26d9aa8aa3fd7c791e64e105e02e461fea9ba72efb898a39ff202690b"}
     }
   },
+  "state_credit": {
+    "outgoing": "handle_entity_relationships", "incoming": "delete",
+    "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
+    "training": "mean of independent repeats per history; equal weights across histories",
+    "rate_control": "constant boundary logit shift with closest incoming-skill count on all native training states, minimum absolute shift on ties",
+    "validation": "two complete histories; native, terminal, span and rate-matched fixed bias from empty memory banks"
+  },
   "datasets": {
     "locomo": {
       "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
