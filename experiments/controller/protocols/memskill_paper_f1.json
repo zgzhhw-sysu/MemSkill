@@ -12,6 +12,17 @@
     "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
     "retriever": "qwen3-embedding-0.6b"
   },
+  "training_boundary_swap": {
+    "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
+    "histories": {
+      "conv-26": {"span": 22, "total_spans": 47, "questions": 152, "linked_question_indices": [42, 66, 118, 119], "source_sha256": "2b4a47f4db70688de295ded1291a889e04899a2ba8321f6c40a82c37f63a0f01"},
+      "conv-30": {"span": 19, "total_spans": 39, "questions": 81, "linked_question_indices": [27, 61], "source_sha256": "caa14fe66ac3b58b7e860c9f74b117b400cbcea6492a183e75657fc8d616ab8a"},
+      "conv-41": {"span": 32, "total_spans": 66, "questions": 152, "linked_question_indices": [29, 32, 101, 102], "source_sha256": "f9af7ba38b3d0547f4a62134c1a2e11ca18007cd5ae4a43da971cf17ae0c9aba"},
+      "conv-42": {"span": 29, "total_spans": 60, "questions": 199, "linked_question_indices": [31, 32, 78, 80, 136, 137, 138, 140, 141, 142], "source_sha256": "9662537e8b5e00f8d499fa04a76ba60f060658e7e2a47f6b5b1fc73691d9ce45"},
+      "conv-43": {"span": 33, "total_spans": 68, "questions": 178, "linked_question_indices": [14, 41, 67, 123, 124], "source_sha256": "f232a3aea55d296fa4a2fed64a44aad6a9dbc7e54b0a8459677781f60896f02d"},
+      "conv-44": {"span": 31, "total_spans": 64, "questions": 123, "linked_question_indices": [31], "source_sha256": "3e2e29f26d9aa8aa3fd7c791e64e105e02e461fea9ba72efb898a39ff202690b"}
+    }
+  },
   "datasets": {
     "locomo": {
       "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",

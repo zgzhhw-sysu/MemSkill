@@ -1,4 +1,5 @@
 """Validate and restore a traced prefix, then replay both branches to final QA."""
+from contextlib import contextmanager
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 import re
@@ -140,6 +141,94 @@ def restore_text(events):
             else:
                 raise ValueError(f"Unknown change {kind}")
     return live
+
+
+def _boundary_slots(span):
+    policy = span["policy"]
+    names, scores = policy["candidates"], policy["logits"]
+    chosen = [names.index(op["name"]) for op in span["selected_skills"]]
+    if (not 0 < len(chosen) < len(names) or len(names) != len(set(names))
+            or len(chosen) != len(set(chosen)) or [scores[i] for i in chosen] != sorted(scores, reverse=True)[:len(chosen)]):
+        raise ValueError("Reference action does not match the deterministic ranking")
+    outside = [i for i in range(len(names)) if i not in chosen]
+    incoming = max(outside, key=scores.__getitem__)
+    if scores[chosen[-1]] == scores[incoming]:
+        raise ValueError("Equal boundary logits cannot implement this intervention")
+    return chosen[-1], incoming
+
+
+@contextmanager
+def swap_boundary_logits(controller, spans, start):
+    """Exchange the last selected logit and first excluded logit in exactly one forward."""
+    if not 0 <= start < len(spans):
+        raise ValueError("Requested span is outside the native history")
+    outgoing, incoming = _boundary_slots(spans[start])
+    position = -1
+
+    def check_input(module, inputs):
+        nonlocal position
+        position += 1
+        if position > start:
+            return
+        state, _ = inputs
+        digest = hashlib.sha256(state.detach().cpu().numpy().tobytes()).hexdigest()
+        if digest != spans[position]["policy"]["state_sha256"]:
+            raise ValueError(f"Native state differs before the swap at span {position}")
+
+    def exchange(module, inputs, outputs):
+        if position != start:
+            return
+        reference = spans[start]["policy"]["logits"]
+        if outputs.shape != (1, len(reference), 1) or outputs[0, :, 0].tolist() != reference:
+            raise ValueError("Native logits differ at the swap")
+        changed = outputs.clone()
+        changed[0, [outgoing, incoming], 0] = outputs[0, [incoming, outgoing], 0]
+        return changed
+
+    with controller.register_forward_pre_hook(check_input), controller.actor_head.register_forward_hook(exchange):
+        yield
+    if position + 1 != len(spans):
+        raise ValueError("The native and intervention histories have different forward counts")
+
+
+def verify_native_swap(native, changed, start):
+    """Verify the unchanged prefix and single action before accepting paired QA scores."""
+    from .executor import deployment_operations
+
+    if (len(native) != len(changed) or not 0 <= start < len(native)
+            or any(a["span_id"] != i or b["span_id"] != i or a["source"] != b["source"]
+                   for i, (a, b) in enumerate(zip(native, changed)))):
+        raise ValueError("Native and intervention spans differ")
+    if native[:start] != changed[:start]:
+        raise ValueError("Native prefix did not reproduce exactly")
+    a, b = native[start], changed[start]
+    left, right = a["policy"], b["policy"]
+    if (any(a[key] != b[key] for key in ("sample", "source_turns", "retrieved", "refs"))
+            or left["candidates"] != right["candidates"] or left["state_sha256"] != right["state_sha256"]):
+        raise ValueError("Branches have different pre-write inputs")
+    names = left["candidates"]
+    selected = [op["name"] for op in a["selected_skills"]]
+    old, new = _boundary_slots(a)
+    expected = list(left["logits"])
+    expected[old], expected[new] = expected[new], expected[old]
+    if (right["logits"] != expected or b["selected_skills"][:-1] != a["selected_skills"][:-1]
+            or [op["name"] for op in b["selected_skills"]] != [*selected[:-1], names[new]]):
+        raise ValueError("Intervention did not exchange the boundary skills")
+    for event in (a, b):
+        chosen = (SimpleNamespace(**op) for op in event["selected_skills"])
+        prompt_skills = [vars(op) for op in deployment_operations(chosen)]
+        if event["skills"] != prompt_skills:
+            raise ValueError("Recorded writer skills differ from deployment selection")
+    probs_a, probs_b = left["first_draw_probabilities"], right["first_draw_probabilities"]
+    if not (probs_b[old] < probs_a[old] and probs_b[new] > probs_a[new]):
+        raise ValueError("Intervention did not change the paired policy probabilities")
+    return {"matched_prefix_spans": start, "state_sha256": left["state_sha256"],
+            "outgoing": names[old], "incoming": names[new],
+            "native_first_draw": [probs_a[old], probs_a[new]], "swap_first_draw": [probs_b[old], probs_b[new]],
+            "writer_prompt_changed": [r["prompt_sha256"] for r in a["executor_responses"]] !=
+                                     [r["prompt_sha256"] for r in b["executor_responses"]],
+            "suffix_action_changes": sum(x["selected_skills"] != y["selected_skills"]
+                                         for x, y in zip(native[start+1:], changed[start+1:]))}
 
 
 def rebuild_suffix(trainer, events, start, first_actions, *, select_suffix=None, observe_suffix=None):

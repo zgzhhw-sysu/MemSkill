@@ -10,6 +10,7 @@ export MEMSKILL_MODEL_MANIFEST="$work/models/Llama-3.1-8B-Instruct/verified-mode
 export MEMSKILL_BACKEND_ID=llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1
 export MEMSKILL_PAPER_NATIVE_ONLY=1
 export MEMSKILL_PAPER_SPLIT=test
+unset MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_NATIVE_TRAIN_ROOT
 report=baseline.json
 mode=${1:-baseline}
 datasets=(locomo longmemeval)
@@ -25,18 +26,31 @@ case "$mode" in
             --tensor-parallel-size 2 --gpu-memory-utilization .43 --max-num-seqs 4 --max-num-batched-tokens 256 \
             --disable-custom-all-reduce --disable-log-requests --worker-cls serve_low_duty.DutyLimitedWorker ;;
     baseline) ;;
-    locomo-batch64|locomo-train|locomo-validation)
+    locomo-batch64|locomo-train|locomo-validation|locomo-train-swap)
         datasets=(locomo)
         encoder_batch=64
         run="$baseline_run-$mode"
-        if [[ "$mode" != locomo-batch64 ]]; then
+        if [[ "$mode" == locomo-train-swap ]]; then
+            if [[ $# != 3 || ! $2 =~ ^conv-[0-9]+$ || ! $3 =~ ^(0|[1-9][0-9]*)$ ]]; then
+                echo "Usage: locomo-train-swap conv-ID zero-based-span" >&2
+                exit 2
+            fi
+            for baseline in "$baseline_run-locomo-batch64/legacy-rank-audit/upstream-inference-batch64.json" \
+                            "$baseline_run/longmemeval/baseline.json"; do
+                if [[ ! -s "$baseline" ]]; then echo "Waiting for original baseline: $baseline" >&2; exit 1; fi
+            done
+            export MEMSKILL_PAPER_SPLIT=train MEMSKILL_SWAP_HISTORY="$2" MEMSKILL_SWAP_SPAN="$3"
+            export MEMSKILL_NATIVE_TRAIN_ROOT="$baseline_run-locomo-train/locomo"
+            export MEMSKILL_GREEDY_EVAL_CACHE="$baseline_run-locomo-train/greedy-cache"
+            run="$run/$2/span-$3"
+        elif [[ "$mode" != locomo-batch64 ]]; then
             export MEMSKILL_PAPER_SPLIT="${mode#locomo-}" MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
         fi
         export MEMSKILL_QWEN_PREFILL_ONLY=1 MEMSKILL_MEMORY_SEARCH=cuda-skylakex MEMSKILL_TRACE_NATIVE_POLICY=1
         export PYTORCH_ALLOC_CONF=expandable_segments:True
         ;;
     paired) export MEMSKILL_PAPER_NATIVE_ONLY=0; report=comparison.json ;;
-    *) echo "Expected backend, baseline, locomo-batch64, locomo-train, locomo-validation or paired" >&2; exit 2 ;;
+    *) echo "Expected backend, baseline, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap or paired" >&2; exit 2 ;;
 esac
 export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH="${MEMSKILL_MEMORY_SEARCH:-cuda}"
 if [[ "$MEMSKILL_MEMORY_SEARCH" == cuda-skylakex ]]; then
