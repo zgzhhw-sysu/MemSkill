@@ -56,6 +56,38 @@ class PaperF1Test(unittest.TestCase):
             events()
         self.assertEqual(events(), original)
 
+    def test_independent_repeat_seeds_only_preceding_writes_and_checks_them_on_resume(self):
+        from experiments.designer.paper_date_pair import seed_writer_prefix
+        from src.evaluation_cache import publish_response, read_response
+
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = base / "original-cache"
+            isolated = base / "repeat" / "native-cache"
+            keys = [str(i) * 64 for i in (1, 2, 3)]
+            spans, usage = [], []
+            for i, (key, kind) in enumerate(zip(keys, ("executor", "executor", "reader"), strict=True)):
+                row = publish_response(source, key, f"prompt-{i}", f"response-{i}", 10, 5)
+                usage.append({"kind": kind, "cache_key": key, "response_sha256": row["sha256"], "input": 10, "output": 5})
+                if kind == "executor":
+                    spans.append({"executor_responses": [{"prompt_sha256": f"prompt-{i}", "response": f"response-{i}",
+                                                          "input_tokens": 10, "output_tokens": 5}]})
+            (base / "usage.jsonl").write_text("\n".join(map(json.dumps, usage)))
+            seed_writer_prefix(base, spans, 1, source, isolated)
+            self.assertEqual(read_response(isolated, keys[0]), read_response(source, keys[0]))
+            self.assertIsNone(read_response(isolated, keys[1]))
+            self.assertIsNone(read_response(isolated, keys[2]))
+            independent = publish_response(isolated, keys[1], "prompt-1", "different writer result", 10, 6)
+            seed_writer_prefix(base, spans, 1, source, isolated)
+            self.assertEqual(read_response(isolated, keys[1]), independent)
+            with self.assertRaisesRegex(ValueError, "separate cache"):
+                seed_writer_prefix(base, spans, 1, source, source)
+            with self.assertRaisesRegex(ValueError, "recorded prefix"):
+                seed_writer_prefix(base, spans, 0, source, isolated)
+            spans[0]["executor_responses"][0]["response"] = "modified"
+            with self.assertRaisesRegex(ValueError, "native response receipt"):
+                seed_writer_prefix(base, spans, 1, source, isolated)
+
     def test_development_ids_are_separate_from_paper_test_ids(self):
         def key_hash(sid):
             return hashlib.sha256(json.dumps([[sid, 1]], separators=(",", ":")).encode()).hexdigest()

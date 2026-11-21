@@ -15,6 +15,7 @@ from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, questio
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.episode_trace import skill_spec
+from src.evaluation_cache import publish_response, read_response
 from src.inference.text import infer_text_dataset_memories
 from src.rag_utils import reuse_qwen_retriever
 from src.revision_validation import compare_revisions
@@ -114,12 +115,44 @@ def history_spans(directory):
         return [r for line in stream if (r := json.loads(line))["kind"] == "span"]
 
 
-def measure_training_swap(trainer, sample, args, root, original, questions, start):
+def seed_writer_prefix(original, spans, start, source_cache, cache):
+    """Initialize an arm with only the historical writes strictly before the intervention."""
+    with (original / "usage.jsonl").open() as stream:
+        writes = [r for line in stream if (r := json.loads(line))["kind"] == "executor"]
+    if len(writes) != len(spans) or source_cache.resolve() == cache.resolve():
+        raise ValueError("Independent repeat requires the original writer ledger and a separate cache")
+    receipts = {}
+    for event, usage in zip(spans[:start], writes[:start], strict=True):
+        response, = event["executor_responses"]
+        key = usage["cache_key"]
+        receipt = read_response(source_cache, key)
+        expected = {"key": key, "prompt_sha256": response["prompt_sha256"], "response": response["response"],
+                    "tokens": [response["input_tokens"], response["output_tokens"]]}
+        if (receipt is None or receipt["sha256"] != usage["response_sha256"]
+                or receipt["payload"] != expected or expected["tokens"] != [usage["input"], usage["output"]]):
+            raise ValueError("Prefix writer trace differs from the native response receipt")
+        receipts[key] = receipt
+    manifest = {"spans": start, "responses": {k: v["sha256"] for k, v in receipts.items()}}
+    if not cache.exists():
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(dir=cache.parent) as tmp:
+            staged = Path(tmp) / "seeded"
+            staged.mkdir()
+            for key, receipt in receipts.items():
+                row = receipt["payload"]
+                publish_response(staged, key, row["prompt_sha256"], row["response"], *row["tokens"])
+            save(staged / "prefix.json", manifest)
+            staged.rename(cache)
+    if (json.loads((cache / "prefix.json").read_bytes()) != manifest
+            or any(read_response(cache, k) != v for k, v in receipts.items())):
+        raise ValueError("Independent arm cache does not match its recorded prefix")
+
+
+def measure_training_swap(trainer, sample, args, root, original, questions, start, repeat=0):
     """Measure one training action with the native end-to-end writer, retrieval and reader."""
     from src.replay import swap_boundary_logits, verify_native_swap
 
     spans = history_spans(original)
-    control = question_scores("locomo", questions, [original / "scores.json"])
     sid = trainer.data_processor.get_sample_id(sample)
     if not 0 <= start < len(spans):
         raise ValueError("Requested span is outside the native history")
@@ -128,40 +161,89 @@ def measure_training_swap(trainer, sample, args, root, original, questions, star
     linked = sorted(i for (_, i), qa in questions.items() if turns.intersection(qa.get("evidence") or []))
     panel = json.loads(PROTOCOL.read_text())["training_boundary_swap"]["histories"].get(sid)
     registered = panel is not None and panel["span"] == start
-    if registered and panel != {"span": start, "total_spans": len(spans), "questions": len(control),
+    if registered and panel != {"span": start, "total_spans": len(spans), "questions": len(questions),
                                 "linked_question_indices": linked, "source_sha256": hashlib.sha256(event["source"].encode()).hexdigest()}:
         raise ValueError("Measured training span differs from its preregistered source and question IDs")
-    dest = root / "swap" / sid
-    dest.parent.mkdir(exist_ok=True)
+    order = ("swap", "native") if repeat % 2 else ("native", "swap")
+    source_cache = Path(os.environ["MEMSKILL_GREEDY_EVAL_CACHE"]) if repeat else None
+    arms = order if repeat else ("swap",)
+    for arm in arms:
+        directory = root / arm / sid
+        directory.parent.mkdir(exist_ok=True)
+        if repeat:
+            cache = root.parent / "greedy-cache" / arm
+            seed_writer_prefix(original, spans, start, source_cache, cache)
+        if directory.exists():
+            continue
+        with TemporaryDirectory(dir=directory.parent) as tmp:
+            staged = Path(tmp) / sid
+            staged.mkdir()
+            try:
+                if repeat:
+                    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)
+                with swap_boundary_logits(trainer.controller, spans, start) if arm == "swap" else nullcontext():
+                    run_traced_history(trainer, sample, args, staged)
+            finally:
+                if repeat:
+                    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(source_cache)
+            stats = inspect_trace(staged / "traces", sid)
+            observed = history_spans(staged)
+            measured_cost(staged, observed, len(questions))
+            question_scores("locomo", questions, [staged / "scores.json"])
+            if arm == "swap":
+                verify_native_swap(spans, observed, start)
+            else:
+                if (len(observed) != len(spans) or observed[:start] != spans[:start]
+                        or any(observed[start][k] != event[k] for k in
+                               ("source", "sample", "span_id", "source_turns", "retrieved", "refs", "policy", "selected_skills", "skills"))):
+                    raise ValueError("Repeated native arm differs from the original before the target write")
+                save(staged / "audit.json", stats)
+            staged.rename(directory)
 
-    def report(directory):
-        changed = history_spans(directory)
-        record = verify_native_swap(spans, changed, start)
-        after = question_scores("locomo", questions, [directory / "scores.json"])
-        deltas = {key[1]: after[key] - control[key] for key in questions}
-        cost = {"native": measured_cost(original, spans, len(control)),
-                "swap": measured_cost(directory, changed, len(after))}
-        record.update(sample_id=sid, span_id=start, questions=len(deltas), cost=cost,
-                      registered_span=registered, linked_question_indices=linked,
-                      native_f1=100 * mean(control.values()), swap_f1=100 * mean(after.values()),
-                      difference_points=100 * mean(deltas.values()), f1_deltas={str(i): d for i, d in deltas.items()},
-                      **inspect_trace(directory / "traces", sid))
-        trace, = (directory / "traces").glob("*.jsonl")
-        record["artifacts"] = {str(p.relative_to(directory)): file_hash(p)
-                               for p in (trace, directory / "usage.jsonl", directory / "scores.json")}
-        return record
+    directory = root / "swap" / sid
+    control_dir = root / "native" / sid if repeat else original
+    native = history_spans(control_dir) if repeat else spans
+    changed = history_spans(directory)
+    record = verify_native_swap(native, changed, start)
+    control = question_scores("locomo", questions, [control_dir / "scores.json"])
+    after = question_scores("locomo", questions, [directory / "scores.json"])
+    deltas = {key[1]: after[key] - control[key] for key in questions}
+    cost = {"native": measured_cost(control_dir, native, len(control)),
+            "swap": measured_cost(directory, changed, len(after))}
+    record.update(sample_id=sid, span_id=start, questions=len(deltas), cost=cost,
+                  registered_span=registered, linked_question_indices=linked,
+                  native_f1=100 * mean(control.values()), swap_f1=100 * mean(after.values()),
+                  difference_points=100 * mean(deltas.values()), f1_deltas={str(i): d for i, d in deltas.items()},
+                  **inspect_trace(directory / "traces", sid))
+    trace, = (directory / "traces").glob("*.jsonl")
+    record["artifacts"] = {str(p.relative_to(directory)): file_hash(p)
+                           for p in (trace, directory / "usage.jsonl", directory / "scores.json")}
+    if repeat:
+        for arm in order:
+            arm_cache = root.parent / "greedy-cache" / arm
+            seeded = json.loads((arm_cache / "prefix.json").read_bytes())["responses"]
+            with (root / arm / sid / "usage.jsonl").open() as stream:
+                usage = [json.loads(line) for line in stream]
+            if any(row["kind"] != "executor" or not row["cache_hit"] or seeded.get(row["cache_key"]) != row["response_sha256"]
+                   for row in usage[:start]):
+                raise ValueError("Independent arm did not replay its historical prefix")
+            suffix = usage[start:]
+            for row in suffix:
+                receipt = read_response(arm_cache, row["cache_key"])
+                if receipt is None or receipt["sha256"] != row["response_sha256"]:
+                    raise ValueError("Independent arm is missing a measured post-fork response")
+            cost[arm]["postfork"] = {"requests": len(suffix), "generated_this_attempt": sum(not r["cache_hit"] for r in suffix),
+                                    "distinct_new_requests": len({r["cache_key"] for r in suffix} - seeded.keys()),
+                                    "requests_matching_prefix": sum(r["cache_key"] in seeded for r in suffix)}
+        record.update(repeat=repeat, execution_order=list(order), native_scores_sha256=file_hash(control_dir / "scores.json"),
+                      native_usage_sha256=file_hash(control_dir / "usage.jsonl"))
 
-    if dest.exists():
-        if json.loads((dest / "measurement.json").read_text()) != report(dest):
+    measurement = directory / "measurement.json"
+    if measurement.exists():
+        if json.loads(measurement.read_text()) != record:
             raise ValueError("Published training measurement differs from its original and swap artifacts")
-        return
-    with TemporaryDirectory(dir=dest.parent) as tmp:
-        staged = Path(tmp) / sid
-        staged.mkdir()
-        with swap_boundary_logits(trainer.controller, spans, start):
-            run_traced_history(trainer, sample, args, staged)
-        save(staged / "measurement.json", report(staged))
-        staged.rename(dest)
+    else:
+        save(measurement, record)
 
 
 def summarize_if_complete(dataset, output, questions, types, active_arms, published, split="test"):
@@ -261,6 +343,9 @@ def run(args, root, rank, workers):
                 or swap_history not in {sid for sid, _ in questions}):
             raise ValueError("A single-span swap requires one native LoCoMo training history")
         start = int(os.environ["MEMSKILL_SWAP_SPAN"])
+        repeat = int(os.environ.get("MEMSKILL_SWAP_REPEAT", "0"))
+        if repeat < 0:
+            raise ValueError("Repeat index must be nonnegative")
         native_root = Path(os.environ["MEMSKILL_NATIVE_TRAIN_ROOT"]).resolve()
         if root == native_root or json.loads((native_root / "protocol.json").read_text()) != plan:
             raise ValueError("Training measurement and native reference must have identical inference settings and distinct outputs")
@@ -268,6 +353,9 @@ def run(args, root, rank, workers):
         trace, = (original / "traces").glob("*.jsonl")
         plan["training_swap"] = {"history": swap_history, "span": start, "intervention": "exchange-kth-and-next-logits",
                                  "trace_sha256": file_hash(trace), "scores_sha256": file_hash(original / "scores.json")}
+        if repeat:
+            plan["training_swap"].update(repeat=repeat, arms="independent-postfork-v1",
+                                         usage_sha256=file_hash(original / "usage.jsonl"))
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -297,7 +385,7 @@ def run(args, root, rank, workers):
         if swap_history:
             sample, = [s for s in samples if trainer.data_processor.get_sample_id(s) == swap_history]
             subset = {k: q for k, q in questions.items() if k[0] == swap_history}
-            return measure_training_swap(trainer, sample, args, root, original, subset, start)
+            return measure_training_swap(trainer, sample, args, root, original, subset, start, repeat)
         for index, sample in enumerate(samples):
             sid = trainer.data_processor.get_sample_id(sample)
             if sid not in assigned:

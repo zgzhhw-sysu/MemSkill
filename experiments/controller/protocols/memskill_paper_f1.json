@@ -14,6 +14,8 @@
   },
   "training_boundary_swap": {
     "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
+    "independent_repeats": 2,
+    "repeat_order": "odd swap then native; even native then swap; each arm seeds only earlier writer receipts",
     "histories": {
       "conv-26": {"span": 22, "total_spans": 47, "questions": 152, "linked_question_indices": [42, 66, 118, 119], "source_sha256": "2b4a47f4db70688de295ded1291a889e04899a2ba8321f6c40a82c37f63a0f01"},
       "conv-30": {"span": 19, "total_spans": 39, "questions": 81, "linked_question_indices": [27, 61], "source_sha256": "caa14fe66ac3b58b7e860c9f74b117b400cbcea6492a183e75657fc8d616ab8a"},

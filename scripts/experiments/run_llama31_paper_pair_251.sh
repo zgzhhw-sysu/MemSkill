@@ -10,7 +10,7 @@ export MEMSKILL_MODEL_MANIFEST="$work/models/Llama-3.1-8B-Instruct/verified-mode
 export MEMSKILL_BACKEND_ID=llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1
 export MEMSKILL_PAPER_NATIVE_ONLY=1
 export MEMSKILL_PAPER_SPLIT=test
-unset MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_NATIVE_TRAIN_ROOT
+unset MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_SWAP_REPEAT MEMSKILL_NATIVE_TRAIN_ROOT
 report=baseline.json
 mode=${1:-baseline}
 datasets=(locomo longmemeval)
@@ -31,8 +31,9 @@ case "$mode" in
         encoder_batch=64
         run="$baseline_run-$mode"
         if [[ "$mode" == locomo-train-swap ]]; then
-            if [[ $# != 3 || ! $2 =~ ^conv-[0-9]+$ || ! $3 =~ ^(0|[1-9][0-9]*)$ ]]; then
-                echo "Usage: locomo-train-swap conv-ID zero-based-span" >&2
+            if [[ $# -lt 3 || $# -gt 4 || ! ${2:-} =~ ^conv-[0-9]+$ || ! ${3:-} =~ ^(0|[1-9][0-9]*)$
+                  || ( $# == 4 && ! $4 =~ ^[1-9][0-9]*$ ) ]]; then
+                echo "Usage: locomo-train-swap conv-ID zero-based-span [positive-repeat]" >&2
                 exit 2
             fi
             for baseline in "$baseline_run-locomo-batch64/legacy-rank-audit/upstream-inference-batch64.json" \
@@ -43,6 +44,10 @@ case "$mode" in
             export MEMSKILL_NATIVE_TRAIN_ROOT="$baseline_run-locomo-train/locomo"
             export MEMSKILL_GREEDY_EVAL_CACHE="$baseline_run-locomo-train/greedy-cache"
             run="$run/$2/span-$3"
+            if [[ $# == 4 ]]; then
+                export MEMSKILL_SWAP_REPEAT="$4"
+                run="$run/repeats/$4"
+            fi
         elif [[ "$mode" != locomo-batch64 ]]; then
             export MEMSKILL_PAPER_SPLIT="${mode#locomo-}" MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
         fi
