@@ -21,17 +21,20 @@ if [[ $phase == forecast ]]; then
     done
     exit 0
 fi
-if [[ $phase == evaluation || $phase == state-evaluation ]]; then
+if [[ $phase == evaluation || $phase == state-evaluation || $phase == writer-format-sensitivity || $phase == writer-format-verified || $phase == writer-format-dense || $phase == writer-format-history || $phase == writer-format-transfer ]]; then
     policy="$out"
     flags=()
+    device=3
+    if [[ $phase == writer-format-* ]]; then policy="$out/$phase"; flags+=(--factor "${phase#writer-format-}"); device=1; fi
     if [[ $phase == state-evaluation ]]; then policy="$out/checkpoint-odds"; flags+=(--state); fi
     prior_state=
     while [[ ! -f "$policy/evaluation/summary.json" ]]; do
+        if [[ $phase == writer-format-dense && -f "$base/late-pairs/semantic-writer/three-writer/$phase/unavailable.json" ]]; then exit 0; fi
         if [[ -f "$policy/forecast.json" ]]; then
             state=$(find "$earlier/outcomes" "$out/readers" "$out/pairs" "$out/judged" -maxdepth 1 -name 'conv-*.json' -printf '%p\n' 2>/dev/null | sort || true)
             if [[ -n $state && $prior_state != "$state" || ( -f "$out/judged-complete.json" && -f "$earlier/outcomes-complete.json" ) ]]; then
                 rc=0
-                python3 "$guard" run --gpus 3 -- "$MEMSKILL_PYTHON" -u -m experiments.controller.earliest_skill_evaluation "$base" "$STUDY_DIR" "${flags[@]}" >>"$policy/evaluation.log" 2>&1 || rc=$?
+                python3 "$guard" run --gpus "$device" -- "$MEMSKILL_PYTHON" -u -m experiments.controller.earliest_skill_evaluation "$base" "$STUDY_DIR" "${flags[@]}" >>"$policy/evaluation.log" 2>&1 || rc=$?
                 if ((rc==0)); then prior_state=$state; elif ((rc!=75)); then exit "$rc"; fi
             fi
         fi

@@ -18,10 +18,13 @@ PLAN = Path(__file__).with_name("protocols") / "three_skill_margin.json"
 MODELS = ("raw", "credit", "rotated")
 
 
-def margin_fit(x, y, w, c, v):
+def margin_fit(x, y, w, c, v, *, constraint_x=None, penalty=None):
     """Convex squared-hinge regularization; the raw ridge solution is the zero-credit limit."""
-    penalty = x.new_full((x.shape[1],), 0.25)
-    penalty[0] = 0.02
+    if constraint_x is None:
+        constraint_x = x
+    if penalty is None:
+        penalty = x.new_full((x.shape[1],), 0.25)
+        penalty[0] = 0.02
     gram = x.T @ (w[:, None] * x) + torch.diag(penalty)
     rhs = x.T @ (w * y)
     raw = torch.linalg.solve(gram, rhs)
@@ -29,7 +32,7 @@ def margin_fit(x, y, w, c, v):
         return raw, raw
 
     def objective(b):
-        residual = (c.abs() - c.sign() * (x @ b)).clamp_min(0)
+        residual = (c.abs() - c.sign() * (constraint_x @ b)).clamp_min(0)
         return (
             (w * ((x @ b) - y).square()).sum()
             + (penalty * b.square()).sum()
@@ -38,12 +41,14 @@ def margin_fit(x, y, w, c, v):
 
     beta = raw.clone()
     for _ in range(40):
-        gap = x @ beta - c
+        gap = constraint_x @ beta - c
         active = v * (c.sign() * gap < 0)
-        gradient = gram @ beta - rhs + x.T @ (active * gap)
+        gradient = gram @ beta - rhs + constraint_x.T @ (active * gap)
         if gradient.abs().max() < 1e-10:
             break
-        step = torch.linalg.solve(gram + x.T @ (active[:, None] * x), gradient)
+        step = torch.linalg.solve(
+            gram + constraint_x.T @ (active[:, None] * constraint_x), gradient
+        )
         old = objective(beta)
         for _ in range(32):
             proposal = beta - step
