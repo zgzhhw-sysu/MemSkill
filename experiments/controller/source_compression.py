@@ -3,13 +3,12 @@ import argparse
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, register
 from experiments.controller.granularity_placement import fit_preference
 from src.data_processing.locomo import LoCoMoProcessor
 from src.rag_utils import get_embeddings, init_context_model, set_retriever_flash_attn
@@ -17,22 +16,6 @@ from src.replay import dated_turn_groups
 
 
 FEATURES = ("mean_cosine_loss", "worst_quarter_cosine_loss", "change_in_item_crowding")
-
-
-def file_hash(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def register(path, report):
-    """Atomically create a receipt. Concurrent repeat runs must agree."""
-    with TemporaryDirectory(dir=path.parent) as temp:
-        fresh = Path(temp) / path.name
-        fresh.write_text(json.dumps(report, indent=2))
-        try:
-            os.link(fresh, path)
-        except FileExistsError:
-            if json.loads(path.read_bytes()) != json.loads(fresh.read_bytes()):
-                raise ValueError(f"Different registration already exists at {path}")
 
 
 def compression_features(singles, pairs):

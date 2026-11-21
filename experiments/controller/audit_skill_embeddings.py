@@ -8,19 +8,16 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read
 from experiments.controller.audit_training_replays import compare, probability_placement, read_windows
 from experiments.controller.paired_policy import PairedPolicy, fit_anchored_credit, fit_policy, match_training_probability
 from src.controller import PPOController
 from src.operation_bank import OperationBank
 
 
-def read(path):
-    return json.loads(path.read_bytes())
-
-
 def audit(study, checkpoint, development):
     protocol = read(study / "protocol.json")
-    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    digest = file_hash(checkpoint)
     if digest != protocol["checkpoint_sha256"]:
         raise ValueError("Training protocol and checkpoint differ")
     model = torch.load(checkpoint, map_location="cpu", weights_only=False)

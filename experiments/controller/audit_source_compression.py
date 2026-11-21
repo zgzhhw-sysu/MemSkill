@@ -12,15 +12,12 @@ from types import SimpleNamespace
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.paired_policy import fit_policy, _training_states, _shift_for_mean_probability
 from experiments.controller.probe_omitted import check_responses
 from experiments.controller.resume_status import load_episode
-from experiments.controller.source_compression import FEATURES, file_hash, fit_actor, register
+from experiments.controller.source_compression import FEATURES, fit_actor
 from src.eval import get_evaluator
-
-
-def read(path):
-    return json.loads(path.read_bytes())
 
 
 def panel(study, corpus, features, starts, *, supplement=False):
