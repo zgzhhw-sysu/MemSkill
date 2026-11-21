@@ -42,6 +42,12 @@
     "rate_control": "constant boundary logit shift with closest incoming-skill count on all native training states, minimum absolute shift on ties",
     "validation": "two complete histories; native, terminal, span and rate-matched fixed bias from empty memory banks"
   },
+  "state_credit_test": {
+    "candidate": "span", "comparators": ["native", "terminal", "rate"],
+    "selection_split": "validation", "test_split": "test",
+    "rule": "Verified positive pooled paired F1 against all three controls and at least one Controller decision with both a changed first-draw probability and changed top-K membership on validation",
+    "weights": "Use the exact validated frozen file for all arms without refitting"
+  },
   "datasets": {
     "locomo": {
       "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",

@@ -6,10 +6,56 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from experiments.controller.paper_f1 import PROTOCOL, load_cohort, load_split_cohort, run_baseline, score_answers
+from experiments.controller.paper_f1 import PROTOCOL, load_cohort, load_split_cohort, run_baseline, score_answers, validation_decision
 
 
 class PaperF1Test(unittest.TestCase):
+    def test_frozen_test_requires_positive_paired_validation_and_joint_action_change(self):
+        from types import SimpleNamespace
+        from experiments.designer import paper_date_pair
+
+        paper = json.loads(PROTOCOL.read_bytes())
+        spec = paper["datasets"]["locomo"]["development_splits"]["validation"]
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp) / "experiment"
+            root = Path(str(base) + "-locomo-credit-validation") / "locomo"
+            root.mkdir(parents=True)
+
+            def write(name, obj):
+                path = root / (name + ".json")
+                path.write_text(json.dumps(obj))
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+
+            frozen = write("frozen", {"weight": 1})
+            protocol = write("protocol", {"split": "validation", "question_keys": spec["scored_key_sha256"],
+                                          "state_credit_sha256": frozen})
+            def receipt(rate, joint):
+                scores = {"native": 20, "span": 22, "terminal": 21, "rate": rate}
+                counts = {"probability_changes": 2, "membership_changes": 1}
+                contrasts = {key: {"difference_points": scores["span"] - scores[key]} for key in ("native", "terminal", "rate")}
+                comparison = write("comparison", {"split": "validation", "questions": spec["scored_questions"],
+                                                  "paired": contrasts, "exposure": {"span": {"history": counts}}})
+                write("upstream-score", {"dataset": "locomo", "split": "validation", "scorer_commit": paper["upstream_revision"],
+                                         "comparison_sha256": comparison, "frozen_sha256": frozen, "protocol_sha256": protocol,
+                                         "candidate_changes": dict(counts, joint_changes=joint), "f1_percent": scores,
+                                         "questions": spec["scored_questions"]})
+            receipt(21, 1)
+            self.assertTrue(validation_decision(root, paper)["selected"])
+            for rate, joint in ((22, 1), (23, 1), (21, 0)):
+                receipt(rate, joint)
+                self.assertFalse(validation_decision(root, paper)["selected"])
+                with patch.dict("os.environ", {"MEMSKILL_STATE_CREDIT_BASE": str(base), "MEMSKILL_PAPER_SPLIT": "test"}), \
+                        patch.object(paper_date_pair, "load_split_cohort", side_effect=AssertionError("opened test questions")):
+                    with self.assertRaisesRegex(ValueError, "did not qualify"):
+                        paper_date_pair.run(SimpleNamespace(dataset="locomo"), Path(tmp) / "held", 0, 1)
+            receipt(21, 2)
+            with self.assertRaisesRegex(ValueError, "Controller decisions"):
+                validation_decision(root, paper)
+            receipt(21, 1)
+            write("frozen", {"weight": 2})
+            with self.assertRaisesRegex(ValueError, "frozen"):
+                validation_decision(root, paper)
+
     def test_trace_requires_each_regular_insert_and_allows_deduplicated_dates(self):
         from src.episode_trace import inspect_trace
 
