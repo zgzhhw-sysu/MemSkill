@@ -5,13 +5,12 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import diagnose, writer
 from experiments.controller.exchange_paths import Ranking, clean_marker
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.resume_status import check_equal_source_choice, load_episode
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import (
     _digest,
     check_competing_evidence,

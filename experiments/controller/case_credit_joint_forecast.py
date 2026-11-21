@@ -4,9 +4,8 @@ import argparse
 import os
 from pathlib import Path
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.case_credit import KINDS, examples, excerpt, measure, prompt
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest
 

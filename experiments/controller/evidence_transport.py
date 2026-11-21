@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.evidence_transport_data import (
     factorial,
     randomized,
@@ -13,8 +14,6 @@ from experiments.controller.evidence_transport_data import (
     sources,
 )
 from experiments.controller.evidence_turns import PLAN
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import digest
 
 ARMS = ("credit", "raw", "blind", "sham", "equal")

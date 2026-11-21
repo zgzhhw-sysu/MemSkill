@@ -10,11 +10,10 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_pair_trial import paths
 from experiments.controller.outcome_credit import matched_offset
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.turn_key_credit import fit, offset, paired_interval
 from src.evaluation_cache import digest, encode_batch
 from src.rag_utils import init_context_model, set_retriever_flash_attn

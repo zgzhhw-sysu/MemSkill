@@ -7,10 +7,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
 from experiments.controller.evidence_transport_data import sources
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import cases, completed, limited
 from experiments.controller.witness_passages import registration
 from src.evaluation_cache import digest

@@ -5,9 +5,8 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import digest, read_response
 

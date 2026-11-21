@@ -5,11 +5,11 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import diagnose, writer
 from experiments.controller.earliest_skill_forecast import PLAN
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import (
     make_bank,
     make_writer,
@@ -20,7 +20,6 @@ from experiments.controller.legacy_terminal_symmetry import (
 from experiments.controller.relation_skill_repairs import candidates
 from experiments.controller.resume_status import check_equal_source_choice
 from experiments.controller.semantic_writer import REL, TEMP, sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import ACTIVITY
 from src.credit_assignment import _digest, execution_fault
 from src.episode_trace import skill_spec

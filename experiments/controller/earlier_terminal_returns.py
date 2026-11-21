@@ -6,14 +6,13 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import diagnose, writer
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import make_bank, make_writer, ops
 from experiments.controller.resume_status import check_equal_source_choice
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import _digest, execution_fault
 from src.episode_trace import skill_spec
 from src.eval.locomo import LoCoMoEvaluator

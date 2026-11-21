@@ -8,10 +8,9 @@ from types import SimpleNamespace
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.earliest_skill_evaluation import contrast_bounds
-from experiments.controller.factorial_rollout import read
 from experiments.controller.semantic_writer import measured_readers, sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 from src.credit_assignment import execution_fault
 from src.eval.locomo import LoCoMoEvaluator

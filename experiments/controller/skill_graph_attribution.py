@@ -7,10 +7,9 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.skill_graph_policy import project, ridge
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 
 

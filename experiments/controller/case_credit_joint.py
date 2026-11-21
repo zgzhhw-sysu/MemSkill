@@ -6,9 +6,8 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.case_credit import possible_offsets
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import question_links
 from src.evaluation_cache import digest
 

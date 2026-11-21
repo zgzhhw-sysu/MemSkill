@@ -8,9 +8,8 @@ from itertools import product
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.query_prototypes import mask_speakers
-from experiments.controller.source_compression import file_hash, register
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest
 

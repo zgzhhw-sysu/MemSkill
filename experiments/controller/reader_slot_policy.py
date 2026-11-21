@@ -11,9 +11,9 @@ from types import SimpleNamespace
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
 from experiments.controller.credit_rank_allocation import audit_long_prefix
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_credit_kernel import kernel_effect, score, support
 from experiments.controller.outcome_credit import matched_offset
 from experiments.controller.reader_slot_credit import (
@@ -23,7 +23,6 @@ from experiments.controller.reader_slot_credit import (
     reader_key,
 )
 from experiments.controller.retrieval_competition import summarize
-from experiments.controller.source_compression import file_hash, register
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import read_response
 

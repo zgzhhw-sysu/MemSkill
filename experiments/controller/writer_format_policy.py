@@ -7,12 +7,11 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.direct_skill_allocation import direct_distributions
-from experiments.controller.factorial_rollout import read
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.selective_span_policy import weights
 from experiments.controller.skill_graph_data import training_rows
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_skill_margin import margin_fit, score
 from experiments.controller.witness_passage_policy import limited
 from experiments.controller.writer_format_history import archive as history_archive

@@ -6,8 +6,7 @@ from statistics import mean
 
 import torch
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from experiments.controller.witness_passage_policy import limited
 
 PLAN = Path(__file__).with_name("protocols") / "query_displacement_audit.json"

@@ -6,10 +6,9 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_case_credit_joint import collect, evaluate_offsets
 from experiments.controller.evidence_transport import ARMS
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import digest
 
 BASELINES = ("rate", "return_only", "native", "terminal")

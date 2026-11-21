@@ -8,12 +8,11 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_selection_labels import registration
 from experiments.controller.outcome_credit import matched_offset
 from experiments.controller.retrieval_competition import budgets, mass, summarize
-from experiments.controller.source_compression import file_hash, register
 
 ARMS = ("credit", "early", "raw", "rate", "native", "terminal")
 

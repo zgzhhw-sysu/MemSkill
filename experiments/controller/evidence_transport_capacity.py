@@ -7,9 +7,8 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.evidence_transport import ARMS, root_targets
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 
 
 def expected(logits, offsets, y):

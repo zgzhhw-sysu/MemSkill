@@ -5,8 +5,7 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from experiments.controller.terminal_capacity import optimal_rates
 
 

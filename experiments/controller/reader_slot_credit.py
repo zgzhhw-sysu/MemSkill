@@ -11,14 +11,13 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_paired import reader_inputs
 from experiments.controller.capped_source_policy import baseline, joint_evidence
 from experiments.controller.capped_source_repair import BACKEND as EARLY
 from experiments.controller.capped_source_repair import archive
-from experiments.controller.factorial_rollout import read
 from experiments.controller.first_evidence_credit import BACKEND as DONOR
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.writer_granularity import measured_answer
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import read_response, request_cache

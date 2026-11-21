@@ -6,16 +6,15 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import writer
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import make_bank, make_writer, ops
 from experiments.controller.paired_grounding import window
 from experiments.controller.relation_skill_repairs import activity_rows, check_response
 from experiments.controller.semantic_writer import REL, sha
 from experiments.controller.skill_graph_data import training_rows
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import ACTIVITY
 from src.credit_assignment import _digest, execution_fault
 from src.episode_trace import skill_spec

@@ -3,13 +3,12 @@
 import argparse
 from pathlib import Path
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.legacy_terminal_symmetry import (
     census,
     source,
     verify_writer,
 )
-from experiments.controller.source_compression import file_hash, register
 
 PLAN = Path(__file__).with_name("protocols") / "legacy_root_pivots.json"
 

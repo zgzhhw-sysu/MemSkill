@@ -9,13 +9,12 @@ import torch
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.evidence_transport_data import sources
-from experiments.controller.factorial_rollout import read
 from experiments.controller.passage_advantage import evaluate
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.passage_evidence_prefix import evaluate as evaluate_prefix
 from experiments.controller.query_displacement_data import registration
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 from src.evaluation_cache import digest
 

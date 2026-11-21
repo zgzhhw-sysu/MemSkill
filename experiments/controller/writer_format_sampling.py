@@ -8,8 +8,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from statistics import mean, variance
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from experiments.controller.writer_format_trial import NATIVE, question_receipt
 from src.evaluation_cache import digest
 

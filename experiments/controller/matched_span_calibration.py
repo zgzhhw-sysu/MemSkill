@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.matched_span_policy import (
     concordance,
     fit,
@@ -15,7 +15,6 @@ from experiments.controller.matched_span_policy import (
     score_trial,
 )
 from experiments.controller.passage_evidence_actor import gpu
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 
 PLAN = Path(__file__).with_name("protocols") / "matched_span_calibration.json"

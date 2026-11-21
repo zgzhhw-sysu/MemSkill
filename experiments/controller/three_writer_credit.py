@@ -9,9 +9,8 @@ from statistics import mean
 import numpy as np
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.semantic_writer import REL, TEMP, sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.third_skill_capacity import run as measure_capacity
 from src.credit_assignment import _digest
 from src.evaluation_cache import digest

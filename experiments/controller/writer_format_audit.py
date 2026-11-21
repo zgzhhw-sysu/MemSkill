@@ -9,9 +9,8 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.passage_evidence_actor import gpu
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 from experiments.controller.writer_format_trial import CELLS, NATIVE
 from src.evaluation_cache import digest

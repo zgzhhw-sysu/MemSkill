@@ -9,8 +9,7 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest, encode_batch
 from src.rag_utils import init_context_model, set_retriever_flash_attn

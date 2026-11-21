@@ -9,13 +9,12 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_cross_window import verified_decision
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_credit_kernel import kernel_effect, score, support
 from experiments.controller.outcome_credit import matched_offset
 from experiments.controller.retrieval_competition import summarize
-from experiments.controller.source_compression import file_hash, register
 
 PLAN = Path(__file__).with_name("protocols") / "credit_rank_allocation.json"
 RANKS = ("credit", "raw", "shuffled")

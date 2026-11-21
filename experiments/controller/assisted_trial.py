@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller import (
     assisted_span_backup,
     evidence_transport,
@@ -19,8 +20,6 @@ from experiments.controller.evidence_transport_data import (
     source_keys,
     sources,
 )
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import digest
 
 PLAN = Path(__file__).with_name("protocols") / "assisted_span_backup.json"

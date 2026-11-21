@@ -6,11 +6,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.factorial_repairs import answer, checked_cell, replay_writes
-from experiments.controller.factorial_rollout import read
 from experiments.controller.paired_grounding import window
 from experiments.controller.semantic_writer import measured_readers, sha
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import _digest, execution_fault, possible_recovery, recovered
 from src.evaluation_cache import history_embeddings
 from src.executor import ExecutionResult

@@ -6,11 +6,10 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean, pvariance
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_pair_trial import paths
 from experiments.controller.retrieval_competition import mass
-from experiments.controller.source_compression import file_hash, register
 
 METRICS = ("credit", "credit-native", "credit-rate", "credit-return_only")
 

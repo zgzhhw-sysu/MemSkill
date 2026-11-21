@@ -8,11 +8,10 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.factorial_repairs import checked_cell, replay_writes
-from experiments.controller.factorial_rollout import read
 from experiments.controller.paired_grounding import window
 from experiments.controller.semantic_writer import measured_readers, sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.temporal_update_writer import replay_provider
 from experiments.controller.writer_granularity import measured_answer
 from src.credit_assignment import _digest, recovered

@@ -7,8 +7,8 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.retrieval_competition import (
     PATHS,
     learn,
@@ -16,7 +16,6 @@ from experiments.controller.retrieval_competition import (
     probability,
     summarize,
 )
-from experiments.controller.source_compression import file_hash, register
 
 ARMS = ("robust", "overlap", "rate", "return_only", "native", "terminal")
 
