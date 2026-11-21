@@ -11,6 +11,19 @@ case $mode in
     margin)
         out="$parent/margin"
         cmd=(experiments.controller.three_skill_margin "$base" "$work/study-linked-eight-gpu" "$LOCOMO_DATA") ;;
+    earliest-credit-update)
+        gpu=3
+        out="$parent/earliest-credit-update"
+        cmd=(experiments.controller.earliest_credit_update "$base")
+        early="$base/source-compression/earliest-three-skills"
+        until [[ -f "$early/forecast.json" ]]; do sleep 15; done
+        "$MEMSKILL_PYTHON" -m "${cmd[@]}" --register-only
+        until [[ -f "$early/judged-complete.json" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 30; done ;;
+    checkpoint-odds)
+        gpu=3
+        out="$parent/checkpoint-odds"
+        cmd=(experiments.controller.checkpoint_odds_credit "$base")
+        until [[ -f "$base/source-compression/earliest-three-skills/forecast.json" ]]; do sleep 15; done ;;
     direct-step)
         gpu=3
         out="$parent/direct-step"

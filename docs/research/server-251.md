@@ -612,3 +612,20 @@ done
 `resume graph-donors run_graph_donors_251.sh` 接续较晚 7 个已划定的供样窗口。该进程先在物理卡 3 上准备三种修补，再由卡 5、6 的 BF16 服务复读。用 `resume graph-expanded run_three_skill_margin_251.sh graph-expanded` 接续扩展版，用 `resume direct-step run_three_skill_margin_251.sh direct-step` 接续按内层对话决定步长的版本。`skill-graph/extra-donors/` 保存新题裁决；`skill-graph/expanded/` 的 `original` 与 `zero_new` 分别比较原版本和清零新增标签。端点放大试验在同级 `direct-step/`，`models.json` 列出每个供样对话的校准成绩，`evaluation-bounds-NN.json` 的分母始终是全部 161 道后期题。
 
 各图模型及 `direct-step/` 的 `decisions/` 保存相同随机数下各策略实际选中的技能索引。有序技能及版本在 `branches[action].skills`，`writer` 为该末段写入的输入、输出 token，`reader` 按 `questions` 顺序记录每题输入、输出 token。两项均来自对应的物理分支。汇总文件 `evaluation-NN.json` 同时列出抽样 F1、相对原始回报实际换技的窗口数，以及按概率计算的换技机会。
+
+### 原始轨迹的第三种技能与状态条件概率
+
+在 251 的实验目录加载上文环境与 `resume` 函数后，可按下列命令接续。原生预测和检索使用物理卡 3。写入、问答和三种修补复测使用物理卡 5、6 上同一 BF16 服务。两个新策略的拟合和概率评估通过 CUDA 租约限载执行。
+
+```bash
+resume earliest-three-forecast run_earliest_three_251.sh forecast
+for phase in writers prepared readers pairs repairs judged evaluation state-evaluation; do
+    resume "earliest-three-$phase" run_earliest_three_251.sh "$phase"
+done
+resume checkpoint-odds run_three_skill_margin_251.sh checkpoint-odds
+resume earliest-credit-update run_three_skill_margin_251.sh earliest-credit-update
+```
+
+在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/earliest-three-skills/`，`forecast.json` 保存 12 个决策的归档指纹、各策略的实际概率、关系技能版本及当时已经测过的双技能窗口。`population.json` 保留所有原题号、题型、证据位置和计划分母。`pairs/` 将时间、活动、关系技能按这一顺序逐题对齐。`judged/` 给出每题的较弱技能、实测修补及核验后信用。`evaluation/snapshot-*.json` 用物理回执的内容指纹区分进度，按修改时间查看最新文件；同级 `checkpoint-odds/evaluation/` 保存采用原生状态特征的第二套结果。每个完整窗口给出实际抽到的技能、版本、输入与输出 token，统计按对话、题型和证据位置拆分。
+
+在 `late-pairs/semantic-writer/three-writer/checkpoint-odds/`，`models.json` 保存各留出对话的系数和供样窗口，`through-NN.json` 的 `by_partition.evaluation` 为后期评估，`strict_evaluation` 为冻结时尚无分支结果的窗口。共同随机数和真实技能分支在 `decisions/`。同级 `earliest-credit-update/registration.json` 记录提前登记时的早期测量进度。获得全部早期裁决后该服务自动拟合，并比较 `credit`、`zero_new` 和 `previous`。248 的自动镜像保留相同目录层次。

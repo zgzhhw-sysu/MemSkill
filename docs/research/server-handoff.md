@@ -287,3 +287,9 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 `skill-graph/complete/` 按同一道题合并多条技能边。`skill-graph/attribution/verified-complete.json` 已核对 25 个决策的单题贡献，`through-10-111.json` 给出整队列的可达范围。`direct-step/` 记录只在内层供样对话选出的放大步长。扩大供样的原题 85 在 `skill-graph/extra-donors/` 中逐项记录，后续策略在 `skill-graph/expanded/`。完整正式测试尚待候选通过预先登记的验证条件。[本轮度量与候选出处](algorithm-notes.md#同一道题上合并三种技能的核验信用) · [251 恢复命令](server-251.md#三种技能在同一道题上的信用)
 
 新增供样的原题 85 已裁决。保留关系技能时三种修补均把 F1 从 0.19355 恢复到 1，故额外选技信用为零。`skill-graph/expanded/through-10.json` 中 24 题的 F1 为 0.573458，等于 `zero_new`。在 `direct-step/decisions/evaluation-10.json` 中，核验信用与原始回报在同一组随机数下选到相同技能，单次回放 F1 都是 0.566282；同目录每窗文件保留实际技能顺序、版本、读写 token 和各策略的换技概率。早期两技能全窗口补测另有两处归档检索顺序不符，排除信息保存在 `source-compression/earlier-terminal-returns/prepared/`。conv-26 原题 89 的控制重放与原生轨迹读到的相同前五项次序不同，conv-30 原题 7 发生在替换分支。
+
+### 原始状态三技能实验及新策略
+
+模型计算继续在 251 进行，248 的结果镜像为 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/`。先看 `source-compression/earliest-three-skills/` 的 `forecast.json`、`pairs/`、`judged/` 和最新的 `evaluation/snapshot-*.json`。早期队列共 123 道不同原题，有 91 题通过旧分支的检索重放。直接信用在共同抽样下使 conv-43 第 3–4 场由活动技能换为关系技能。首个完成实测的窗口是 conv-41 第 3–4 场，其 4 题全部涉及前一场，原题答案及三技能分数已对齐。
+
+新状态策略的后期结果在 `late-pairs/semantic-writer/three-writer/checkpoint-odds/through-10.json`。已有的 24 道后期题中，期望 F1 为 0.578094，同设计原始回报为 0.577469；在共同抽样中两者选技相同。独立测试仍留出。等待早期所有窗口完成后，`earliest-credit-update/` 会将新增的经核验信用用于下一次拟合，并与保留新增原始回报、清零新增信用的版本对照。[算法及逐项指标](algorithm-notes.md#用写入前的原生技能偏好调节-span-信用) · [251 恢复命令](server-251.md#原始轨迹的第三种技能与状态条件概率)

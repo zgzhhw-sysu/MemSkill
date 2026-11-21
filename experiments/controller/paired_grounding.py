@@ -244,7 +244,7 @@ def load_arm_weights(study, arm):
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths"])
+    parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-earliest-three-skills", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only policy for paired trajectory evaluation")
     parser.add_argument("--study-complete-donors", action="store_true", help="Measure only missing trajectories on the randomized earlier donor block")
     parser.add_argument("--study-semantic-prefix", choices=(0, 1), type=int, default=0)
@@ -282,7 +282,7 @@ def main():
         parser.error("--study-probe-completed checks the whole training protocol")
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
-    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths")
+    paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-earliest-three-skills", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths")
     if options.study_semantic_prefix and options.study_phase != "training-semantic-writer":
         parser.error("--study-semantic-prefix requires training-semantic-writer")
     if options.study_pair_limit is not None and (options.study_phase not in ("training-late-pairs", "training-cross-prefix", "training-semantic-writer", "training-late-semantic-writer", "training-block-repairs", "training-late-selection-labels") or options.study_pair_limit < 1):
@@ -318,9 +318,9 @@ def main():
             parser.error("Paired training trajectories require one leased GPU and serial encoders")
         free, total = torch.cuda.mem_get_info()
         budget = min(int(total * .76), free - 2048 * 2**20)
-        minimum_mib = 2048 if options.study_phase in ("training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source") else 2304
+        minimum_mib = 2048 if options.study_phase in ("training-semantic-writer", "training-earliest-three-skills", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source") else 2304
         if budget < minimum_mib * 2**20:
-            if options.study_phase in ("training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths"):
+            if options.study_phase in ("training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-earliest-three-skills", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths"):
                 print(f"Waiting for encoder headroom: CUDA reports {free//2**20} MiB free; need {minimum_mib + 2048} MiB", flush=True)
                 raise SystemExit(75)
             raise RuntimeError("Insufficient free memory for the bounded trajectory encoder")
@@ -400,6 +400,9 @@ def main():
             elif options.study_phase == "training-late-semantic-writer":
                 from experiments.controller.late_semantic_writer import run
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
+            elif options.study_phase == "training-earliest-three-skills":
+                from experiments.controller.earliest_skill_forecast import freeze
+                freeze(trainer, out, options.study_forecast, specs)
             elif options.study_phase == "training-semantic-writer":
                 from experiments.controller.semantic_writer import run
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit, prefix_action=options.study_semantic_prefix)
