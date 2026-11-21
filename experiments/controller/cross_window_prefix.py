@@ -14,6 +14,7 @@ import numpy as np
 import torch
 from torch.nn.functional import normalize
 
+from experiments.controller import measured_cost
 from experiments.controller.factorial_rollout import measure_cell
 from experiments.controller.late_pair_policy import logistic, read
 from experiments.controller.prefix_return import budget_envelope, predicted_offsets
@@ -292,29 +293,6 @@ def collect_trajectories(trainer, convo, root, w, versions):
             events.append(spans)
             origins.append(read_origins(spans, [r for r in raw if r["kind"] == "qa"]))
     return cells, events, origins
-
-
-def measured_cost(folder, spans, questions):
-    usage = [
-        json.loads(line) for line in (folder / "usage.jsonl").read_bytes().splitlines()
-    ]
-    by_kind = {}
-    for kind, expected in (("executor", len(spans)), ("reader", questions)):
-        rows = [r for r in usage if r["kind"] == kind]
-        if len(rows) != expected or any(
-            min(r["input"], r["output"]) <= 0 for r in rows
-        ):
-            raise ValueError("Incomplete model usage for full-prefix rollout")
-        by_kind[kind] = {
-            "requests": len(rows),
-            "cache_hits": sum(r["cache_hit"] for r in rows),
-            "input_tokens": sum(r["input"] for r in rows),
-            "output_tokens": sum(r["output"] for r in rows),
-        }
-    return {
-        "model": by_kind,
-        "implemented_writes": sum(len(e["changes"]) for e in spans),
-    }
 
 
 def trajectory_hashes(folder):

@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -9,6 +10,52 @@ from experiments.controller.paper_f1 import PROTOCOL, load_cohort, load_split_co
 
 
 class PaperF1Test(unittest.TestCase):
+    def test_single_swap_changes_one_forward_and_rejects_prefix_drift(self):
+        import torch
+        from src.replay import swap_boundary_logits, verify_native_swap
+
+        class Controller(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.actor_head = torch.nn.Identity()
+
+            def forward(self, state, candidates):
+                return self.actor_head(candidates.reshape(1, -1, 1)).flatten()
+
+        controller = Controller()
+        names = ["noop", "insert", "delete"]
+        values = torch.tensor([3., 2., 1.])
+        def events():
+            rows = []
+            for i in range(3):
+                state = torch.tensor([float(i)])
+                logits = controller(state, values)
+                skills = [{"name": names[j], "update_type": names[j]} for j in logits.topk(2).indices.tolist()]
+                rows.append({"sample": "train", "span_id": i, "source": str(i), "source_turns": [], "changes": [],
+                             "retrieved": [], "refs": [], "selected_skills": skills, "skills": skills[1:],
+                             "policy": {"state_sha256": hashlib.sha256(state.numpy().tobytes()).hexdigest(),
+                                        "logits": logits.tolist(), "first_draw_probabilities": logits.softmax(0).tolist(),
+                                        "candidates": names},
+                             "executor_responses": [{"prompt_sha256": skills[-1]["name"]}]})
+            return rows
+        original = events()
+        with swap_boundary_logits(controller, original, 1):
+            changed = events()
+        report = verify_native_swap(original, changed, 1)
+        self.assertEqual((report["outgoing"], report["incoming"], report["suffix_action_changes"]), ("insert", "delete", 0))
+        self.assertTrue(report["writer_prompt_changed"])
+        self.assertEqual(events(), original)
+        for index, key in [(0, "executor_responses"), (1, "refs"), (1, "skills")]:
+            corrupt = copy.deepcopy(changed)
+            corrupt[index][key].append("drift")
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                verify_native_swap(original, corrupt, 1)
+        wrong = copy.deepcopy(original)
+        wrong[0]["policy"]["state_sha256"] = "wrong"
+        with self.assertRaisesRegex(ValueError, "state differs"), swap_boundary_logits(controller, wrong, 1):
+            events()
+        self.assertEqual(events(), original)
+
     def test_development_ids_are_separate_from_paper_test_ids(self):
         def key_hash(sid):
             return hashlib.sha256(json.dumps([[sid, 1]], separators=(",", ":")).encode()).hexdigest()

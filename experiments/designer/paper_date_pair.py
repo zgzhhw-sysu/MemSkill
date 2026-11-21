@@ -10,7 +10,7 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
 
-from experiments.controller import file_hash
+from experiments.controller import file_hash, measured_cost
 from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores, score_answers
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
@@ -98,6 +98,70 @@ def collect_policy_inputs(trainer, directory):
                     or policy["logits"] != observed["logits"]
                     or policy["first_draw_probabilities"] != observed["first_draw_probabilities"]):
                 raise ValueError("Archived inputs did not reproduce the native policy")
+
+
+def run_traced_history(trainer, sample, args, directory):
+    local = copy.copy(args)
+    local.out_file = str(directory / "scores.json")
+    local.trace_dir = str(directory / "traces")
+    os.environ["MEMSKILL_USAGE_LOG"] = str(directory / "usage.jsonl")
+    infer_text_dataset_memories(trainer, [sample], local)
+
+
+def history_spans(directory):
+    trace, = (directory / "traces").glob("*.jsonl")
+    with trace.open() as stream:
+        return [r for line in stream if (r := json.loads(line))["kind"] == "span"]
+
+
+def measure_training_swap(trainer, sample, args, root, original, questions, start):
+    """Measure one training action with the native end-to-end writer, retrieval and reader."""
+    from src.replay import swap_boundary_logits, verify_native_swap
+
+    spans = history_spans(original)
+    control = question_scores("locomo", questions, [original / "scores.json"])
+    sid = trainer.data_processor.get_sample_id(sample)
+    if not 0 <= start < len(spans):
+        raise ValueError("Requested span is outside the native history")
+    event = spans[start]
+    turns = set(event["source_turns"])
+    linked = sorted(i for (_, i), qa in questions.items() if turns.intersection(qa.get("evidence") or []))
+    panel = json.loads(PROTOCOL.read_text())["training_boundary_swap"]["histories"].get(sid)
+    registered = panel is not None and panel["span"] == start
+    if registered and panel != {"span": start, "total_spans": len(spans), "questions": len(control),
+                                "linked_question_indices": linked, "source_sha256": hashlib.sha256(event["source"].encode()).hexdigest()}:
+        raise ValueError("Measured training span differs from its preregistered source and question IDs")
+    dest = root / "swap" / sid
+    dest.parent.mkdir(exist_ok=True)
+
+    def report(directory):
+        changed = history_spans(directory)
+        record = verify_native_swap(spans, changed, start)
+        after = question_scores("locomo", questions, [directory / "scores.json"])
+        deltas = {key[1]: after[key] - control[key] for key in questions}
+        cost = {"native": measured_cost(original, spans, len(control)),
+                "swap": measured_cost(directory, changed, len(after))}
+        record.update(sample_id=sid, span_id=start, questions=len(deltas), cost=cost,
+                      registered_span=registered, linked_question_indices=linked,
+                      native_f1=100 * mean(control.values()), swap_f1=100 * mean(after.values()),
+                      difference_points=100 * mean(deltas.values()), f1_deltas={str(i): d for i, d in deltas.items()},
+                      **inspect_trace(directory / "traces", sid))
+        trace, = (directory / "traces").glob("*.jsonl")
+        record["artifacts"] = {str(p.relative_to(directory)): file_hash(p)
+                               for p in (trace, directory / "usage.jsonl", directory / "scores.json")}
+        return record
+
+    if dest.exists():
+        if json.loads((dest / "measurement.json").read_text()) != report(dest):
+            raise ValueError("Published training measurement differs from its original and swap artifacts")
+        return
+    with TemporaryDirectory(dir=dest.parent) as tmp:
+        staged = Path(tmp) / sid
+        staged.mkdir()
+        with swap_boundary_logits(trainer.controller, spans, start):
+            run_traced_history(trainer, sample, args, staged)
+        save(staged / "measurement.json", report(staged))
+        staged.rename(dest)
 
 
 def summarize_if_complete(dataset, output, questions, types, active_arms, published, split="test"):
@@ -191,6 +255,19 @@ def run(args, root, rank, workers):
             raise RuntimeError("Insufficient free GPU memory for the batch-64 encoder")
         torch.cuda.set_per_process_memory_fraction(budget / total)
         plan["encoder_kv_cache"] = False
+    swap_history = os.environ.get("MEMSKILL_SWAP_HISTORY")
+    if swap_history:
+        if (split != "train" or args.dataset != "locomo" or workers != 1
+                or swap_history not in {sid for sid, _ in questions}):
+            raise ValueError("A single-span swap requires one native LoCoMo training history")
+        start = int(os.environ["MEMSKILL_SWAP_SPAN"])
+        native_root = Path(os.environ["MEMSKILL_NATIVE_TRAIN_ROOT"]).resolve()
+        if root == native_root or json.loads((native_root / "protocol.json").read_text()) != plan:
+            raise ValueError("Training measurement and native reference must have identical inference settings and distinct outputs")
+        original = native_root / "native" / swap_history
+        trace, = (original / "traces").glob("*.jsonl")
+        plan["training_swap"] = {"history": swap_history, "span": start, "intervention": "exchange-kth-and-next-logits",
+                                 "trace_sha256": file_hash(trace), "scores_sha256": file_hash(original / "scores.json")}
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -217,6 +294,10 @@ def run(args, root, rank, workers):
     types = {row["question_id"]: row["question_type"] for row in samples} if args.dataset == "longmemeval" else {}
     active_arms = ("native",) if os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") == "1" else tuple(VERSIONS)
     with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
+        if swap_history:
+            sample, = [s for s in samples if trainer.data_processor.get_sample_id(s) == swap_history]
+            subset = {k: q for k, q in questions.items() if k[0] == swap_history}
+            return measure_training_swap(trainer, sample, args, root, original, subset, start)
         for index, sample in enumerate(samples):
             sid = trainer.data_processor.get_sample_id(sample)
             if sid not in assigned:
@@ -232,17 +313,13 @@ def run(args, root, rank, workers):
                     with TemporaryDirectory(dir=directory.parent) as temp:
                         staged = Path(temp) / sid
                         staged.mkdir()
-                        local = copy.copy(args)
-                        local.out_file = str(staged / "scores.json")
-                        local.trace_dir = str(staged / "traces")
-                        os.environ["MEMSKILL_USAGE_LOG"] = str(staged / "usage.jsonl")
                         with collect_policy_inputs(trainer, staged) if split != "test" else nullcontext():
-                            infer_text_dataset_memories(trainer, [sample], local)
-                        stats = inspect_trace(Path(local.trace_dir), sid)
+                            run_traced_history(trainer, sample, args, staged)
+                        stats = inspect_trace(staged / "traces", sid)
                         if split != "test":
                             stats["policy_inputs_sha256"] = file_hash(staged / "controller-inputs.npz")
                         subset = {k: q for k, q in questions.items() if k[0] == sid}
-                        stats["f1_percent"] = score_answers(args.dataset, subset, [Path(local.out_file)])
+                        stats["f1_percent"] = score_answers(args.dataset, subset, [staged / "scores.json"])
                         save(staged / "audit.json", stats)
                         staged.rename(directory)
                 elif split != "test":

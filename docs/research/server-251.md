@@ -716,3 +716,5 @@ done
 `shared-weak-credit/replication/registration.json` 保存登记时已经存在的后期结果。后期策略目录的 `by-history/` 保存每个目标对话的训练名单、每项技能的供样对话和逐次删除后的系数。`forecast.json` 中的 `deletion_utilities` 保存删去每个供样对话后该状态的三项修正。`unreplicated` 使用同一批全部标签，允许单一供样对话产生效应。早期同名评估目录和后期人口界都沿用原登记的题目。
 
 `population/directions-*.json` 在相同注册面板上检验任意同方向幅度所能达到的范围。每个文件引用对应 `bounds-*.json` 的哈希，并列出可改变的评估窗口和题数。首批为 3 窗 28 题。固定策略的界在 `bounds-*.json`，改变幅度的界在 `directions-*.json`。
+
+完成两套正式基线和对应训练对话原版后，在编码 GPU 租约内运行 `bash scripts/experiments/run_llama31_paper_pair_251.sh locomo-train-swap conv-26 22` 可执行第一段预登记的单分块对照。结果写到 `~/memskill-work/runs/llama31-paper-v1-locomo-train-swap/conv-26/span-22/locomo/swap/conv-26/`。其中 `measurement.json` 记录分支前的一致性、换出的技能与换入的技能、概率、题号及逐题 F1 差值。重复命令会从已保存的逐题结果重算并核对汇总。其余训练对话的编号和题数见[训练对照](llama31-paper-pair.md)。
