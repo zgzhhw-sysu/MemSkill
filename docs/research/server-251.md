@@ -1,6 +1,21 @@
 # 251 上的配对实验
 
-## 11 月 21 日的两个训练实验
+## Llama-3.1-8B 原始基线
+
+11 月 21 日已把物理 GPU 3、4 切给 Llama-3.1-8B-Instruct，BF16 双卡张量并行计算写入和回答。四个分片各用一张 GPU 做编码与选技，先完成各自分到的 LoCoMo 历史，再做 LongMemEval-S。已完成的预测以整段历史为单位保存在 `native/<历史 ID>/scores.json`。每套测试题全部齐备后，程序从预测重算逐题 F1，生成对应的 `baseline.json`。[题数与评测协议](memskill-paper-f1.md) · [基线参数与模型版本](llama31-paper-pair.md)
+
+在 251 上查看当前进度和完整结果。
+
+```bash
+cd ~/memskill-work/runs/llama31-paper-v1
+systemctl --user is-active memskill-llama31-{baseline-tp2,native80-{0..3}}.service
+for f in native80-{0..3}.log; do echo "$f"; tr '\r' '\n' < "$f" | tail -1; echo; done
+find locomo longmemeval -name baseline.json -print -exec cat {} \;
+```
+
+运行中的服务遇到失败后等待 45 秒再试，每 30 分钟最多启动三次。已发布的历史和已缓存的贪心请求均可复用。运行目录中的五份 `memskill-llama31-*.service.txt` 记录本次服务定义。248 每 90 秒拉取已完成的逐题预测和汇总到 `~/Documents/研究生大论文/runs/llama31-paper-v1/`。两组已停的旧 Llama-3-8B 任务保留了结果和启动配置，配置以 `previous-memskill-251-` 开头。
+
+## 11 月 21 日的旧模型训练实验
 
 `memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
 

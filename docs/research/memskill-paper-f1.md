@@ -21,7 +21,7 @@
 | 表 1 | Qwen3-Next-80B-A3B-Instruct | 42.08 | 25.29 |
 | 附表 7 | Llama-3.1-8B-Instruct | 20.59 | 18.13 |
 
-当前项目使用 Meta-Llama-3-8B-Instruct。报告改动带来的增益时，同一模型、checkpoint 起点、推理配置和测试题上分别运行原始 MemSkill 和候选。可在旁边列论文值，并标明模型版本、权重精度和服务差异。开发集前缀、固定技能数为 3 的整 session 实验各自保留配置标签。[论文表 1](https://arxiv.org/pdf/2602.02474v3#page=7) · [论文附表 7](https://arxiv.org/pdf/2602.02474v3#page=16)
+本轮复现使用 Llama-3.1-8B-Instruct，对照附表 7。早期实验使用 Meta-Llama-3-8B-Instruct。报告改动带来的增益时，同一模型、checkpoint 起点、推理配置和测试题上分别运行原始 MemSkill 和候选。可在旁边列论文值，并标明模型版本、权重精度和服务差异。开发集前缀、固定技能数为 3 的整 session 实验各自保留配置标签。[论文表 1](https://arxiv.org/pdf/2602.02474v3#page=7) · [论文附表 7](https://arxiv.org/pdf/2602.02474v3#page=16)
 
 论文第 4.1 节给出的对话测试默认值是 512 token 分块、每块选 7 个技能、Qwen3-Embedding-0.6B 最多检索 20 条记忆。本项目论文对照入口对两个数据集统一采用这些默认值，并按发布脚本固定相邻块重叠 64 token。上游 LongMemEval 脚本写的是 5 个技能，LoCoMo 脚本注释建议 Qwen 用 256 token。公开材料没有给出能逐行核验表 1 每次运行的配置。如需复现脚本变体，单列其结果和参数。[正文第 4.1 节](https://arxiv.org/pdf/2602.02474v3#page=6) · [作者 LoCoMo 脚本](https://github.com/ViktorAxelsen/MemSkill/blob/f65b797338033f4f9c34822f1810f9c2747e6022/eval_locomo.sh) · [作者 LongMemEval 脚本](https://github.com/ViktorAxelsen/MemSkill/blob/f65b797338033f4f9c34822f1810f9c2747e6022/eval_longmemeval.sh)
 
