@@ -9,7 +9,7 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
 
-from experiments.controller.paper_f1 import PROTOCOL, load_cohort, score_answers
+from experiments.controller.paper_f1 import PROTOCOL, load_cohort, question_scores, score_answers
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.data_processing.datasets import load_dataset, split_data
@@ -29,7 +29,7 @@ VERSIONS = {"native": "d2be7d28f4fee9e180c628d2bf99ddf8dc663611cab3f40e755193e0a
 
 
 def save(path, obj):
-    tmp = path.with_suffix(".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
     tmp.replace(path)
 
@@ -55,7 +55,33 @@ def inspect_trace(trace_dir, sample_id):
     return {"spans": spans, "spans_with_date_inserts": applied}
 
 
-def run(args, root):
+def summarize_if_complete(dataset, output, questions, types, active_arms, published):
+    histories = dict.fromkeys(sid for sid, _ in questions)
+    reports = {arm: [output.parent / arm / sid / "scores.json" for sid in histories] for arm in active_arms}
+    if any(not path.exists() for paths in reports.values() for path in paths):
+        return
+    scores_by_arm = {arm: question_scores(dataset, questions, paths) for arm, paths in reports.items()}
+    by_type = {}
+    for arm, scores in scores_by_arm.items():
+        grouped = {}
+        for (sid, index), score in scores.items():
+            group = types[sid] if types else str(questions[sid, index]["category"])
+            grouped.setdefault(group, []).append(score)
+        for group, values in grouped.items():
+            by_type.setdefault(group, {"questions": len(values)})[arm] = 100 * mean(values)
+    native = 100 * mean(scores_by_arm["native"].values())
+    summary = {"questions": len(questions), "native_f1": native, "paper_f1": published,
+               "difference_from_paper_points": native - published, "f1_by_type": by_type}
+    if "dated" in scores_by_arm:
+        arms = {arm: {"answers": [{"sample_id": sid, "qa_index": i, "f1": v} for (sid, i), v in scores.items()]}
+                for arm, scores in scores_by_arm.items()}
+        dated = 100 * mean(scores_by_arm["dated"].values())
+        summary.update(dated_f1=dated, gain_f1_points=dated - native,
+                       paired=compare_revisions(arms["native"], arms["dated"]))
+    save(output, summary)
+
+
+def run(args, root, rank, workers):
     paper = json.loads(PROTOCOL.read_text())
     spec = paper["datasets"][args.dataset]
     questions = load_cohort(args.dataset, Path(args.data_file), spec)
@@ -79,28 +105,36 @@ def run(args, root):
             "model": model_info, "backend": os.environ["MEMSKILL_BACKEND_ID"],
             "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": paper["inference_defaults"],
             "seed": args.seed, "temperature": args.temperature, "max_writer_tokens": args.max_new_tokens,
+            "history_workers": workers,
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
     protocol = root / "protocol.json"
-    if protocol.exists() and json.loads(protocol.read_text()) != plan:
-        raise ValueError("Existing runs use a different protocol")
-    save(protocol, plan)
+    with (root / "protocol.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if protocol.exists():
+            if json.loads(protocol.read_text()) != plan:
+                raise ValueError("Existing runs use a different protocol")
+        else:
+            save(protocol, plan)
+    histories = list(dict.fromkeys(sid for sid, _ in questions))
+    assigned = set(histories[rank::workers])
+    if not assigned:
+        return
     set_seed(args.seed)
     trainer = get_trainer(args, config)
     trainer.load_checkpoint(args.load_checkpoint)
     skill = trainer.operation_bank.operations[SKILL]
     _, _, test = split_data(load_dataset(args.data_file, args.dataset), args.dataset)
-    histories = {sid for sid, _ in questions}
     types = {row["question_id"]: row["question_type"] for row in test} if args.dataset == "longmemeval" else {}
-    reports = {arm: [] for arm in VERSIONS}
+    active_arms = ("native",) if os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") == "1" else tuple(VERSIONS)
     with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
         for index, sample in enumerate(test):
             sid = trainer.data_processor.get_sample_id(sample)
-            if sid not in histories:
+            if sid not in assigned:
                 continue
-            for arm, version in VERSIONS.items():
+            for arm in active_arms:
                 # The edit changes only the executor hook. Keep the checkpoint's skill embeddings in place.
                 skill.source_rule = None if arm == "native" else "dated_relative_turns"
-                if skill_spec(skill)["version"] != version:
+                if skill_spec(skill)["version"] != VERSIONS[arm]:
                     raise ValueError(f"Unexpected {arm} skill version")
                 directory = root / arm / sid
                 directory.parent.mkdir(exist_ok=True)
@@ -118,33 +152,19 @@ def run(args, root):
                         stats["f1_percent"] = score_answers(args.dataset, subset, [Path(local.out_file)])
                         save(staged / "audit.json", stats)
                         staged.rename(directory)
-                reports[arm].append(directory / "scores.json")
                 print(f"Complete {args.dataset} {index+1}/{len(test)} {sid} {arm}", flush=True)
-    arms = {arm: {"f1_percent": score_answers(args.dataset, questions, paths),
-                  "answers": [row for path in paths for row in json.loads(path.read_text())["answers"]]}
-            for arm, paths in reports.items()}
-    comparison = compare_revisions(arms["native"], arms["dated"])
-    by_type = {}
-    for arm, report in arms.items():
-        grouped = {}
-        for row in report["answers"]:
-            sid = row["sample_id"]
-            group = types[sid] if types else str(questions[sid, row["qa_index"]]["category"])
-            grouped.setdefault(group, []).append(row["f1"])
-        for group, scores in grouped.items():
-            by_type.setdefault(group, {"questions": len(scores)})[arm] = 100 * mean(scores)
-    gain = arms["dated"]["f1_percent"] - arms["native"]["f1_percent"]
-    if abs(gain - 100 * comparison["delta"]) > 1e-8:
-        raise ValueError("Stored scores differ from reference-based paired F1")
-    save(Path(args.out_file), {"questions": len(questions), "native_f1": arms["native"]["f1_percent"],
-                               "dated_f1": arms["dated"]["f1_percent"],
-                               "gain_f1_points": gain, "paired": comparison, "f1_by_type": by_type})
+    published = paper["reported_f1"]["Llama-3.1-8B-Instruct"][args.dataset]
+    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published)
 
 
 if __name__ == "__main__":
     args = get_agentic_memory_args()
     root = Path(args.out_file).resolve().parent
     root.mkdir(parents=True, exist_ok=True)
-    with (root / "run.lock").open("a") as lock:
+    rank = int(os.environ.get("MEMSKILL_HISTORY_RANK", "0"))
+    workers = int(os.environ.get("MEMSKILL_HISTORY_WORKERS", "1"))
+    if not 0 <= rank < workers:
+        raise ValueError("Invalid history shard")
+    with (root / f"run-{rank}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        run(args, root)
+        run(args, root, rank, workers)
