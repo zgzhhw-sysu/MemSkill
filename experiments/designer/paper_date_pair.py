@@ -294,7 +294,15 @@ def run(args, root, rank, workers):
     with urlopen(args.api_base.rstrip("/") + "/models", timeout=10) as response:
         if [m["id"] for m in json.load(response)["data"]] != [MODEL]:
             raise ValueError("Unexpected reader/writer service")
-    for name, value in paper["inference_defaults"].items():
+    settings = paper["inference_defaults"].copy()
+    launcher = os.environ.get("MEMSKILL_LONGMEMEVAL_LAUNCHER") == "1"
+    if launcher:
+        reference = paper["longmemeval_launcher"]
+        if (args.dataset != "longmemeval" or split != "test" or args.encode_batch_size != reference["encode_batch_size"]
+                or os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") != "1"):
+            raise ValueError("LongMemEval launcher settings require the complete native batch-64 test cohort")
+        settings["action_top_k"] = reference["action_top_k"]
+    for name, value in settings.items():
         setattr(args, name, value)
     args.model = MODEL
     args.eval_only = args.eval_f1_only = args.skip_load_snapshot_manager = True
@@ -316,10 +324,12 @@ def run(args, root, rank, workers):
             memory_search = "cuda-native-ties-v1"
     plan = {"dataset": args.dataset,
             "model": model_info, "backend": os.environ["MEMSKILL_BACKEND_ID"],
-            "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": paper["inference_defaults"],
+            "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": settings,
             "seed": args.seed, "temperature": args.temperature, "max_writer_tokens": args.max_new_tokens,
             "history_workers": workers, "memory_search": memory_search,
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
+    if launcher:
+        plan["upstream_launcher"] = reference["script"]
     if split == "test":
         plan["test_keys"] = spec["scored_key_sha256"]
     else:
@@ -333,8 +343,9 @@ def run(args, root, rank, workers):
         if args.device != "cuda":
             raise ValueError("The Qwen prefill comparison requires a GPU")
         free, total = torch.cuda.mem_get_info()
-        # Leave 1 GiB free on the shared 251 card, and cap this encoder at 3.25 GiB.
-        budget = min(3328 * 2**20, free - 2**30)
+        # Longer LongMemEval batches can exceed the LoCoMo encoder allocation.
+        cap_mib = 5500 if launcher else 3328
+        budget = min(cap_mib * 2**20, free - 2**30)
         if budget < 2250 * 2**20:
             raise RuntimeError("Insufficient free GPU memory for the batch-64 encoder")
         torch.cuda.set_per_process_memory_fraction(budget / total)

@@ -10,7 +10,7 @@ export MEMSKILL_MODEL_MANIFEST="$work/models/Llama-3.1-8B-Instruct/verified-mode
 export MEMSKILL_BACKEND_ID=llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1
 export MEMSKILL_PAPER_NATIVE_ONLY=1
 export MEMSKILL_PAPER_SPLIT=test
-unset MEMSKILL_STATE_CREDIT_BASE MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_SWAP_REPEAT MEMSKILL_NATIVE_TRAIN_ROOT
+unset MEMSKILL_LONGMEMEVAL_LAUNCHER MEMSKILL_STATE_CREDIT_BASE MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_SWAP_REPEAT MEMSKILL_NATIVE_TRAIN_ROOT
 report=baseline.json
 mode=${1:-baseline}
 datasets=(locomo longmemeval)
@@ -26,6 +26,14 @@ case "$mode" in
             --tensor-parallel-size 2 --gpu-memory-utilization .43 --max-num-seqs 4 --max-num-batched-tokens 256 \
             --disable-custom-all-reduce --disable-log-requests --worker-cls serve_low_duty.DutyLimitedWorker ;;
     baseline) ;;
+    longmemeval-launcher)
+        datasets=(longmemeval)
+        encoder_batch=64
+        run="$baseline_run-$mode"
+        export MEMSKILL_LONGMEMEVAL_LAUNCHER=1 MEMSKILL_QWEN_PREFILL_ONLY=1
+        export MEMSKILL_MEMORY_SEARCH=cuda-skylakex PYTORCH_ALLOC_CONF=expandable_segments:True
+        export MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
+        ;;
     locomo-batch64|locomo-train|locomo-validation|locomo-train-swap|locomo-credit-validation)
         datasets=(locomo)
         encoder_batch=64
@@ -61,11 +69,11 @@ case "$mode" in
         export PYTORCH_ALLOC_CONF=expandable_segments:True
         ;;
     paired) export MEMSKILL_PAPER_NATIVE_ONLY=0; report=comparison.json ;;
-    *) echo "Expected backend, baseline, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap, locomo-credit-validation or paired" >&2; exit 2 ;;
+    *) echo "Expected backend, baseline, longmemeval-launcher, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap, locomo-credit-validation or paired" >&2; exit 2 ;;
 esac
 export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH="${MEMSKILL_MEMORY_SEARCH:-cuda}"
 if [[ "$MEMSKILL_MEMORY_SEARCH" == cuda-skylakex ]]; then
-    if [[ "$mode" != locomo-* ]]; then run="$baseline_run-cuda-skylakex"; fi
+    if [[ "$mode" != locomo-* && "$mode" != longmemeval-launcher ]]; then run="$baseline_run-cuda-skylakex"; fi
     export CC="${CC:-$HOME/.conda/envs/agemem/bin/x86_64-conda-linux-gnu-cc}" OPENBLAS_NUM_THREADS=1
 fi
 api=http://127.0.0.1:18831/v1
@@ -83,7 +91,7 @@ for dataset in "${datasets[@]}"; do
         --encode-batch-size "$encoder_batch" --reward-metric f1 --out-file "$run/$dataset/$report" \
         --save-dir "$run/$dataset/checkpoints" --log-dir "$run/$dataset/logs"
 done
-if [[ "$MEMSKILL_PAPER_SPLIT" != test ]]; then
+if [[ "$MEMSKILL_PAPER_SPLIT" != test || "$mode" == longmemeval-launcher ]]; then
     exit 0
 elif [[ "$mode" == locomo-batch64 ]]; then
     run="$baseline_run"

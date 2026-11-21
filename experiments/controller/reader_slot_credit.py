@@ -91,7 +91,11 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
     by_key = {}
     for call in calls:
         by_key.setdefault(call["cache_key"], []).append(call)
-    for (i, q), row in zip(questions.items(), rows, strict=True):
+    by_question = {row["qa_index"]: row for row in rows}
+    if len(rows) != len(by_question) or by_question.keys() != questions.keys():
+        raise ValueError("Missing or duplicate native question")
+    for i, q in questions.items():
+        row = by_question[i]
         ctx = [versions[tuple(ref)] for ref in queries[i]["refs"]]
         prompt = ev.build_prompt(q["question"], [text for _, text in ctx], q)
         key = reader_key(model, prompt)
@@ -370,12 +374,12 @@ def matched_reader_slots(target, lengths):
     if not target:
         return []
     stride = len(lengths) ** 2 + 1
-    cost = [[abs(lengths[i] - lengths[j]) * stride + abs(i-j) for j in others] for i in target]
+    cost = [[abs(lengths[i] - lengths[j]) * stride + abs(i - j) for j in others] for i in target]
     _, selected = linear_sum_assignment(cost)
     return [others[j] for j in selected]
 
 
-def paper_reader_ablation(native, output, corpus, sid):
+def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
     from transformers import AutoTokenizer
     from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort
 
@@ -397,6 +401,8 @@ def paper_reader_ablation(native, output, corpus, sid):
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
     cache = native / "greedy-cache"
     trial = output / sid
+    if verify and not all((trial / name).is_file() for name in ("plan.json", "scores.json", "summary.json")):
+        raise ValueError("The archived Reader comparison is incomplete")
     trial.mkdir(parents=True, exist_ok=True)
     fresh = trial / "greedy-cache"
     if fresh.resolve() == cache.resolve():
@@ -408,13 +414,14 @@ def paper_reader_ablation(native, output, corpus, sid):
     ev = LoCoMoEvaluator(SimpleNamespace())
     spans, contexts, archived = measured_contexts(base, cache, expected, questions, ev, model)
     pivot = cell["span"]
-    linked = [i for i,q in questions.items() if set(q.get("evidence") or []) & set(spans[pivot]["source_turns"])]
+    turns = set(spans[pivot]["source_turns"])
+    linked = [i for i, q in questions.items() if turns.intersection(q.get("evidence") or [])]
     if (len(spans) != cell["total_spans"] or spans[pivot]["span_id"] != pivot
             or sha(spans[pivot]["source"]) != cell["source_sha256"] or linked != cell["linked_question_indices"]):
         raise ValueError("Focal span or evidence question registration differs")
     rows = {}
-    for (i, q), ctx, orig in zip(questions.items(), contexts, archived, strict=True):
-        target = [j for j,(origin, _) in enumerate(ctx) if origin == pivot]
+    for i, ctx, orig in zip(questions, contexts, archived, strict=True):
+        target = [j for j, (origin, _) in enumerate(ctx) if origin == pivot]
         lengths = [len(ids) for ids in tokenizer([text for _, text in ctx], add_special_tokens=False)["input_ids"]]
         rows[i] = {"target": target, "sham": matched_reader_slots(target, lengths), "lengths": lengths,
                    "linked": i in linked, "archived": orig}
@@ -423,7 +430,7 @@ def paper_reader_ablation(native, output, corpus, sid):
     os.environ["MEMSKILL_USAGE_LOG"] = str(trial / "usage.jsonl")
     rows_out = []
     arms = ["repeat", "target", "sham"]
-    for ordinal, ((i,q), ctx) in enumerate(zip(questions.items(), contexts, strict=True)):
+    for ordinal, ((i, q), ctx) in enumerate(zip(questions.items(), contexts, strict=True)):
         record = rows[i]
         answers = {"archived": record["archived"]}
         for arm in arms[ordinal % 3:] + arms[:ordinal % 3]:
@@ -433,15 +440,20 @@ def paper_reader_ablation(native, output, corpus, sid):
             if not record["target"]:
                 answers[arm] = record["archived"]
                 continue
-            prompt = ev.build_prompt(q["question"], [txt for j,(_,txt) in enumerate(ctx) if j not in remove], q)
+            contents = [text for j, (_, text) in enumerate(ctx) if j not in remove]
+            prompt = ev.build_prompt(q["question"], contents, q)
             key = reader_key(model, prompt)
-            measured = measured_answer(prompt, model, q, ev, fresh)
+            if not verify:
+                measured_answer(prompt, model, q, ev, fresh)
             receipt = read_response(fresh, key)
             if not receipt or receipt["payload"]["prompt_sha256"] != sha(prompt):
                 raise ValueError("Missing measured Reader response")
             if arm == "repeat" and key != record["archived"]["key"]:
                 raise ValueError("Native repeat request changed")
-            answers[arm] = {**measured, "key": key, "response_sha256": receipt["sha256"], "prompt_sha256": sha(prompt)}
+            payload = receipt["payload"]
+            answers[arm] = {"answer": payload["response"], "tokens": payload["tokens"],
+                            "f1": ev.compute_f1(payload["response"], ev.get_ground_truth(q), q),
+                            "key": key, "response_sha256": receipt["sha256"], "prompt_sha256": sha(prompt)}
         rows_out.append({"qa_index": i, "linked": record["linked"], "direct": bool(record["target"]), "answers": answers})
     register(trial / "scores.json", rows_out)
     groups = {"all": rows_out, "direct": [r for r in rows_out if r["direct"]],
@@ -451,8 +463,8 @@ def paper_reader_ablation(native, output, corpus, sid):
     for name, group in groups.items():
         matched = [r for r in group if "sham" in r["answers"]]
         summary[name] = {"questions": len(group), "matched_questions": len(matched),
-                         "f1": {a:100*mean(r["answers"][a]["f1"] for r in group) for a in ["archived","repeat","target"]} if group else {},
-                         "matched_f1": {a:100*mean(r["answers"][a]["f1"] for r in matched) for a in arms} if matched else {}}
+                         "f1": {a: 100 * mean(r["answers"][a]["f1"] for r in group) for a in ("archived", "repeat", "target")} if group else {},
+                         "matched_f1": {a: 100 * mean(r["answers"][a]["f1"] for r in matched) for a in arms} if matched else {}}
     register(trial / "summary.json", {"history": sid, "span": pivot, "groups": summary,
              "plan_sha256": file_hash(trial / "plan.json"), "scores_sha256": file_hash(trial / "scores.json")})
 
@@ -467,7 +479,7 @@ if __name__ == "__main__":
     p.add_argument("--paper-history", help="Measure the preassigned training span using a native run, output directory and corpus")
     a = p.parse_args()
     if a.paper_history:
-        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history)
+        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history, verify=a.verify)
         raise SystemExit(0)
     o = prepare(a.base, a.study, a.corpus, verify=a.verify)
     if a.read:

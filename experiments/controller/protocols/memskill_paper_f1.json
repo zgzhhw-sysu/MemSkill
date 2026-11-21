@@ -12,6 +12,7 @@
     "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
     "retriever": "qwen3-embedding-0.6b"
   },
+  "longmemeval_launcher": {"script": "eval_longmemeval.sh", "action_top_k": 5, "encode_batch_size": 64},
   "training_boundary_swap": {
     "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
     "independent_repeats": 2,
