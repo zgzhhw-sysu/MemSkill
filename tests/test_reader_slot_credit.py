@@ -20,6 +20,18 @@ class ReaderSlotTests(unittest.TestCase):
         self.assertEqual(focal_reader_slots(ctx, 1, True), [1, 3, 5])
         self.assertEqual(focal_reader_slots(ctx, 5, True), [])
 
+    def test_copy_credit_conditions_on_equal_removals(self):
+        from experiments.controller.reader_slot_credit import copy_contrasts, matched_reader_slots
+
+        self.assertEqual(matched_reader_slots([1, 4], [2, 2, 3, 2, 3, 2], removed=[0, 3]), [5, 2])
+        self.assertIsNone(matched_reader_slots([1, 2], [1, 1, 1, 1], removed=[0]))
+        scores = {"full": 1, "no_focal": 1, "no_copies": 1, "neither": 0, "no_control": 1, "no_focal_control": 1}
+        values = copy_contrasts({arm: {"f1": v} for arm, v in scores.items()})
+        self.assertEqual((values["focal_order_average"], values["copies_order_average"]), (.5, .5))
+        self.assertEqual(values["interaction_vs_control"], 1)
+        scores["no_focal_control"] = 0
+        self.assertEqual(copy_contrasts({arm: {"f1": v} for arm, v in scores.items()})["interaction_vs_control"], 0)
+
     def test_sham_slots_match_length_then_rank_and_preserve_duplicates(self):
         from experiments.controller.reader_slot_credit import matched_reader_slots
 

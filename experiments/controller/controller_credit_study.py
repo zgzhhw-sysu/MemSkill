@@ -23,6 +23,112 @@ from src.revision_validation import evaluate_bank
 from src.trainer import get_trainer
 
 
+@torch.no_grad()
+def screen_forward_rank(native, checkpoint, out, history):
+    """Test which retained ranks change only the skill at the deployed action boundary."""
+    import time
+    from experiments.designer.paper_date_pair import CHECKPOINT_SHA, MODEL, history_spans
+    from src.controller import PPOController
+
+    paper = read(PROTOCOL)
+    rule = paper["forward_rank_boundary"]
+    cell = paper["training_boundary_swap"]["histories"][history]
+    plan = read(native / "locomo/protocol.json")
+    if (file_hash(checkpoint) != CHECKPOINT_SHA or plan["checkpoint"] != CHECKPOINT_SHA or plan["split"] != "train"
+            or plan["model"]["model"] != MODEL or plan["encode_batch_size"] != 64
+            or plan["question_keys"] != paper["datasets"]["locomo"]["development_splits"]["train"]["scored_key_sha256"]):
+        raise ValueError("Expected the original LoCoMo training Controller and native cohort")
+    folder = native / "locomo/native" / history
+    path = folder / "controller-inputs.npz"
+    if file_hash(path) != read(folder / "audit.json")["policy_inputs_sha256"]:
+        raise ValueError("Native Controller inputs differ from the recorded run")
+    spans = history_spans(folder)
+    with np.load(path, allow_pickle=False) as archive:
+        states = torch.from_numpy(archive["states"]).cuda()
+        candidates = torch.from_numpy(archive["candidate_vectors"]).cuda()
+        names = archive["candidate_names"].tolist()
+        if archive["span_ids"].tolist() != [s["span_id"] for s in spans] or len(states) != cell["total_spans"]:
+            raise ValueError("Incomplete native span panel")
+    k = plan["settings"]["action_top_k"]
+    torch.set_float32_matmul_precision("highest")
+    policy = PPOController(state_dim=states.shape[-1], op_dim=candidates.shape[-1], hidden_dim=256,
+                           device="cuda", action_top_k=k).cuda().eval()
+    policy.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=False)["controller_state_dict"])
+    layer = policy.get_parameter(rule["layer"])
+    original = layer.clone()
+    expected = []
+    for state, span in zip(states, spans, strict=True):
+        info = {}
+        chosen, _, _ = policy(state, candidates, deterministic=True, policy_trace=info)
+        if (info["logits"] != span["policy"]["logits"] or info["first_draw_probabilities"] != span["policy"]["first_draw_probabilities"]
+                or [names[j] for j in chosen] != [s["name"] for s in span["selected_skills"]]):
+            raise ValueError("Native serial Controller forward differs from the original trace")
+        next_skill = torch.tensor(info["logits"], device="cuda").topk(k + 1).indices[-1].item()
+        expected.append((chosen, chosen[:-1] + [next_skill], np.array(info["first_draw_probabilities"])))
+    duty = float(os.environ.get("MEMSKILL_ENCODER_DUTY", "0.8"))
+    if not 0 < duty <= 1:
+        raise ValueError("Invalid GPU duty")
+    def measure(weight, keep_rows=False):
+        torch.cuda.synchronize()
+        started = time.monotonic()
+        layer.copy_(weight)
+        counts = Counter()
+        maximum = 0.0
+        rows = []
+        for state, (native_order, swap_order, probabilities) in zip(states, expected, strict=True):
+            info = {}
+            chosen, _, _ = policy(state, candidates, deterministic=True, policy_trace=info)
+            shift = float(np.max(np.abs(np.asarray(info["first_draw_probabilities"]) - probabilities)))
+            kind = "native" if chosen == native_order else "boundary" if chosen == swap_order else "other"
+            counts[kind] += 1
+            counts["membership"] += set(chosen) != set(native_order)
+            counts["probability"] += shift > 0
+            maximum = max(maximum, shift)
+            if keep_rows:
+                rows.append({"span": len(rows), "class": kind, "ordered_skills": [names[j] for j in chosen],
+                             "first_draw_probabilities": info["first_draw_probabilities"]})
+        torch.cuda.synchronize()
+        time.sleep((time.monotonic() - started) * (1 / duty - 1))
+        return {key: counts[key] for key in ("native", "boundary", "other", "membership", "probability")} | {"max_probability_shift": maximum}, rows
+
+    out.mkdir(parents=True, exist_ok=True)
+    weights = out / "frozen-weight.json"
+    result = {"history": history, "spans": len(states), "method": rule, "checkpoint_sha256": CHECKPOINT_SHA,
+              "input_sha256": file_hash(path), "candidate_order": names, "device": torch.cuda.get_device_name(),
+              "split": "train", "writer_reader_calls": 0, "question_labels_used": 0}
+    if history == rule["calibration"]:
+        u, singular, vh = torch.linalg.svd(original.double(), full_matrices=False)
+        full = ((u * singular) @ vh).float()
+        if not torch.equal(full, original):
+            raise ValueError("Full-rank reconstruction differs from the native FP32 layer")
+        selected = None
+        sweep = {}
+        for rank in range(len(singular) - 1, 0, -1):
+            weight = ((u[:, :rank] * singular[:rank]) @ vh[:rank]).float()
+            trial, _ = measure(weight)
+            sweep[str(rank)] = trial
+            if selected is None and trial["native"] and trial["boundary"] and not trial["other"]:
+                selected = rank
+                register(weights, weight.cpu().tolist())
+        result["rank_sweep"] = sweep
+    else:
+        calibration = out / (rule["calibration"] + ".json")
+        frozen = read(calibration)
+        if frozen["method"] != rule or frozen["checkpoint_sha256"] != CHECKPOINT_SHA or frozen["candidate_order"] != names:
+            raise ValueError("Frozen rank calibration differs from the transfer protocol")
+        selected = frozen["selected_rank"]
+        result["calibration_sha256"] = file_hash(calibration)
+        if selected is not None and frozen["weight_sha256"] != file_hash(weights):
+            raise ValueError("Frozen rank weights changed")
+    result["selected_rank"] = selected
+    if selected is not None:
+        result["weight_sha256"] = file_hash(weights)
+        result["forward"], result["rows"] = measure(torch.tensor(read(weights), device="cuda", dtype=layer.dtype), True)
+        if history == rule["calibration"] and result["forward"] != result["rank_sweep"][str(selected)]:
+            raise ValueError("Frozen rank did not reproduce its calibration decisions")
+    register(out / (history + ".json"), result)
+
+
 def state_features(states):
     """Give the native session and retrieved-memory embeddings equal feature weight."""
     if states.shape[-1] % 2 or not states.isfinite().all():
@@ -340,4 +446,13 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    if sys.argv[1:2] == ["rank-boundary"]:
+        import argparse
+        parser = argparse.ArgumentParser(description=screen_forward_rank.__doc__)
+        for arg in ("native", "checkpoint", "out"):
+            parser.add_argument(arg, type=Path)
+        parser.add_argument("history")
+        screen_forward_rank(**vars(parser.parse_args(sys.argv[2:])))
+    else:
+        run()
