@@ -51,7 +51,7 @@ def candidates(questions, rows, source_turns, baseline="temporal"):
     return linked, jobs
 
 
-def check_response(receipts, folder):
+def check_response(receipts, folder, *, cache=None):
     pending = {
         (r["prompt_sha256"], r["response"], r["input_tokens"], r["output_tokens"])
         for r in receipts
@@ -59,7 +59,9 @@ def check_response(receipts, folder):
     for row in map(json.loads, (folder / "usage.jsonl").read_bytes().splitlines()):
         if row["kind"] != "executor":
             continue
-        result = read_response(folder / "responses", row["cache_key"])
+        result = read_response(
+            cache if cache is not None else folder / "responses", row["cache_key"]
+        )
         if not result or result["sha256"] != row["response_sha256"]:
             raise ValueError("Changed stored relation write")
         p = result["payload"]

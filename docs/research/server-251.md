@@ -629,3 +629,21 @@ resume earliest-credit-update run_three_skill_margin_251.sh earliest-credit-upda
 在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/earliest-three-skills/`，`forecast.json` 保存 12 个决策的归档指纹、各策略的实际概率、关系技能版本及当时已经测过的双技能窗口。`population.json` 保留所有原题号、题型、证据位置和计划分母。`pairs/` 将时间、活动、关系技能按这一顺序逐题对齐。`judged/` 给出每题的较弱技能、实测修补及核验后信用。`evaluation/snapshot-*.json` 用物理回执的内容指纹区分进度，按修改时间查看最新文件；同级 `checkpoint-odds/evaluation/` 保存采用原生状态特征的第二套结果。每个完整窗口给出实际抽到的技能、版本、输入与输出 token，统计按对话、题型和证据位置拆分。
 
 在 `late-pairs/semantic-writer/three-writer/checkpoint-odds/`，`models.json` 保存各留出对话的系数和供样窗口，`through-NN.json` 的 `by_partition.evaluation` 为后期评估，`strict_evaluation` 为冻结时尚无分支结果的窗口。共同随机数和真实技能分支在 `decisions/`。同级 `earliest-credit-update/registration.json` 记录提前登记时的早期测量进度。获得全部早期裁决后该服务自动拟合，并比较 `credit`、`zero_new` 和 `previous`。248 的自动镜像保留相同目录层次。
+
+### 交叉复测写入指令和原文分组
+
+在 251 加载本页的环境和 `resume` 函数后，以下命令可恢复本轮服务。检索使用物理卡 3，批量 2，目标占空比 30%。读者共用卡 5、6 的 BF16 服务，目标占空比 28%。小规模拟合与归因区间使用卡 1 的租约。项目持有计算租约时，守护会暂停空闲占用。
+
+```bash
+for phase in prepared verified readers identification; do
+    resume "writer-format-$phase" run_writer_format_251.sh "$phase"
+done
+for stage in sensitivity history verified transfer dense; do
+    resume "writer-format-$stage-policy" run_three_skill_margin_251.sh "writer-format-$stage"
+    resume "writer-format-$stage-evaluation" run_earliest_three_251.sh "writer-format-$stage"
+done
+```
+
+在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/writer-format-credit/`，`registration.json` 固定题号，`prepared/` 记录四条路径的检索顺序，`questions/<窗口>/<原题号>.json` 保存真实回答、F1、回执哈希与两项贡献。`verified-complete.json` 覆盖三条已有信用，`readers-complete.json` 标记整个 10 窗 74 题队列已处理。逐题状态和各策略的匹配分母以对应结果为准。`identification/` 给出当前仍与数据相容的效应区间，共享请求键的四条路径共享同一个未知回答。识别区间的中间快照按修改时间排序，最终入口为 `summary.json`。
+
+后期结果位于 `late-pairs/semantic-writer/three-writer/writer-format-<stage>/`。`through-NN.json` 的 `by_partition.evaluation` 给出期望 F1，`decisions/evaluation-NN.json` 给出固定抽样换技数、抽样 F1 和实际读写 token。早期独立窗口查看 `source-compression/earliest-three-skills/writer-format-<stage>/evaluation/`。阶段 `verified` 使用三条实测信用，`dense` 进一步使用已完整匹配窗口的逐题分量回报。`history` 和 `transfer` 检验旧分组观测的迁移，`sensitivity` 保存假设分摊的敏感性对照。248 的现有镜像以相同层次收回。

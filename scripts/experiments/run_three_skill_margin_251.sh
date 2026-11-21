@@ -19,6 +19,21 @@ case $mode in
         until [[ -f "$early/forecast.json" ]]; do sleep 15; done
         "$MEMSKILL_PYTHON" -m "${cmd[@]}" --register-only
         until [[ -f "$early/judged-complete.json" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 30; done ;;
+    writer-format-sensitivity|writer-format-verified|writer-format-dense|writer-format-history|writer-format-transfer)
+        gpu=1
+        out="$parent/$mode"
+        stage=${mode#writer-format-}
+        cmd=(experiments.controller.writer_format_policy "$base" "$stage")
+        input="$base/source-compression/writer-format-credit/registration.json"
+        case $stage in
+            verified|transfer) input="${input%/*}/verified-complete.json" ;;
+            dense) input="${input%/*}/readers-complete.json" ;;
+        esac
+        if [[ $stage == transfer ]]; then
+            earlier="$base/source-compression/earliest-three-skills"
+            until [[ -f "$parent/writer-format-verified/forecast.json" && -f "$earlier/writer-format-verified/forecast.json" ]]; do sleep 20; done
+        fi
+        until [[ -f "$input" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 20; done ;;
     checkpoint-odds)
         gpu=3
         out="$parent/checkpoint-odds"
@@ -75,7 +90,7 @@ until [[ -f "$out/summary.json" ]]; do
         python3 "$guard" run --gpus "$gpu" -- "$MEMSKILL_PYTHON" -u -m "${cmd[@]}" >>"$out/policy.log" 2>&1 || rc=$?
         if ((rc==0)); then
             last=$count
-            if [[ $mode == raw-reference ]]; then exit 0; fi
+            if [[ $mode == raw-reference || -f "$out/unavailable.json" ]]; then exit 0; fi
         elif ((rc!=75)); then exit "$rc"; fi
     fi
     sleep 35

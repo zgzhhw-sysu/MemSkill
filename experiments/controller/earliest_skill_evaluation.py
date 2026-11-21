@@ -257,18 +257,21 @@ def paired_histories(strata, families):
     return intervals
 
 
-def evaluate(base, study, corpus, *, state=False):
+def evaluate(base, study, corpus, *, state=False, factor=None):
     src = base / "source-compression"
     earlier = src / "earlier-terminal-returns"
     out = src / "earliest-three-skills"
-    forecast = (out / "checkpoint-odds" if state else out) / "forecast.json"
+    policy = out / "checkpoint-odds" if state else out
+    if factor:
+        policy = out / ("writer-format-" + factor)
+    forecast = policy / "forecast.json"
     results = forecast.parent / "evaluation"
     results.mkdir(exist_ok=True)
     inputs = available(out, earlier)
     census = population(out, study, corpus)
     inputs["population"] = file_hash(census)
-    if state:
-        inputs["state_policy"] = file_hash(forecast)
+    if state or factor:
+        inputs["factor_policy" if factor else "state_policy"] = file_hash(forecast)
     path = results / ("snapshot-" + digest(inputs) + ".json")
     final = (
         (out / "judged-complete.json").is_file()
@@ -283,11 +286,12 @@ def evaluate(base, study, corpus, *, state=False):
             )
         return path
     pred = read(forecast)
-    if state and pred["inputs"] != read(out / "forecast.json")["inputs"]:
+    if (state or factor) and pred["inputs"] != read(out / "forecast.json")["inputs"]:
         raise ValueError("Different original-state cohort")
     windows = {}
     strata = defaultdict(lambda: defaultdict(lambda: [0, 0.0, 0.0]))
-    totals = {family: [0.0, 0.0] for family in (("state",) if state else FAMILIES)}
+    families = ("factor",) if factor else ("state",) if state else FAMILIES
+    totals = {family: [0.0, 0.0] for family in families}
     matched = binary = relation = denominator = 0
     for name, w in pred["windows"].items():
         scores, stages, costs, groups, ordered_skills = arm_data(
@@ -390,7 +394,13 @@ if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("base", type=Path)
     cli.add_argument("study", type=Path)
-    cli.add_argument("--state", action="store_true")
+    model = cli.add_mutually_exclusive_group()
+    model.add_argument("--state", action="store_true")
+    model.add_argument(
+        "--factor", choices=("sensitivity", "verified", "dense", "history", "transfer")
+    )
     a = cli.parse_args()
     gpu()
-    evaluate(a.base, a.study, Path(os.environ["LOCOMO_DATA"]), state=a.state)
+    evaluate(
+        a.base, a.study, Path(os.environ["LOCOMO_DATA"]), state=a.state, factor=a.factor
+    )
