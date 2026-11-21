@@ -683,3 +683,17 @@ done
 ```
 
 在 `source-compression/earliest-three-skills/shared-weak-credit/registration.json` 核对首批 6 窗的哈希和全体 123 个题号。`certified/` 列出需要复核的较弱写入和每项判定，`outcomes/` 保存通过判定的题在三种指令、两种原文分组下的实测答案。两个批次的结算文件是 `initial.json` 和 `final.json`。后期 `outlier-initial` 与 `outlier-final` 目录里的 `models.json` 含逐题供样和按对话排除的拟合记录。`zero_new` 是相同新增样本、清零新增信用的对照，`previous` 是加入早期窗口前的六路模型。
+
+### 复核一个供样对话能否决定整项选技修正
+
+```bash
+for wave in initial final; do
+    stage="outlier-replicated-$wave"
+    resume "$stage-policy" run_three_skill_margin_251.sh "$stage"
+    resume "$stage-evaluation" run_earliest_three_251.sh "$stage"
+done
+```
+
+`shared-weak-credit/replication/registration.json` 保存登记时已经存在的后期结果。后期策略目录的 `by-history/` 保存每个目标对话的训练名单、每项技能的供样对话和逐次删除后的系数。`forecast.json` 中的 `deletion_utilities` 保存删去每个供样对话后该状态的三项修正。`unreplicated` 使用同一批全部标签，允许单一供样对话产生效应。早期同名评估目录和后期人口界都沿用原登记的题目。
+
+`population/directions-*.json` 在相同注册面板上检验任意同方向幅度所能达到的范围。每个文件引用对应 `bounds-*.json` 的哈希，并列出可改变的评估窗口和题数。首批为 3 窗 28 题。固定策略的界在 `bounds-*.json`，改变幅度的界在 `directions-*.json`。

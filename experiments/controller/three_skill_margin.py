@@ -467,7 +467,7 @@ def score(
         intervals = {}
         if len(active) >= 2:
             baselines = ["raw", "rotated", "native", "uniform"]
-            baselines.extend(k for k in ("zero_new", "previous") if k in extra_controls)
+            baselines.extend(k for k in ("zero_new", "previous", "unreplicated") if k in extra_controls)
             for arm in baselines:
                 intervals[arm] = paired_interval(
                     [v["questions"] for v in active],
