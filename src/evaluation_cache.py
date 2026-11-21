@@ -122,6 +122,31 @@ def read_response(root, key):
     return row
 
 
+@contextmanager
+def pending_response(cache):
+    """Let concurrent callers share the first measured completion for an exact request."""
+    if cache is None:
+        yield None
+        return
+    root, key = cache
+    row = read_response(root, key)
+    if row is not None:
+        yield row
+        return
+
+    import fcntl
+    receipt = response_path(root, key)
+    receipt.parent.mkdir(exist_ok=True, parents=True)
+    lock_path = receipt.with_suffix(".lock")
+    with lock_path.open("ab") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # A previous owner may have published while this caller waited.
+        yield read_response(root, key)
+        # Once the immutable receipt exists, all waiters can read it on either inode.
+        if receipt.exists():
+            lock_path.unlink(missing_ok=True)
+
+
 def publish_response(root, key, prompt_hash, response, input_tokens, output_tokens):
     if not isinstance(response, str) or min(input_tokens, output_tokens) <= 0:
         raise ValueError("Local greedy evaluation requires one measured response")

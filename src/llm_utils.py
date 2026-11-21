@@ -9,7 +9,7 @@ from transformers import AutoTokenizer
 from multiprocessing.dummy import Pool as ThreadPool
 from tqdm import tqdm
 
-from src.evaluation_cache import publish_response, read_response, request_cache
+from src.evaluation_cache import pending_response, publish_response, request_cache
 
 
 
@@ -93,6 +93,26 @@ def _get_client_round_robin(
     return client
 
 
+def _complete_chat(api_key, base_url, params, max_trials, time_gap):
+    for attempt in range(1, max_trials + 1):
+        client = _get_client_round_robin(
+            api_keys=api_key, base_url=base_url, max_retries=2,
+            timeout=float(os.environ.get("MEMSKILL_API_TIMEOUT_S", "60")),
+        )
+        try:
+            completion = client.chat.completions.create(**params)
+            if completion is None:
+                break
+            return completion, attempt
+        except Exception as error:
+            print(error)
+            if "request timed out" in str(error).strip().lower():
+                break
+            print("Retrying...")
+            time.sleep(time_gap)
+    raise Exception("Reach MAX_TRIALS={}".format(max_trials))
+
+
 def get_llm_response_via_api(prompt,
                              LLM_MODEL="",
                              base_url="",
@@ -122,37 +142,21 @@ def get_llm_response_via_api(prompt,
     cache = request_cache(base_url, api_params, usage_kind)
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest() if cache else None
     started = time.monotonic()
-    cached = read_response(*cache) if cache else None
     attempts = 0
-    if cached:
-        if cached["payload"]["prompt_sha256"] != prompt_hash:
-            raise ValueError("Cached request has a different prompt")
-        response = cached["payload"]["response"]
-        prompt_tokens, completion_tokens = cached["payload"]["tokens"]
-    else:
-        completion = None
-        for attempts in range(1, MAX_TRIALS + 1):
-            client = _get_client_round_robin(
-                api_keys=api_key, base_url=base_url, max_retries=2,
-                timeout=float(os.environ.get("MEMSKILL_API_TIMEOUT_S", "60")),
-            )
-            try:
-                completion = client.chat.completions.create(**api_params)
-                break
-            except Exception as e:
-                print(e)
-                if "request timed out" in str(e).strip().lower():
-                    break
-                print("Retrying...")
-                time.sleep(TIME_GAP)
-        if completion is None:
-            raise Exception("Reach MAX_TRIALS={}".format(MAX_TRIALS))
-        contents = [c.message.content for c in completion.choices]
-        response = contents[0] if len(contents) == 1 else contents
-        prompt_tokens = completion.usage.prompt_tokens
-        completion_tokens = completion.usage.completion_tokens
-        if cache:
-            cached = publish_response(*cache, prompt_hash, response, prompt_tokens, completion_tokens)
+    with pending_response(cache) as cached:
+        if cached is None:
+            completion, attempts = _complete_chat(api_key, base_url, api_params, MAX_TRIALS, TIME_GAP)
+            contents = [c.message.content for c in completion.choices]
+            response = contents[0] if len(contents) == 1 else contents
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
+            if cache:
+                cached = publish_response(*cache, prompt_hash, response, prompt_tokens, completion_tokens)
+        else:
+            if cached["payload"]["prompt_sha256"] != prompt_hash:
+                raise ValueError("Cached request has a different prompt")
+            response = cached["payload"]["response"]
+            prompt_tokens, completion_tokens = cached["payload"]["tokens"]
 
     usage_log = os.environ.get("MEMSKILL_USAGE_LOG")
     if usage_log:

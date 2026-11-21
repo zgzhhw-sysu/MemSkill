@@ -1,8 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event, local
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -96,6 +98,57 @@ class EvaluationCacheTest(unittest.TestCase):
                 for _ in range(2):
                     get_llm_response_via_api(**dict(kwargs, **changes))
                 self.assertEqual(request.call_count, before + 2)
+
+    def test_concurrent_identical_requests_share_one_completion(self):
+        entered, second_miss, release = Event(), Event(), Event()
+        caller = local()
+
+        def lookup(root, key):
+            row = read_response(root, key)
+            if row is None and getattr(caller, "waiting", False):
+                second_miss.set()
+            return row
+
+        def complete(**params):
+            prompt = params["messages"][0]["content"]
+            if prompt == "same":
+                entered.set()
+                self.assertTrue(release.wait(10))
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=prompt))],
+                                   usage=SimpleNamespace(prompt_tokens=10, completion_tokens=1))
+
+        def call(prompt, waiting=False):
+            caller.waiting = waiting
+            return get_llm_response_via_api(prompt, api_key="local", base_url="http://127.0.0.1/v1",
+                                            TAU=0, MAX_TRIALS=1, TIME_GAP=0)
+
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, {
+            "MEMSKILL_GREEDY_EVAL_CACHE": tmp, "MEMSKILL_BACKEND_ID": "fixed",
+            "MEMSKILL_USAGE_LOG": str(Path(tmp) / "usage.jsonl"),
+        }), patch("src.llm_utils._get_client_round_robin") as client, \
+                patch("src.evaluation_cache.read_response", side_effect=lookup), ThreadPoolExecutor(3) as pool:
+            request = client.return_value.chat.completions.create
+            request.side_effect = complete
+            first = pool.submit(call, "same")
+            try:
+                self.assertTrue(entered.wait(5))
+                waiting = pool.submit(call, "same", True)
+                self.assertTrue(second_miss.wait(5))
+                self.assertEqual(pool.submit(call, "other").result(timeout=5)[0], "other")
+            finally:
+                release.set()
+            self.assertEqual(first.result(timeout=5), waiting.result(timeout=5))
+            self.assertEqual(request.call_count, 2)
+            records = [json.loads(line) for line in (Path(tmp) / "usage.jsonl").read_text().splitlines()]
+            self.assertEqual(sorted(r["attempts"] for r in records), [0, 1, 1])
+            self.assertEqual(list(Path(tmp).rglob("*.lock")), [])
+
+            request.side_effect = TimeoutError("request timed out")
+            with self.assertRaisesRegex(Exception, "Reach MAX_TRIALS"):
+                call("interrupted")
+            request.side_effect = complete
+            self.assertEqual(call("interrupted")[0], "interrupted")
+            self.assertEqual(list(Path(tmp).rglob("*.lock")), [])
 
     def test_competing_results_and_corrupt_or_incomplete_entries_fail(self):
         with TemporaryDirectory() as tmp:
