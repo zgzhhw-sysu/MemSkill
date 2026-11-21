@@ -530,3 +530,38 @@ source "$HOME/memskill-work/deploy/env-251.sh"
 cd "$work/run-linked-questions-v1"
 bash scripts/experiments/run_legacy_terminal_251.sh root-pivots
 ```
+
+### 在 251 重放首段写入和两个前缀的关系技能
+
+工作目录为 `~/memskill-work/run-linked-questions-v1`。下列命令可在 251 的用户会话中接续本轮实验。各阶段按已落盘的上游回执继续。GPU 3 以批量 2、占空比 0.30 重建检索，首段写入与复核问答使用 GPU 5、6 的 18773 服务。新增的关系技能分支沿用原参考实验的 GPU 0 编码和 GPU 7 上的 18774 服务，便于逐题配对。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+resume() {
+    local unit="memskill-251-$1"
+    shift
+    systemctl --user is-active --quiet "$unit" && return 0
+    systemd-run --user --collect --unit="$unit" -p Restart=on-failure -p RestartSec=40s \
+        --working-directory="$PWD" bash "$PWD/scripts/experiments/$1" "${@:2}"
+}
+for phase in suffix-inputs suffix-writes reader-inputs outcomes; do
+    resume "root-replay-$phase" run_root_replay_251.sh "$phase"
+done
+resume relation-activity-prefix run_semantic_writer_251.sh activity-prefix
+for phase in prepared outcomes; do
+    resume "relation-repair-$phase" run_relation_repairs_251.sh "$phase"
+done
+for phase in encode-roots root-augmented; do
+    resume "matched-span-$phase" run_matched_span_251.sh "$phase"
+done
+```
+
+在 `runs/paired-251-linked-eight/source-compression` 下查看以下输出。
+
+| 目录 | 查看内容 |
+| --- | --- |
+| `legacy-root-symmetry` | `summary.json` 给出两条首段信用及否决原因。单题 `outcomes/*.json` 保留两种选技的原答案和三种同技能修补后的回答。 |
+| `semantic-writer/activity-prefix` | `contrasts/through-NN.json` 给出共享窗口的题数、两种前缀下各自的关系减时间 F1，以及允许按前缀选技所增加的事后上限。 |
+| `relation-skill-repairs/{0,1}` | 0 表示前次时间写入，1 表示前次活动写入。每个 `outcomes/conv-*.json` 记录尝试、匹配、局部证据数、候选以及同技能修补的结果。 |
+| `matched-span-rank/root-augmented` | `forecast.json` 保存各首段和末段的预测。逐题策略概率、已观测的配对 F1 及同批新增标签置零的对照见 `later`，完整四路径见 `replica`。 |

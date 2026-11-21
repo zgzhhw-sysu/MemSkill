@@ -55,7 +55,7 @@ def structure(singles, pairs):
     return torch.quantile(values, values.new_tensor([0.1, 0.5, 0.9]), dim=0).flatten()
 
 
-def early_sources(base, study, corpus):
+def early_sources(base, study, corpus, *, pivot=1):
     reg = census(base, study, corpus)
     known = read(reg)
     proto = read(study / "protocol.json")
@@ -68,7 +68,7 @@ def early_sources(base, study, corpus):
     nodes = {}
     for window, receipt in sorted(known["windows"].items()):
         h, first = window.rsplit("_s", 1)
-        n = int(first) + 1
+        n = int(first) + pivot
         sk = f"session_{n}"
         (source,) = proc._extract_session_chunks(
             data[h][sk], data[h][sk + "_date_time"]
@@ -83,7 +83,7 @@ def early_sources(base, study, corpus):
         if (
             file_hash(trace) != receipt["trace"]
             or len(archive) != 2
-            or archive[-1]["source"] != source
+            or archive[pivot]["source"] != source
         ):
             raise ValueError("Earlier predecision source did not match the old rollout")
         rows = read(root / "rows.json")
@@ -97,18 +97,18 @@ def early_sources(base, study, corpus):
             data[h],
             sk,
             window,
-            int(rows[0]["use"]),
+            int(rows[1 - pivot]["use"]),
             len(read(root / "questions.json")),
         )
     return reg, nodes
 
 
-def encode_extra(base, study, corpus):
+def encode_extra(base, study, corpus, *, pivot=1):
     qreg = registration(base, study, corpus)
     root = qreg.parent.parent / "matched-span-rank"
-    out = root / "earlier-sources"
+    out = root / ("earlier-sources" if pivot else "earlier-root-sources")
     out.mkdir(parents=True, exist_ok=True)
-    earlier, nodes = early_sources(base, study, corpus)
+    earlier, nodes = early_sources(base, study, corpus, pivot=pivot)
     encoded = qreg.parent / "encoded.json"
     receipts = read(encoded)["sources"]
     identity = {
@@ -235,5 +235,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     for k in ("base", "study", "corpus"):
         p.add_argument(k, type=Path)
+    p.add_argument("--pivot", type=int, choices=(0, 1), default=1)
     a = p.parse_args()
-    encode_extra(a.base, a.study, a.corpus)
+    encode_extra(a.base, a.study, a.corpus, pivot=a.pivot)

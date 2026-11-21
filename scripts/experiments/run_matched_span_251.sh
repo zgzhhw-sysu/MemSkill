@@ -33,14 +33,19 @@ case $phase in
 esac
 mkdir -p "$root"
 case $phase in
-    encode)
-        while [[ ! -f "$root/earlier-sources/complete.json" ]]; do
+    encode|encode-roots)
+        folder=earlier-sources
+        pivot=1
+        if [[ $phase == encode-roots ]]; then folder=earlier-root-sources; pivot=0; fi
+        while [[ ! -f "$root/$folder/complete.json" ]]; do
             rc=0
-            python3 "$guard" run --gpus 3 -- "$MEMSKILL_PYTHON" -u -m experiments.controller.matched_span_data "${args[@]}" >>"$root/encode.log" 2>&1 || rc=$?
+            python3 "$guard" run --gpus 3 -- "$MEMSKILL_PYTHON" -u -m experiments.controller.matched_span_data "${args[@]}" --pivot "$pivot" >>"$root/$phase.log" 2>&1 || rc=$?
             if (( rc==75 )); then sleep 30; elif (( rc!=0 )); then exit "$rc"; fi
         done
         exit ;;
     original) ;;
+    root-augmented)
+        until [[ -f "$root/earlier-root-sources/complete.json" && -f "$src/legacy-root-symmetry/summary.json" && -f "$root/expanded/edge-audit.json" ]]; do sleep 30; done ;;
     expanded)
         until [[ -f "$root/earlier-sources/complete.json" && -f "$src/legacy-terminal-symmetry/summary.json" && -f "$root/original/edge-audit.json" ]]; do sleep 30; done ;;
     *) exit 2 ;;

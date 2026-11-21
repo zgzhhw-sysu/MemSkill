@@ -257,3 +257,13 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 251 的五条旧末段标签已全部复核，三条保留，两条有同技能修补的竞争解释。新结果在 248 镜像的 `logs/source-compression/matched-span-rank/`。查看 `consensus/original/later/through-08.json` 的同一批 74 题，核验信用投票 F1 为 0.529637，同种投票只用回报为 0.528751，原生为 0.515726，错配信用为 0.530109。信用相对同种回报投票的增益区间仍跨零。完整后期 378 题还在收集，正式测试继续留出。两条早期首段的后续轨迹需要在较弱技能上重放，当前位置为 `logs/source-compression/legacy-root-symmetry/`。[逐版本配对数据](algorithm-notes.md#同一对话内的-span-收益排序) · [251 恢复命令](server-251.md#同对话配对排序残差校准与删除供样对话投票)
 
 `legacy-root-symmetry/writers-complete.json` 已收回，两条首段替换均重现原解析动作。固定后续技能的修补与读者问答仍待测量。三技能可达收益在 `logs/late-pairs/semantic-writer/three-writer/capacity/through-09.json`，其中 6 个匹配窗口有 37 题，3 个执行异常的窗口保留原因。[三技能机会界及分母](algorithm-notes.md#同一对话内的-span-收益排序)
+
+### 在 251 接续首段重放与关系技能实验
+
+248 的镜像根目录为 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/`。在 `legacy-root-symmetry/` 中，两条候选的后续写入已复现，四份原技能或替换技能的最终记忆库及问答检索顺序均与归档一致。两条较弱首段补入缺失证据之后，最终读者看到的前五条记忆均与各自的较弱原路径一致。另两种修补改变了上下文，最终判定以 `outcomes/*.json` 中真实回答和 `summary.json` 为准。
+
+关系技能的原时间前缀面板共 12 个训练窗口、91 题，其中 10 个写入匹配窗口覆盖 74 题，40 题的证据位于干预段。仅 conv-41 第 7–8 场的原题 80 满足局部完整参考答案恢复，时间技能 F1 为 1，关系技能为 0.75。`relation-skill-repairs/0/outcomes/conv-41_s7.json` 记录修补后的归因。活动前缀复测的相同题目继续使用原题号，在 `semantic-writer/activity-prefix/contrasts/` 查看两前缀同时匹配的实际分母。
+
+`matched-span-rank/root-augmented/` 保存纳入较早首段后的策略。读表时用 `credit` 对照 `zero_roots` 衡量新增标签的作用，再与先前版本 `expanded` 对照。完整发布条件涉及后期 378 题、四路径复核和独立于这些问题的长前缀 185 题。正式测试继续留出。[251 恢复命令与各目录说明](server-251.md#在-251-重放首段写入和两个前缀的关系技能) · [实验假设与配对方式](algorithm-notes.md#首段写入如何影响下一次选技)
+
+首条已收回的最终判定为 `legacy-root-symmetry/outcomes/conv-41_s1_p0_q67.json`。原技能、替换技能的 F1 分别为 1.00、0.50，三种同技能修补均为 0.50，该题首段信用确认为 +0.50。策略在两条候选均结束后自动拟合。
