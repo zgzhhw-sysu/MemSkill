@@ -301,3 +301,11 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 本轮权重拟合、检索和问答运行在 251，248 收回回执。三道训练题的四条反事实路径均已复核。第 20 题的 +0.85714 全来自逐条分组，第 80 题的 −0.25 全来自写入指令，第 110 题的 −1 分为指令 −0.81579 和分组 −0.18421。后期 4 窗 36 题上，分项信用改变了四窗概率；相对同设计清零，期望 F1 从 0.553839 变为 0.553770，固定抽样换技 0 次。当前版本保留为开发对照。后期登记分母为 161 题，正式测试仍留出。
 
 接手后先看 248 的 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/source-compression/writer-format-credit/`。三条归因在 `questions/`，整批 74 题进度在 `readers/` 与 `identification/`。策略的 `verified`、`transfer`、`dense` 结果分别对应真实信用、增加旧分组观测、增加当前交叉回报。在同一后期窗口比较各自的 `credit` 和 `raw`，再核对换技数、冻结前暴露和匹配分母。[逐题分解与当前评估](algorithm-notes.md#区分写入指令与原文分组对-span-信用的贡献) · [251 恢复命令](server-251.md#交叉复测写入指令和原文分组)
+
+### 交接时间技能概率和同题重复信用的实验
+
+251 继续在限载 GPU 上训练和评估。后期已有 36 题的固定时间概率上限为 0.565884，当前切片的目标为 0.568407。新版本允许时间概率随已核验的对比调整，后期期望 F1 为 0.549932，同设计清零为 0.551019。按原题合并信用后为 0.550288。早期 31 题有一个实测换技窗口，抽样 F1 增加 0.026568，期望 F1 减少 0.002944。贡献最大的是 conv-42 第 105 题，该题的执行和检索修补均恢复答案，额外选技信用为零。正式测试继续留出。
+
+接手时先查看 `source-compression/writer-format-credit/sampling/frame.json` 和 `shared/outcomes/`。前者固定了每个窗口要随机复测的两题，后者保存时间技能补测后六种写入/分组路径的回执。再比较后期 `temporal-gate`、`outlier-total`、`outlier-components` 三个目录中同一进度的 `through-NN.json` 和 `decisions/evaluation-NN.json`。早期同名目录的 `evaluation/switches-*.json` 可以逐题查明抽样 F1 的来源。[本轮实验笔记](algorithm-notes.md#当时间技能的概率也可以改变) · [251 恢复命令](server-251.md#随机抽题时间技能概率与共享题目回执)
+
+六路实测现已完成。248 镜像里的 `source-compression/writer-format-credit/shared/outcomes-complete.json` 索引三道原题。第 110 题的活动技能 +1 在与另外两种技能分别比较后，分为指令 +0.56579 和分组 +0.43421。最终分项策略的后期 36 题期望 F1 为 0.551747，比同设计清零高 0.000728；早期 39 题为 0.478911，比清零低 0.003585。尚未晋级。全分母界和逐题贡献分别在 `outlier-components/population/` 和 `outlier-components/skill-effects-12.json`。跨 10 个窗口的随机读者队列仍在 251 继续。

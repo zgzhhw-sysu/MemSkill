@@ -647,3 +647,25 @@ done
 在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/writer-format-credit/`，`registration.json` 固定题号，`prepared/` 记录四条路径的检索顺序，`questions/<窗口>/<原题号>.json` 保存真实回答、F1、回执哈希与两项贡献。`verified-complete.json` 覆盖三条已有信用，`readers-complete.json` 标记整个 10 窗 74 题队列已处理。逐题状态和各策略的匹配分母以对应结果为准。`identification/` 给出当前仍与数据相容的效应区间，共享请求键的四条路径共享同一个未知回答。识别区间的中间快照按修改时间排序，最终入口为 `summary.json`。
 
 后期结果位于 `late-pairs/semantic-writer/three-writer/writer-format-<stage>/`。`through-NN.json` 的 `by_partition.evaluation` 给出期望 F1，`decisions/evaluation-NN.json` 给出固定抽样换技数、抽样 F1 和实际读写 token。早期独立窗口查看 `source-compression/earliest-three-skills/writer-format-<stage>/evaluation/`。阶段 `verified` 使用三条实测信用，`dense` 进一步使用已完整匹配窗口的逐题分量回报。`history` 和 `transfer` 检验旧分组观测的迁移，`sensitivity` 保存假设分摊的敏感性对照。248 的现有镜像以相同层次收回。
+
+### 随机抽题、时间技能概率与共享题目回执
+
+在 251 恢复这轮任务时，检索入口仍用物理卡 3，BF16 读者在 5、6，新增拟合和早期评估通过物理卡 0 的低占空比租约。两个读者任务共享按题加锁的四路回执。248 自动回收包含本轮服务的 137 项任务状态。
+
+```bash
+for phase in sampling shared-prepared shared-outcomes; do
+    resume "writer-format-$phase" run_writer_format_251.sh "$phase"
+done
+for stage in proxy sample1 sample2; do
+    resume "writer-format-$stage-policy" run_three_skill_margin_251.sh "writer-format-$stage"
+    resume "writer-format-$stage-evaluation" run_earliest_three_251.sh "writer-format-$stage"
+done
+for stage in temporal-gate outlier-total outlier-components; do
+    resume "$stage" run_three_skill_margin_251.sh "$stage"
+    resume "$stage-evaluation" run_earliest_three_251.sh "$stage"
+done
+```
+
+在 `source-compression/writer-format-credit/sampling/` 查看 `frame.json` 的固定题号与纳入概率，`sample1.json`、`sample2.json` 给出一题或两题校正，`census.json` 保存与全窗测量的误差。每窗中途失败会列明原因，该窗不进入对应拟合。三路时间/活动/关系技能的逐题复核在同级 `shared/outcomes/`。后期策略目录均位于 `late-pairs/semantic-writer/three-writer/`。在 `temporal-gate/budgets-NN.json` 看概率分配上限和变化来源，在 `outlier-*/skill-effects-NN.json` 看每项技能对逐题 F1 的贡献。早期同名策略的 `evaluation/switches-*.json` 列出实际换技、匹配的问题、两臂实测 F1 和该技能对的归因复核。
+
+三个允许时间概率变化的策略在各自的 `population/bounds-*.json` 中记录 18 窗、161 题全分母界。按修改时间查看最新快照；`known` 按时间、活动、关系顺序给出已有实测值数目。三路尚未齐全时，可从已完成的真实双路问答先核实两个技能的回报。输入回执的哈希保存在同一文件中。

@@ -19,7 +19,7 @@ case $mode in
         until [[ -f "$early/forecast.json" ]]; do sleep 15; done
         "$MEMSKILL_PYTHON" -m "${cmd[@]}" --register-only
         until [[ -f "$early/judged-complete.json" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 30; done ;;
-    writer-format-sensitivity|writer-format-verified|writer-format-dense|writer-format-history|writer-format-transfer)
+    writer-format-sensitivity|writer-format-verified|writer-format-dense|writer-format-history|writer-format-transfer|writer-format-proxy|writer-format-sample1|writer-format-sample2)
         gpu=1
         out="$parent/$mode"
         stage=${mode#writer-format-}
@@ -27,6 +27,7 @@ case $mode in
         input="$base/source-compression/writer-format-credit/registration.json"
         case $stage in
             verified|transfer) input="${input%/*}/verified-complete.json" ;;
+            proxy|sample1|sample2) gpu=0; input="${input%/*}/sampling/$stage.json" ;;
             dense) input="${input%/*}/readers-complete.json" ;;
         esac
         if [[ $stage == transfer ]]; then
@@ -34,6 +35,20 @@ case $mode in
             until [[ -f "$parent/writer-format-verified/forecast.json" && -f "$earlier/writer-format-verified/forecast.json" ]]; do sleep 20; done
         fi
         until [[ -f "$input" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 20; done ;;
+    outlier-total|outlier-components)
+        gpu=0
+        out="$parent/$mode"
+        cmd=(experiments.controller.shared_outlier_policy "$base" "$mode")
+        early="$base/source-compression/earliest-three-skills"
+        shared="$base/source-compression/writer-format-credit/shared"
+        until [[ -f "$early/temporal-gate/forecast.json" && -f "$shared/registration.json" ]]; do sleep 15; done
+        if [[ $mode == outlier-components ]]; then until [[ -f "$shared/outcomes-complete.json" ]]; do sleep 20; done; fi ;;
+    temporal-gate)
+        gpu=0
+        out="$parent/temporal-gate"
+        cmd=(experiments.controller.three_skill_temporal_gate "$base")
+        until [[ -f "$parent/writer-format-verified/forecast.json" && -f "$base/source-compression/earliest-three-skills/writer-format-verified/forecast.json" ]]; do sleep 20; done
+        "$MEMSKILL_PYTHON" -m "${cmd[@]}" --register-only ;;
     checkpoint-odds)
         gpu=3
         out="$parent/checkpoint-odds"
@@ -80,6 +95,11 @@ mkdir -p "$out"
 last=-1
 until [[ -f "$out/summary.json" ]]; do
     count=$(find "$parent" -maxdepth 1 -name 'conv-*.json' | wc -l)
+    if [[ $mode == temporal-gate || $mode == outlier-* ]]; then
+        binary="$base/source-compression/retrieval-competition/pairs"
+        count+=":$(find "$binary" -maxdepth 1 -name 'conv-*.json' | wc -l)"
+        count+=":$(find "$base/late-pairs/outcomes" -mindepth 2 -maxdepth 2 -name pair.json | wc -l)"
+    fi
     if [[ $mode == graph-attribution ]]; then
         direct="$base/source-compression/activity-relation-repairs/0/outcomes"
         count+=":$(find "$direct" -maxdepth 1 -name 'conv-*.json' | wc -l)"

@@ -1,6 +1,7 @@
 """Cross two real writer responses with two source rules at the same archived decision."""
 
 import argparse
+import fcntl
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -137,7 +138,7 @@ def reparse(ex, event, selected, rule, receipts, expected):
     return {"actions": actions, "writer_skills": skills}
 
 
-def prepare(base, study, data, rank, name, reg):
+def prepare(base, study, data, rank, name, reg, *, temporal_only=False):
     src = base / "source-compression"
     archive = src / "factorial"
     sem = src / "semantic-writer"
@@ -200,14 +201,34 @@ def prepare(base, study, data, rank, name, reg):
         }
         for i, q in truth.items()
     }
-    banks = {}
-    for key in CELLS:
-        who, format_name = key.split("_")
-        sel, wr, acts = (
-            (end["selected_skills"], end["executor_responses"], end["parsed_actions"])
-            if who == "activity"
-            else (choice["selected"], rel["writer"], rel["actions"])
+    writes = {
+        "activity": (
+            end["selected_skills"],
+            end["executor_responses"],
+            end["parsed_actions"],
+        ),
+        "relation": (choice["selected"], rel["writer"], rel["actions"]),
+    }
+    cells = CELLS
+    if temporal_only:
+        orig = temporal[-1]
+        if (
+            orig["selected_skills"][-1]["name"] != "capture_temporal_context"
+            or orig["selected_skills"][-1]["source_rule"] != SINGLE
+        ):
+            raise ValueError("Different original temporal write")
+        check_response(orig["executor_responses"], cell, cache=archive / "responses")
+        writes["temporal"] = (
+            orig["selected_skills"],
+            orig["executor_responses"],
+            orig["parsed_actions"],
         )
+        expected = {"temporal_single": list(restore_text(temporal).values())}
+        cells = ("temporal_single", "temporal_pairs")
+    banks = {}
+    for key in cells:
+        who, format_name = key.split("_")
+        sel, wr, acts = writes[who]
         branch = reparse(
             ex, end, sel, SINGLE if format_name == "single" else PAIRS, wr, acts
         )
@@ -231,7 +252,7 @@ def prepare(base, study, data, rank, name, reg):
                 "indices": idx,
                 "context_hash": _digest(ctx),
             }
-            if key in NATIVE:
+            if key in expected:
                 previous = orig[who]
                 if (
                     previous["indices"] != idx
@@ -277,11 +298,27 @@ def measure(out, pkt, cache):
     }
 
 
+def question_receipt(out, name, i, root, inputs):
+    qfile = out / "questions" / name / (str(i) + ".json")
+    qfile.parent.mkdir(exist_ok=True, parents=True)
+    with qfile.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not qfile.exists():
+            record = measure(
+                out,
+                root["questions"][str(i)],
+                out.parent / "activity-relation-repairs/0/responses",
+            )
+            register(qfile, dict(record, inputs=inputs))
+        if read(qfile)["inputs"] != inputs:
+            raise ValueError("Unbound question return")
+    return qfile
+
+
 def run(base, study, corpus, phase):
     f = registration(base, study)
     reg = read(f)
     out = f.parent
-    src = out.parent
     if phase == "register":
         return
     flags = reg["flags"]
@@ -332,18 +369,7 @@ def run(base, study, corpus, phase):
                 )
                 answers = {}
                 for i in ids:
-                    qfile = out / "questions" / name / (i + ".json")
-                    qfile.parent.mkdir(exist_ok=True, parents=True)
-                    if not qfile.exists():
-                        record = measure(
-                            out,
-                            root["questions"][i],
-                            src / "activity-relation-repairs/0/responses",
-                        )
-                        register(qfile, dict(record, inputs=inputs))
-                    q = read(qfile)
-                    if q["inputs"] != inputs:
-                        raise ValueError("Unbound question return")
+                    qfile = question_receipt(out, name, i, root, inputs)
                     answers[i] = file_hash(qfile)
                 v = {"status": "answered", "rows": answers}
         register(p, dict(v, inputs=inputs))

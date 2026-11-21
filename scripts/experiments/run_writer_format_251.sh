@@ -14,6 +14,40 @@ mkdir -p "$src"
 export MEMSKILL_USAGE_LOG="$src/usage.jsonl"
 cmd=("$MEMSKILL_PYTHON" -u -m experiments.controller.writer_format_trial "$base" "$study" "$LOCOMO_DATA")
 if [[ ! -f "$src/registration.json" ]]; then "${cmd[@]}" register; fi
+if [[ $phase == shared-prepared || $phase == shared-outcomes ]]; then
+    part=${phase#shared-}
+    until [[ -f "$src/verified-complete.json" ]]; do sleep 15; done
+    shared=("$MEMSKILL_PYTHON" -u -m experiments.controller.three_skill_shared_credit "$base" "$study" "$LOCOMO_DATA")
+    "${shared[@]}" register
+    export MEMSKILL_USAGE_LOG="$src/shared/usage.jsonl"
+    if [[ $part == outcomes ]]; then until [[ -f "$src/shared/prepared-complete.json" ]]; do sleep 15; done; fi
+    until [[ -f "$src/shared/$part-complete.json" ]]; do
+        rc=0
+        if [[ $part == prepared ]]; then
+            python3 "$guard" run --gpus 3 -- "${shared[@]}" "$part" >>"$src/shared/$part.log" 2>&1 || rc=$?
+        elif bash scripts/experiments/run_witness_four_paths_251.sh check-writer; then
+            "${shared[@]}" "$part" >>"$src/shared/$part.log" 2>&1 || rc=$?
+        fi
+        if ((rc!=0 && rc!=75)); then exit "$rc"; fi
+        [[ -f "$src/shared/$part-complete.json" ]] || sleep 20
+    done
+    exit 0
+fi
+if [[ $phase == sampling ]]; then
+    until [[ -f "$src/prepared-complete.json" && -f "$src/verified-complete.json" ]]; do sleep 15; done
+    survey=("$MEMSKILL_PYTHON" -u -m experiments.controller.writer_format_sampling "$base")
+    "${survey[@]}" register
+    while [[ ! -f "$src/sampling/sample2.json" ]]; do
+        if bash scripts/experiments/run_witness_four_paths_251.sh check-writer; then
+            "${survey[@]}" read >>"$src/sampling/reader.log" 2>&1
+        else
+            sleep 15
+        fi
+    done
+    until [[ -f "$src/readers-complete.json" ]]; do sleep 35; done
+    "${survey[@]}" compare
+    exit 0
+fi
 if [[ $phase == identification ]]; then
     prev=
     while [[ ! -f "$src/identification/summary.json" ]]; do

@@ -257,21 +257,30 @@ def paired_histories(strata, families):
     return intervals
 
 
-def evaluate(base, study, corpus, *, state=False, factor=None):
+def evaluate(
+    base, study, corpus, *, state=False, factor=None, gate=False, outlier=None
+):
     src = base / "source-compression"
     earlier = src / "earlier-terminal-returns"
     out = src / "earliest-three-skills"
-    policy = out / "checkpoint-odds" if state else out
+    family = None
+    policy = out
+    if state:
+        family, policy = "state", out / "checkpoint-odds"
     if factor:
-        policy = out / ("writer-format-" + factor)
+        family, policy = "factor", out / ("writer-format-" + factor)
+    if gate:
+        family, policy = "gate", out / "temporal-gate"
+    if outlier:
+        family, policy = "outlier", out / outlier
     forecast = policy / "forecast.json"
     results = forecast.parent / "evaluation"
     results.mkdir(exist_ok=True)
     inputs = available(out, earlier)
     census = population(out, study, corpus)
     inputs["population"] = file_hash(census)
-    if state or factor:
-        inputs["factor_policy" if factor else "state_policy"] = file_hash(forecast)
+    if family:
+        inputs[family + "_policy"] = file_hash(forecast)
     path = results / ("snapshot-" + digest(inputs) + ".json")
     final = (
         (out / "judged-complete.json").is_file()
@@ -286,11 +295,11 @@ def evaluate(base, study, corpus, *, state=False, factor=None):
             )
         return path
     pred = read(forecast)
-    if (state or factor) and pred["inputs"] != read(out / "forecast.json")["inputs"]:
+    if family and pred["inputs"] != read(out / "forecast.json")["inputs"]:
         raise ValueError("Different original-state cohort")
     windows = {}
     strata = defaultdict(lambda: defaultdict(lambda: [0, 0.0, 0.0]))
-    families = ("factor",) if factor else ("state",) if state else FAMILIES
+    families = (family,) if family else FAMILIES
     totals = {family: [0.0, 0.0] for family in families}
     matched = binary = relation = denominator = 0
     for name, w in pred["windows"].items():
@@ -390,17 +399,124 @@ def evaluate(base, study, corpus, *, state=False, factor=None):
     return path
 
 
+def switched_evidence(base, snapshot, family):
+    """Join actual common-draw switches to the matching physical question and repair."""
+    out = base / "source-compression/earliest-three-skills"
+    target = snapshot.parent / (
+        "switches-" + snapshot.stem.removeprefix("snapshot-") + ".json"
+    )
+    if target.exists():
+        if read(target)["snapshot"] != file_hash(snapshot):
+            raise ValueError("Different decision snapshot")
+        return
+    d = read(snapshot)
+    pop = read(out / "population.json")["windows"]
+    windows = {}
+    for name, w in d["windows"].items():
+        if not w["contrasts"][family]["draw_changed"]:
+            continue
+        raw, chosen = (w["selected"][family + "_" + k] for k in ("raw", "credit"))
+        entry = {"from": raw, "to": chosen, "questions": w["questions"], "rows": []}
+        windows[name] = entry
+        if not w["token_costs"]:
+            entry["status"] = "pending_or_unmatched"
+            continue
+        pn = name + ".json"
+        pair = out / "pairs" / pn
+        if d["inputs"]["pairs"][pn] != file_hash(pair):
+            raise ValueError("Changed physical switch outcomes")
+        judged = {}
+        if pn in d["inputs"]["judged"]:
+            jf = out / "judged" / pn
+            repairs = out / "repairs" / pn
+            obs = read(jf)
+            if (
+                file_hash(jf) != d["inputs"]["judged"][pn]
+                or obs["inputs"]["parent"] != file_hash(repairs)
+                or read(repairs)["inputs"]["parent"] != file_hash(pair)
+            ):
+                raise ValueError("Wrong weaker-skill adjudication for observed switch")
+            judged = {(c["index"], c["baseline"]): c for c in obs["cases"]}
+        baseline = raw if chosen == "relation" else chosen
+        for q in read(pair)["rows"]:
+            idx = q["original_index"]
+            before = q[raw]["f1"]
+            after = q[chosen]["f1"]
+            delta = after - before
+            c = judged.get((idx, baseline)) if "relation" in (raw, chosen) else None
+            status = "no_audited_pair" if c is None else c["status"]
+            extra = {}
+            if c is not None:
+                orientation = 1 if chosen == "relation" else -1
+                if abs(orientation * c["raw"] - delta) > 1e-10:
+                    raise ValueError(
+                        "Switched branch orientation contradicts the measured repair"
+                    )
+                extra = {
+                    "signed_choice_credit": orientation * c["credit"],
+                    "veto": c.get("veto", []),
+                }
+            entry["rows"].append(
+                {
+                    "index": idx,
+                    "category": q["category"],
+                    "focal": pop[name][str(idx)]["focal"],
+                    "from_f1": before,
+                    "to_f1": after,
+                    "delta": delta,
+                    "adjudication": status,
+                    **extra,
+                }
+            )
+        entry["status"] = "matched"
+        entry["sum_delta"] = sum(r["delta"] for r in entry["rows"])
+    n = d["matched_questions"]
+    if n:
+        actual = sum(w.get("sum_delta", 0.0) for w in windows.values()) / n
+        scores = d["matched_f1"]["all"]
+        expected = (
+            scores[family + "_credit"]["drawn"] - scores[family + "_raw"]["drawn"]
+        )
+        if abs(actual - expected) > 1e-10:
+            raise ValueError("Switches did not reproduce drawn F1")
+    register(
+        target,
+        {"snapshot": file_hash(snapshot), "matched_questions": n, "windows": windows},
+    )
+
+
 if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("base", type=Path)
     cli.add_argument("study", type=Path)
     model = cli.add_mutually_exclusive_group()
     model.add_argument("--state", action="store_true")
+    model.add_argument("--gate", action="store_true")
+    model.add_argument("--outlier", choices=("outlier-total", "outlier-components"))
     model.add_argument(
-        "--factor", choices=("sensitivity", "verified", "dense", "history", "transfer")
+        "--factor",
+        choices=(
+            "sensitivity",
+            "verified",
+            "dense",
+            "history",
+            "transfer",
+            "proxy",
+            "sample1",
+            "sample2",
+        ),
     )
     a = cli.parse_args()
     gpu()
-    evaluate(
-        a.base, a.study, Path(os.environ["LOCOMO_DATA"]), state=a.state, factor=a.factor
+    snapshot = evaluate(
+        a.base,
+        a.study,
+        Path(os.environ["LOCOMO_DATA"]),
+        state=a.state,
+        factor=a.factor,
+        gate=a.gate,
+        outlier=a.outlier,
     )
+
+    if a.gate or a.outlier:
+        switched_evidence(a.base, snapshot, "outlier" if a.outlier else "gate")
