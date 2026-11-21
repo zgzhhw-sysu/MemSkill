@@ -14,7 +14,7 @@ from experiments.controller import file_hash, measured_cost
 from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores, score_answers
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
-from src.episode_trace import skill_spec
+from src.episode_trace import inspect_trace, skill_spec
 from src.evaluation_cache import publish_response, read_response
 from src.inference.text import infer_text_dataset_memories
 from src.rag_utils import reuse_qwen_retriever
@@ -34,27 +34,6 @@ def save(path, obj):
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n")
     tmp.replace(path)
-
-
-def inspect_trace(trace_dir, sample_id):
-    paths = list(trace_dir.glob("*.jsonl"))
-    if len(paths) != 1:
-        raise ValueError(f"Expected one fresh history trace for {sample_id}")
-    spans = applied = 0
-    with paths[0].open() as stream:
-        for line in stream:
-            event = json.loads(line)
-            if event["kind"] != "span":
-                continue
-            spans += 1
-            actions = event["parsed_actions"]
-            if any("API call failed" in a["reasoning"] for a in actions):
-                raise RuntimeError(f"Writer request failed in {sample_id}")
-            dates = {a["memory_content"] for a in actions if a["success"] and a["reasoning"] == "dated_relative_turns"}
-            applied += any(c["action"] == "INSERT" and c["after"] in dates for c in event["changes"])
-    if not spans:
-        raise ValueError(f"No memory construction trace for {sample_id}")
-    return {"spans": spans, "spans_with_date_inserts": applied}
 
 
 @contextmanager
@@ -468,7 +447,9 @@ def run(args, root, rank, workers):
                         stats["f1_percent"] = score_answers(args.dataset, subset, [staged / "scores.json"])
                         save(staged / "audit.json", stats)
                         staged.rename(directory)
-                elif split != "test":
+                else:
+                    inspect_trace(directory / "traces", sid)
+                if split != "test":
                     audit = json.loads((directory / "audit.json").read_bytes())
                     if credit_base:
                         if file_hash(directory / "policy-comparison.json") != audit["artifacts"]["policy-comparison.json"]:

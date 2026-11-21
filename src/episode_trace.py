@@ -1,4 +1,5 @@
 """Record applied writes and compare one skill edit at a fixed LoCoMo write."""
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path
@@ -6,6 +7,33 @@ from types import SimpleNamespace
 import uuid
 import re
 from datetime import datetime
+
+
+def inspect_trace(trace_dir, sample_id):
+    paths = list(trace_dir.glob("*.jsonl"))
+    if len(paths) != 1:
+        raise ValueError(f"Expected one fresh history trace for {sample_id}")
+    spans = applied = 0
+    with paths[0].open() as stream:
+        for line in stream:
+            event = json.loads(line)
+            if event["kind"] != "span":
+                continue
+            spans += 1
+            actions = event["parsed_actions"]
+            if any("API call failed" in a["reasoning"] for a in actions):
+                raise RuntimeError(f"Writer request failed in {sample_id}")
+            required = Counter(a["memory_content"] for a in actions if a["success"] and a["action_type"] == "INSERT"
+                               and a["reasoning"] != "dated_relative_turns")
+            written = Counter(c["after"] for c in event["changes"] if c["action"] == "INSERT")
+            missing = sum((required - written).values())
+            if missing:
+                raise RuntimeError(f"{sample_id} span {event['span_id']} dropped {missing} parsed INSERTs")
+            dates = {a["memory_content"] for a in actions if a["success"] and a["reasoning"] == "dated_relative_turns"}
+            applied += any(c["action"] == "INSERT" and c["after"] in dates for c in event["changes"])
+    if not spans:
+        raise ValueError(f"No memory construction trace for {sample_id}")
+    return {"spans": spans, "spans_with_date_inserts": applied}
 
 
 def skill_spec(op):

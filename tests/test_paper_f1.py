@@ -10,6 +10,40 @@ from experiments.controller.paper_f1 import PROTOCOL, load_cohort, load_split_co
 
 
 class PaperF1Test(unittest.TestCase):
+    def test_trace_requires_each_regular_insert_and_allows_deduplicated_dates(self):
+        from src.episode_trace import inspect_trace
+
+        action = {"action_type": "INSERT", "memory_content": "same", "success": True, "reasoning": ""}
+        date = dict(action, memory_content="2026-11-21", reasoning="dated_relative_turns")
+        change = {"action": "INSERT", "after": "same"}
+        row = {"kind": "span", "span_id": 27, "parsed_actions": [action, date, action], "changes": [change]}
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "history.jsonl"
+            path.write_text(json.dumps(row) + "\n")
+            with self.assertRaisesRegex(RuntimeError, "sample span 27 dropped 1 parsed INSERT"):
+                inspect_trace(path.parent, "sample")
+            row["changes"].append(change)
+            path.write_text(json.dumps(row) + "\n")
+            self.assertEqual(inspect_trace(path.parent, "sample"), {"spans": 1, "spans_with_date_inserts": 0})
+
+    def test_traced_writer_stops_on_embedding_failures(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from src.executor import ExecutionResult, Executor
+
+        writer = Executor(SimpleNamespace(retriever="test"))
+        action = ExecutionResult("INSERT", True, memory_content="a recorded fact")
+        bank = SimpleNamespace(trace=object(), state_encoder=Mock(), add_memory=Mock())
+        for encoder in ("retriever", "state"):
+            with self.subTest(encoder=encoder):
+                failure = RuntimeError(f"{encoder} embedding failed")
+                bank.state_encoder._encode_texts.side_effect = failure
+                with patch("src.executor.get_embeddings", side_effect=failure if encoder == "retriever" else None,
+                           return_value=[[1.0]]):
+                    with self.assertRaisesRegex(RuntimeError, str(failure)):
+                        writer.apply_to_memory_bank([action], bank, [])
+                bank.add_memory.assert_not_called()
+
     def test_single_swap_changes_one_forward_and_rejects_prefix_drift(self):
         import torch
         from src.replay import swap_boundary_logits, verify_native_swap

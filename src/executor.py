@@ -607,6 +607,8 @@ class Executor:
                     'context'
                 )
             except Exception as e:
+                if getattr(memory_bank, "trace", None) is not None:
+                    raise
                 self.logger.warning(f"Failed to batch compute retriever embeddings: {e}")
                 all_success = False
                 # Fall back to empty embeddings (operations will fail individually)
@@ -618,6 +620,8 @@ class Executor:
             try:
                 all_state_encoder_embeddings = memory_bank.state_encoder._encode_texts(all_contents)
             except Exception as e:
+                if getattr(memory_bank, "trace", None) is not None:
+                    raise
                 self.logger.warning(f"Failed to batch compute state encoder embeddings: {e}")
                 # Fall back to None (memory_bank will compute individually if needed)
                 all_state_encoder_embeddings = [None] * len(all_contents)
