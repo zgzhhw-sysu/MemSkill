@@ -8,6 +8,26 @@ from experiments.controller.paper_f1 import PROTOCOL, run_baseline, score_answer
 
 
 class PaperF1Test(unittest.TestCase):
+    def test_complete_history_shards_rescore_native_baseline(self):
+        from experiments.designer.paper_date_pair import summarize_if_complete
+
+        questions = {("a", 0): {"answer": "red, blue", "category": 1},
+                     ("b", 0): {"answer": "run", "category": 4}}
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "baseline.json"
+            for sid, prediction in (("a", "blue"), ("b", "running")):
+                folder = root / "native" / sid
+                folder.mkdir(parents=True)
+                (folder / "scores.json").write_text(json.dumps({"answers": [
+                    {"sample_id": sid, "qa_index": 0, "f1": 0, "prediction": prediction}]}))
+                summarize_if_complete("locomo", out, questions, {}, ["native"], 20.59)
+                self.assertEqual(out.exists(), sid == "b")
+            result = json.loads(out.read_text())
+            self.assertEqual(result["native_f1"], 75)
+            self.assertEqual(result["f1_by_type"]["1"], {"questions": 1, "native": 50})
+            self.assertAlmostEqual(result["difference_from_paper_points"], 54.41)
+
     def test_native_scores_use_original_keys_and_references(self):
         questions = {("a", 2): {"answer": "red, blue", "category": 1},
                      ("a", 5): {"answer": "running; other", "category": 3}}

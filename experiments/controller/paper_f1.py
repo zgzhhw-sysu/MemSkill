@@ -42,7 +42,7 @@ def load_cohort(dataset, path, spec):
     return questions
 
 
-def score_answers(dataset, questions, answer_files):
+def question_scores(dataset, questions, answer_files):
     from src.eval import get_evaluator
 
     evaluator = get_evaluator(dataset, args=None)
@@ -64,7 +64,11 @@ def score_answers(dataset, questions, answer_files):
     if len(scores) != len(questions):
         missing = questions.keys() - scores.keys()
         raise ValueError(f"Missing {len(missing)} question(s), including {min(missing)!r}")
-    return 100 * mean(scores.values())
+    return scores
+
+
+def score_answers(dataset, questions, answer_files):
+    return 100 * mean(question_scores(dataset, questions, answer_files).values())
 
 
 def run_baseline(dataset, data, output_dir, engine_args, defaults):

@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from experiments.controller import legacy_root_replay as root
-from experiments.controller import matched_root_credit
+from experiments.controller import matched_span_data
 from experiments.controller.relation_prefix_interaction import combine, metrics
 from experiments.controller.relation_skill_repairs import candidates
 from experiments.controller.source_compression import file_hash
@@ -137,13 +137,13 @@ class EarlierRootCreditTests(unittest.TestCase):
                 "b_s3": (None, None, None, "b_s3", 0, 8),
             }
             with patch.object(
-                matched_root_credit, "early_sources", return_value=(early, nodes)
+                matched_span_data, "early_sources", return_value=(early, nodes)
             ):
-                rows = matched_root_credit.root_units(None, None, None)
+                rows = matched_span_data.root_units(None, None, None)
                 self.assertEqual(
                     [(r["node"], r["background"], r["credit"]) for r in rows],
                     [("a_s1", 1, -0.1), ("b_s3", 0, 0.0)],
                 )
                 (audit / "outcomes/p.json").write_text("{}")
                 with self.assertRaises(ValueError):
-                    matched_root_credit.root_units(None, None, None)
+                    matched_span_data.root_units(None, None, None)

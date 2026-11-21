@@ -2,10 +2,17 @@
 import argparse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import os
 import time
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+
+def rest_after_work(started, fraction):
+    active = time.monotonic() - started
+    time.sleep(active * (1 / fraction - 1))
+    return active
 
 
 class DutyCycle:
@@ -17,8 +24,7 @@ class DutyCycle:
     def rest(self):
         for device in range(self.devices):
             torch.cuda.synchronize(device)
-        elapsed = time.monotonic() - self.started
-        time.sleep(elapsed * (1 / self.fraction - 1))
+        rest_after_work(self.started, self.fraction)
         self.started = time.monotonic()
 
 
@@ -125,3 +131,29 @@ def main():
 
 if __name__ == "__main__":
     main()
+elif os.environ.get("MEMSKILL_VLLM_DUTY"):
+    # vLLM imports this module by its worker class name in each tensor-parallel process.
+    from vllm.v1.worker.gpu_worker import Worker
+
+    class DutyLimitedWorker(Worker):
+        def init_device(self):
+            self.target_duty = float(os.environ["MEMSKILL_VLLM_DUTY"])
+            if not 0 < self.target_duty <= 0.80:
+                raise ValueError("MEMSKILL_VLLM_DUTY must be in (0, 0.80]")
+            super().init_device()
+            self.window_start = time.monotonic()
+            self.window_work = 0.0
+            print(f"MemSkill rank {self.rank} duty target {self.target_duty:.2f}", flush=True)
+
+        def execute_model(self, scheduler_output):
+            start = time.monotonic()
+            result = super().execute_model(scheduler_output)
+            torch.cuda.synchronize(self.device)
+            self.window_work += rest_after_work(start, self.target_duty)
+            now = time.monotonic()
+            window = now - self.window_start
+            if window >= 30:
+                print(f"MemSkill rank {self.rank} forward duty {self.window_work / window:.3f} "
+                      f"over {window:.1f}s", flush=True)
+                self.window_start, self.window_work = now, 0.0
+            return result

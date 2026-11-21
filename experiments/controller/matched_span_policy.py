@@ -14,6 +14,7 @@ from experiments.controller.matched_span_data import (
     extra_units,
     features,
     original_units,
+    root_units,
 )
 from experiments.controller.passage_advantage import evaluate
 from experiments.controller.passage_evidence_actor import gpu
@@ -224,8 +225,6 @@ def freeze(base, study, corpus, stage):
         )
         arms = (*arms, "original")
     if stage == "root-augmented":
-        from experiments.controller.matched_root_credit import root_units
-
         root_dir = root / "earlier-root-sources"
         more = features(root_dir, root_dir, root_dir / "complete.json")
         if any(vals[n] != more[n] for n in vals.keys() & more):
