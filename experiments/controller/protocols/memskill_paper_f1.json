@@ -57,6 +57,10 @@
     "layer": "op_net.2.weight",
     "motivation": "After the actor projection preserved the action at every rank on conv-26, test the final skill encoder projection. It transforms each candidate embedding before it is paired with the state. Inherit the same calibration, transfer and selection rules. Make no layer or rank choices using QA outcomes."
   },
+  "frozen_skill_projection_outcome": {
+    "split": "train", "treatment": "projected", "questions": 885,
+    "design": "After both fixed test baselines have been verified, deploy the selected skill projection from conv-26 on all six complete original training conversations. Keep the matrix fixed, rebuild each bank from empty, and compare every prediction with the same-model native training run using exact shared requests. Report each history and the paired question mean. This outcome does not select a rank or qualify a policy for testing."
+  },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,

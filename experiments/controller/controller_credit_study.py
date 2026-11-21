@@ -134,6 +134,41 @@ def screen_forward_rank(native, checkpoint, out, history, *, skill_projection=Fa
     register(out / (history + ".json"), result)
 
 
+def load_training_projection(base, root, plan, paper):
+    """Load the frozen skill matrix against the native run and original scoring receipts."""
+    from experiments.designer.paper_date_pair import CHECKPOINT_SHA
+    from experiments.controller.paper_f1 import read_locked_json
+
+    native_reference = Path(str(base) + "-locomo-train") / "locomo"
+    verified = read(base / "paired-baselines-verified.json")
+    if verified["scorer_commit"] != paper["upstream_revision"]:
+        raise ValueError("Expected the author-scored paired baselines")
+    for dataset, source in (("locomo", Path(str(base) + "-locomo-batch64")), ("longmemeval", base)):
+        receipt = verified["datasets"][dataset]
+        original = read_locked_json(source / dataset / "baseline.json", receipt["baseline_sha256"])
+        if original["questions"] != receipt["questions"] or original["questions"] != paper["datasets"][dataset]["scored_questions"]:
+            raise ValueError("Incomplete paired baselines")
+    if (native_reference.resolve() == root.resolve() or not (native_reference / "baseline.json").is_file()
+            or read(native_reference / "baseline.json")["questions"] != paper["frozen_skill_projection_outcome"]["questions"]
+            or read(native_reference / "protocol.json") != plan):
+        raise ValueError("Expected a separate complete native training run with matching inference settings")
+    study = base / "legacy-rank-audit/training-controller-dispersion/rank-skill-projection"
+    rule = paper["forward_rank_boundary"] | paper["forward_rank_skill_projection"]
+    sid = rule["calibration"]
+    receipt = read(study / f"{sid}-upstream-verification.json")
+    calibration = read_locked_json(study / f"{sid}.json", receipt["report_sha256"])
+    rank = calibration["selected_rank"]
+    if (calibration["method"] != rule or calibration["history"] != sid or calibration["checkpoint_sha256"] != CHECKPOINT_SHA
+            or receipt["upstream"] != paper["upstream_revision"]
+            or calibration["input_sha256"] != file_hash(native_reference / "native" / sid / "controller-inputs.npz")
+            or rank is None or rank != receipt["selected_rank"] or calibration["weight_sha256"] != receipt["weight_sha256"]):
+        raise ValueError("Missing a verified training-selected skill projection")
+    projection = read_locked_json(study / "frozen-weight.json", calibration["weight_sha256"])
+    metadata = {"layer": rule["layer"], "rank": rank, "weight_sha256": calibration["weight_sha256"],
+                "calibration_sha256": receipt["report_sha256"], "outcome": paper["frozen_skill_projection_outcome"]}
+    return native_reference, metadata, projection
+
+
 def state_features(states):
     """Give the native session and retrieved-memory embeddings equal feature weight."""
     if states.shape[-1] % 2 or not states.isfinite().all():

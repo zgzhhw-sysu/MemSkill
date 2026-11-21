@@ -254,6 +254,14 @@ def summarize_if_complete(dataset, output, questions, types, active_arms, publis
         dated = 100 * mean(scores_by_arm["dated"].values())
         summary.update(dated_f1=dated, gain_f1_points=dated - native,
                        paired=compare_revisions(arms["native"], arms["dated"]))
+    if "projected" in scores_by_arm:
+        projected = scores_by_arm["projected"]
+        deltas = {k: projected[k] - v for k, v in scores_by_arm["native"].items()}
+        summary.update(projected_f1=100 * mean(projected.values()), gain_f1_points=100 * mean(deltas.values()),
+                       higher=sum(v > 0 for v in deltas.values()), lower=sum(v < 0 for v in deltas.values()),
+                       equal=sum(v == 0 for v in deltas.values()))
+        summary["by_history"] = {sid: {arm: 100 * mean(v for k, v in vals.items() if k[0] == sid)
+                                       for arm, vals in scores_by_arm.items()} for sid in histories}
     if "span" in scores_by_arm:
         for arm in active_arms:
             summary[arm + "_f1"] = 100 * mean(scores_by_arm[arm].values())
@@ -386,6 +394,13 @@ def run(args, root, rank, workers):
             plan["training_swap"].update(repeat=repeat, arms="independent-postfork-v1",
                                          usage_sha256=file_hash(original / "usage.jsonl"))
     native_reference = None
+    projection_base = os.environ.get("MEMSKILL_FROZEN_SKILL_PROJECTION")
+    if projection_base:
+        if (split != "train" or args.dataset != "locomo" or credit_base or swap_history
+                or len(questions) != paper["frozen_skill_projection_outcome"]["questions"]):
+            raise ValueError("The frozen skill projection requires the complete original LoCoMo training cohort")
+        from experiments.controller.controller_credit_study import load_training_projection
+        native_reference, plan["skill_projection"], projection = load_training_projection(Path(projection_base), root, plan, paper)
     if credit_base:
         from experiments.controller.controller_credit_study import freeze_paper_credit, learned_skill_boundary
         native_run = "-locomo-batch64" if split == "test" else "-locomo-validation"
@@ -429,11 +444,21 @@ def run(args, root, rank, workers):
             raise ValueError("Expected one shared Qwen encoder for the serial comparison")
         base.model[0].auto_model.config.use_cache = False
     trainer.load_checkpoint(args.load_checkpoint)
+    if projection_base:
+        import torch
+        weight = trainer.controller.get_parameter(plan["skill_projection"]["layer"])
+        replacement = torch.tensor(projection, device=weight.device, dtype=weight.dtype)
+        if not weight.is_cuda or replacement.shape != weight.shape or not torch.isfinite(replacement).all():
+            raise ValueError("Invalid frozen GPU skill projection")
+        with torch.no_grad():
+            weight.copy_(replacement)
     skill = trainer.operation_bank.operations[SKILL]
     types = {row["question_id"]: row["question_type"] for row in samples} if args.dataset == "longmemeval" else {}
     active_arms = ("native",) if os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") == "1" else tuple(VERSIONS)
     if credit_base:
         active_arms = (*model["treatments"], "rate")
+    if projection_base:
+        active_arms = ("projected",)
     with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
         if swap_history:
             sample, = [s for s in samples if trainer.data_processor.get_sample_id(s) == swap_history]

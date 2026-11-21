@@ -268,6 +268,21 @@ class PaperF1Test(unittest.TestCase):
             self.assertEqual(training["native_f1"], 75)
             self.assertNotIn("paper_f1", training)
 
+            study = root / "projection"
+            outcome = study / "comparison.json"
+            for sid, prediction in (("a", "red, blue"), ("b", "running")):
+                folder = study / "projected" / sid
+                folder.mkdir(parents=True)
+                (folder / "scores.json").write_text(json.dumps({"answers": [
+                    {"sample_id": sid, "qa_index": 0, "prediction": prediction}
+                ]}))
+            summarize_if_complete("locomo", outcome, questions, {}, ["projected"], None, split="train", native_root=root)
+            measured = json.loads(outcome.read_bytes())
+            self.assertEqual((measured["questions"], measured["higher"], measured["equal"], measured["lower"]), (2, 1, 1, 0))
+            self.assertEqual(measured["projected_f1"], 100)
+            self.assertEqual(measured["gain_f1_points"], 25)
+            self.assertEqual(measured["by_history"]["a"], {"native": 50, "projected": 100})
+
     def test_native_scores_use_original_keys_and_references(self):
         questions = {("a", 2): {"answer": "red, blue", "category": 1},
                      ("a", 5): {"answer": "running; other", "category": 3}}
