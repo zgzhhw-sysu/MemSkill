@@ -35,14 +35,17 @@ case $mode in
             until [[ -f "$parent/writer-format-verified/forecast.json" && -f "$earlier/writer-format-verified/forecast.json" ]]; do sleep 20; done
         fi
         until [[ -f "$input" && -f "$parent/checkpoint-odds/forecast.json" ]]; do sleep 20; done ;;
-    outlier-total|outlier-components)
+    outlier-total|outlier-components|outlier-initial|outlier-final)
         gpu=0
         out="$parent/$mode"
         cmd=(experiments.controller.shared_outlier_policy "$base" "$mode")
         early="$base/source-compression/earliest-three-skills"
         shared="$base/source-compression/writer-format-credit/shared"
         until [[ -f "$early/temporal-gate/forecast.json" && -f "$shared/registration.json" ]]; do sleep 15; done
-        if [[ $mode == outlier-components ]]; then until [[ -f "$shared/outcomes-complete.json" ]]; do sleep 20; done; fi ;;
+        if [[ $mode == outlier-initial || $mode == outlier-final ]]; then
+            until [[ -f "$early/shared-weak-credit/${mode#outlier-}.json" && -f "$parent/outlier-components/forecast.json" ]]; do sleep 15; done
+        fi
+        if [[ $mode != outlier-total ]]; then until [[ -f "$shared/outcomes-complete.json" ]]; do sleep 20; done; fi ;;
     temporal-gate)
         gpu=0
         out="$parent/temporal-gate"

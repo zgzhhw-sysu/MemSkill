@@ -203,12 +203,33 @@ def report(base, forecast):
                 [[float("nan") if v is None else v for v in row] for row in values]
             )
             bounds = contrast_bounds(delta, table).tolist()
+            controls = {}
+            for key_control in ("zero_new", "previous"):
+                if key_control not in s.get("outlier", {}):
+                    continue
+                reference = t(raw) + t(s["outlier"][key_control])
+                shift = 0.8 * (
+                    (t(changed) / 0.05).softmax(0) - (reference / 0.05).softmax(0)
+                )
+                if name in covered:
+                    issued = covered[name]["p"]
+                    if not torch.allclose(
+                        shift,
+                        t(issued["credit"]) - t(issued[key_control]),
+                        rtol=0,
+                        atol=1e-12,
+                    ):
+                        raise ValueError(
+                            "Expanded-credit comparison changed the issued probabilities"
+                        )
+                controls[key_control] = contrast_bounds(shift, table).tolist()
         windows[name] = {
             "n": len(values),
             "status": status,
             "three_skill_status": full["excluded"].get(name),
             "known": [sum(row[j] is not None for row in values) for j in range(3)],
             "sum_delta_bounds": bounds,
+            **({"controls": controls} if controls else {}),
             "probability_delta": delta.tolist(),
         }
         sources[name] = hashes
@@ -235,6 +256,13 @@ def report(base, forecast):
                 r["n"] for r in windows.values() if r["status"] == "triplet"
             ),
             "known": [sum(r["known"][j] for r in windows.values()) for j in range(3)],
+            **{
+                "credit_minus_" + c: [
+                    sum(w["controls"][c][j] for w in windows.values()) / n
+                    for j in range(2)
+                ]
+                for c in next(iter(windows.values())).get("controls", {})
+            },
             "credit_minus_raw": [
                 sum(r["sum_delta_bounds"][j] for r in windows.values()) / n
                 for j in range(2)

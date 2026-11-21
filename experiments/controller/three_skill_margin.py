@@ -466,7 +466,9 @@ def score(
         active = [v for v in by_history.values() if v["questions"]]
         intervals = {}
         if len(active) >= 2:
-            for arm in ("raw", "rotated", "native", "uniform"):
+            baselines = ["raw", "rotated", "native", "uniform"]
+            baselines.extend(k for k in ("zero_new", "previous") if k in extra_controls)
+            for arm in baselines:
                 intervals[arm] = paired_interval(
                     [v["questions"] for v in active],
                     [v["f1"]["credit"] - v["f1"][arm] for v in active],
