@@ -447,7 +447,7 @@ class PPOController(nn.Module):
     def forward(self, state_embedding: torch.Tensor,
                 op_embeddings: torch.Tensor,
                 deterministic: bool = False,
-                new_op_mask: Optional[torch.Tensor] = None, *, record_noise=None, replay_noise=None
+                new_op_mask: Optional[torch.Tensor] = None, *, record_noise=None, replay_noise=None, policy_trace=None
                 ) -> Tuple[Union[int, List[int]], float, float]:
         """
         Forward pass with action selection (supports top-K)
@@ -457,6 +457,7 @@ class PPOController(nn.Module):
             op_embeddings: [num_ops, op_dim]
             deterministic: If True, always select top actions by logits
             new_op_mask: Optional mask for new action bias
+            policy_trace: If supplied, record logits and first-draw probabilities from this forward pass
 
         Returns:
             - action: int (if K=1) or List[int] (if K>1) selected action indices
@@ -486,6 +487,9 @@ class PPOController(nn.Module):
 
         num_ops = logits.shape[0]
         k = min(self.action_top_k, num_ops)  # Can't select more than available ops
+        if policy_trace is not None:
+            scores = logits.detach()
+            policy_trace.update(logits=scores.tolist(), first_draw_probabilities=scores.softmax(dim=-1).tolist())
 
         if k == 1:
             # Original single-action behavior

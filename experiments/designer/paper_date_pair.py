@@ -119,6 +119,8 @@ def run(args, root, rank, workers):
             "seed": args.seed, "temperature": args.temperature, "max_writer_tokens": args.max_new_tokens,
             "history_workers": workers, "memory_search": memory_search,
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
+    if os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") == "1":
+        plan["native_policy_trace"] = "first-draw-logits-v1"
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

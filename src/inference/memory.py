@@ -1,4 +1,5 @@
 """Construct, merge and cache memory banks for inference."""
+import hashlib
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,7 +41,9 @@ def _extract_memory_actions_step(trainer: BaseTrainer,
     state_tensor = torch.tensor(state_embedding, dtype=torch.float32).to(trainer.device)
     op_tensor = torch.tensor(op_embeddings, dtype=torch.float32).to(trainer.device)
 
-    action_idx, _, _ = trainer.controller(state_tensor, op_tensor, deterministic=True)
+    record_policy = memory_bank.trace is not None and os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") == "1"
+    policy_options = {"policy_trace": {}} if record_policy else {}
+    action_idx, log_prob, _ = trainer.controller(state_tensor, op_tensor, deterministic=True, **policy_options)
     if isinstance(action_idx, list):
         selected_ops = [candidate_ops[idx] for idx in action_idx]
     else:
@@ -59,6 +62,12 @@ def _extract_memory_actions_step(trainer: BaseTrainer,
     if memory_bank.trace is not None:
         memory_bank.trace.begin(memory_bank.timestep, session_text, executor_ops, retrieved_memories,
                                 retrieved_indices, selected=selected_ops)
+        if record_policy:
+            memory_bank.trace.current["policy"] = {
+                **policy_options["policy_trace"], "candidates": [op.name for op in candidate_ops],
+                "ordered_log_probability": log_prob,
+                "state_sha256": hashlib.sha256(np.asarray(state_embedding, dtype=np.float32).tobytes()).hexdigest(),
+            }
         memory_bank.trace.current["executor_responses"] = audit["audit"]
     operation_names = []
     seen = set()

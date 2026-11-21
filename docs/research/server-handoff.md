@@ -1,4 +1,12 @@
-# MemSkill 换机交接 · 2026-11-20
+# MemSkill 换机交接
+
+## Llama-3.1-8B 基线（2026-11-21）
+
+251 的 3、4 号 GPU 运行 BF16 写入与问答。研究分支和 `main` 均发布到 `zgzhhw-sysu/MemSkill`。两套测试各自完成后，在 248 的 `~/Documents/研究生大论文/runs/llama31-paper-v1/<数据集>/upstream-score.json` 查看作者代码独立复算的 F1。LoCoMo 的两段对话还有各自的 `native/conv-*/upstream-score.json`。[模型、Controller 与测试设置](llama31-paper-pair.md) · [251 服务和日志](server-251.md)
+
+248 的 `memskill-pull-llama31-native-v1` 用户服务收回逐题预测、已完成历史的记忆库、轨迹以及它们引用的贪心请求缓存。在 248 的 `llama31-paper-v1` 目录运行 `sha256sum --quiet -c locomo/native/conv-49/recovery.sha256` 可核验一段对话。迁移时保留数据集目录和同级 `greedy-cache/`，同时复制 251 的 `~/memskill-work/models/Llama-3.1-8B-Instruct/`、Qwen3-Embedding-0.6B 和运行协议中指定的 `conversation_controller.pt`。用 `verified-model.json` 和 `verified-qwen.json` 核对权重版本。11 月 20 日的迁移包内是较早的 Llama-3-8B 权重。
+
+## Llama-3-8B 历史实验
 
 251 的写入格式复核与新增因果样本结果分别在 `source-compression/writer-block-repair/` 和 `late-pairs/selection-labels/`，均由 248 自动收回。后期策略加入第 9–12 个 session 的 88 题后，只在之后的 378 题上计分。[运行与恢复方法](server-251.md#写入格式复核和后续因果训练样本)
 

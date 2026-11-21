@@ -93,6 +93,19 @@ class SpanCreditTest(unittest.TestCase):
                 self.assertEqual(recorded, controller(state, ops, replay_noise=noise))
                 self.assertTrue(torch.equal(untouched_rng, torch.get_rng_state()))
 
+    def test_native_trace_records_the_same_forward_that_selected_the_skills(self):
+        controller = PPOController(state_dim=4, op_dim=3, hidden_dim=8, device="cpu", action_top_k=3)
+        state, ops = torch.randn(4), torch.randn(5, 3)
+        expected = controller(state, ops, deterministic=True)
+        trace = {}
+        with patch.object(controller.actor_head, "forward", wraps=controller.actor_head.forward) as head:
+            actual = controller(state, ops, deterministic=True, policy_trace=trace)
+        head.assert_called_once()
+        self.assertEqual(actual, expected)
+        scores = torch.tensor(trace["logits"])
+        self.assertEqual(scores.topk(3).indices.tolist(), actual[0])
+        torch.testing.assert_close(torch.tensor(trace["first_draw_probabilities"]), scores.softmax(-1))
+
     def test_swap_is_fixed_k_distinct_and_does_not_modify_the_sample(self):
         ops = [dict(name=n, update_type=t) for n,t in (("a","DELETE"), ("b","UPDATE"), ("c","INSERT"))]
         selected = ops[:2]
