@@ -10,7 +10,7 @@ export MEMSKILL_MODEL_MANIFEST="$work/models/Llama-3.1-8B-Instruct/verified-mode
 export MEMSKILL_BACKEND_ID=llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1
 export MEMSKILL_PAPER_NATIVE_ONLY=1
 export MEMSKILL_PAPER_SPLIT=test
-unset MEMSKILL_LONGMEMEVAL_LAUNCHER MEMSKILL_STATE_CREDIT_BASE MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_SWAP_REPEAT MEMSKILL_NATIVE_TRAIN_ROOT
+unset MEMSKILL_FROZEN_SKILL_PROJECTION MEMSKILL_LONGMEMEVAL_LAUNCHER MEMSKILL_STATE_CREDIT_BASE MEMSKILL_SWAP_HISTORY MEMSKILL_SWAP_SPAN MEMSKILL_SWAP_REPEAT MEMSKILL_NATIVE_TRAIN_ROOT
 report=baseline.json
 mode=${1:-baseline}
 datasets=(locomo longmemeval)
@@ -34,7 +34,7 @@ case "$mode" in
         export MEMSKILL_MEMORY_SEARCH=cuda-skylakex PYTORCH_ALLOC_CONF=expandable_segments:True
         export MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
         ;;
-    locomo-batch64|locomo-train|locomo-validation|locomo-train-swap|locomo-credit-validation|locomo-credit-test)
+    locomo-batch64|locomo-train|locomo-train-projection|locomo-validation|locomo-train-swap|locomo-credit-validation|locomo-credit-test)
         datasets=(locomo)
         encoder_batch=64
         run="$baseline_run-$mode"
@@ -56,6 +56,12 @@ case "$mode" in
                 export MEMSKILL_SWAP_REPEAT="$4"
                 run="$run/repeats/$4"
             fi
+        elif [[ "$mode" == locomo-train-projection ]]; then
+            test -s "$baseline_run/paired-baselines-verified.json"
+            test -s "$baseline_run-locomo-train/locomo/baseline.json"
+            export MEMSKILL_PAPER_SPLIT=train MEMSKILL_FROZEN_SKILL_PROJECTION="$baseline_run"
+            export MEMSKILL_GREEDY_EVAL_CACHE="$baseline_run-locomo-train/greedy-cache"
+            report=comparison.json
         elif [[ "$mode" == locomo-credit-test ]]; then
             test -s "$baseline_run/paired-baselines-verified.json"
             test -s "$baseline_run-locomo-credit-validation/locomo/upstream-score.json"
@@ -75,7 +81,7 @@ case "$mode" in
         export PYTORCH_ALLOC_CONF=expandable_segments:True
         ;;
     paired) export MEMSKILL_PAPER_NATIVE_ONLY=0; report=comparison.json ;;
-    *) echo "Expected backend, baseline, longmemeval-launcher, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap, locomo-credit-validation, locomo-credit-test or paired" >&2; exit 2 ;;
+    *) echo "Expected backend, baseline, longmemeval-launcher, locomo-batch64, locomo-train, locomo-validation, locomo-train-projection, locomo-train-swap, locomo-credit-validation, locomo-credit-test or paired" >&2; exit 2 ;;
 esac
 export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH="${MEMSKILL_MEMORY_SEARCH:-cuda}"
 if [[ "$MEMSKILL_MEMORY_SEARCH" == cuda-skylakex ]]; then
