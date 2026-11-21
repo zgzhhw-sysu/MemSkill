@@ -19,7 +19,7 @@ from src.credit_assignment import recovered
 from src.eval import get_evaluator
 from src.evaluation_cache import read_response
 from src.eval_utils import normalize_answer
-from src.replay import restore_text
+from src.replay import verified_reader_contexts
 
 
 def read(path):
@@ -74,35 +74,12 @@ def audit_rate_control(study, weights):
 
 
 def reader_inputs(events, scored_rows, questions, evaluator):
-    """Rebuild the ordered evidence for each QA from the final, versioned memory bank."""
-    spans = [e for e in events if e["kind"] == "span"]
-    live = restore_text(spans)
-    snapshot, = [e for e in events if e["kind"] == "snapshot"]
-    versions = {(change["memory_id"], change["version"]): (span["span_id"], change["after"])
-                for span in spans for change in span["changes"]}
-    last_version = {memory_id: version for memory_id, version in versions}
-    final = [tuple(ref) for ref in snapshot["memory_refs"]]
-    if (final != [(mid, last_version[mid]) for mid in live]
-            or [versions[ref][1] for ref in final] != list(live.values())
-            or snapshot["text_sha256"] != hashlib.sha256(
-                json.dumps(list(live.items()), ensure_ascii=False).encode()).hexdigest()):
-        raise ValueError("Final memory references or contents disagree with the write trace")
-    answers = {row["qa_index"]: row for row in scored_rows}
+    contexts = verified_reader_contexts(events, scored_rows, questions)
     result = {}
-    for query in (e for e in events if e["kind"] == "qa"):
-        index = query["query_id"]
-        row, question = answers[index], questions[index]
-        if any(i < 0 or i >= len(final) for i in row["retrieved_indices"]):
-            raise ValueError(f"Invalid retrieved index for question {index}")
-        refs = [final[i] for i in row["retrieved_indices"]]
-        if (index in result or not query["success"] or query["refs"] != [list(ref) for ref in refs]
-                or query["question"] != question["question"] or query["prediction"] != row["prediction"]
-                or query["tokens"] != row["tokens"] or not math.isclose(query["f1"], row["f1"])):
-            raise ValueError(f"Reader trace disagrees with scored question {index}")
-        prompt = evaluator.build_prompt(question["question"], [versions[ref][1] for ref in refs], question)
-        result[index] = (hashlib.sha256(prompt.encode()).hexdigest(), {versions[ref][0] for ref in refs})
-    if result.keys() != answers.keys():
-        raise ValueError("Incomplete reader trace")
+    for index, context in contexts.items():
+        question = questions[index]
+        prompt = evaluator.build_prompt(question["question"], [text for _, text in context], question)
+        result[index] = hashlib.sha256(prompt.encode()).hexdigest(), {span for span, _ in context}
     return result
 
 

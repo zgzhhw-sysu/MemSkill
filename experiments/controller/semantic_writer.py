@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
-from experiments.controller import file_hash, read, register
+from experiments.controller import file_hash, read, register, text_hash as sha
 from experiments.controller.factorial_repairs import answer, checked_cell, replay_writes
 from experiments.controller.paired_grounding import window
 from src.credit_assignment import _digest, execution_fault
@@ -23,10 +23,6 @@ from src.replay import dated_turn_groups, restore_text
 
 PLAN = Path(__file__).with_name("protocols") / "semantic_writer.json"
 TEMP, REL = "capture_temporal_context", "handle_entity_relationships"
-
-
-def sha(text):
-    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def source_offsets(calibration, target):

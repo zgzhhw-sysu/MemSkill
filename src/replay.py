@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import re
 import hashlib
 import json
+import math
 
 
 def anchor_relative_time(turn):
@@ -155,6 +156,38 @@ def _boundary_slots(span):
     if scores[chosen[-1]] == scores[incoming]:
         raise ValueError("Equal boundary logits cannot implement this intervention")
     return chosen[-1], incoming
+
+
+def verified_reader_contexts(events, scored_rows, questions):
+    """Rebuild the ordered evidence for each QA from the final, versioned memory bank."""
+    spans = [e for e in events if e["kind"] == "span"]
+    live = restore_text(spans)
+    snapshot, = [e for e in events if e["kind"] == "snapshot"]
+    versions = {(change["memory_id"], change["version"]): (span["span_id"], change["after"])
+                for span in spans for change in span["changes"]}
+    last_version = {memory_id: version for memory_id, version in versions}
+    final = [tuple(ref) for ref in snapshot["memory_refs"]]
+    if (final != [(mid, last_version[mid]) for mid in live]
+            or [versions[ref][1] for ref in final] != list(live.values())
+            or snapshot["text_sha256"] != hashlib.sha256(
+                json.dumps(list(live.items()), ensure_ascii=False).encode()).hexdigest()):
+        raise ValueError("Final memory references or contents disagree with the write trace")
+    answers = {row["qa_index"]: row for row in scored_rows}
+    result = {}
+    for query in (e for e in events if e["kind"] == "qa"):
+        index = query["query_id"]
+        row, question = answers[index], questions[index]
+        if any(i < 0 or i >= len(final) for i in row["retrieved_indices"]):
+            raise ValueError(f"Invalid retrieved index for question {index}")
+        refs = [final[i] for i in row["retrieved_indices"]]
+        if (index in result or not query["success"] or query["refs"] != [list(ref) for ref in refs]
+                or query["question"] != question["question"] or query["prediction"] != row["prediction"]
+                or query["tokens"] != row["tokens"] or not math.isclose(query["f1"], row["f1"])):
+            raise ValueError(f"Reader trace disagrees with scored question {index}")
+        result[index] = [versions[ref] for ref in refs]
+    if result.keys() != answers.keys():
+        raise ValueError("Incomplete reader trace")
+    return result
 
 
 @contextmanager

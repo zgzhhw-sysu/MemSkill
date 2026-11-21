@@ -15,6 +15,20 @@ def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def text_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def measured_answer(prompt, model, q, ev, cache):
+    from src.llm_utils import get_llm_response_via_api
+
+    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)
+    answer, n_in, n_out = get_llm_response_via_api(
+        prompt, LLM_MODEL=model, MAX_TOKENS=32, TAU=0.0, base_url=os.environ["MEMSKILL_API_BASE"],
+        api_key=os.environ.get("MEMSKILL_API_KEY", "local-only"))
+    return {"answer": answer, "tokens": [n_in, n_out], "f1": ev.compute_f1(answer, ev.get_ground_truth(q), q)}
+
+
 def register(path, report):
     """Atomically create a receipt. Concurrent repeat runs must agree."""
     with TemporaryDirectory(dir=path.parent) as temp:

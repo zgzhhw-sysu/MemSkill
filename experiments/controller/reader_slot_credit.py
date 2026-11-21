@@ -11,17 +11,10 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
-from experiments.controller import file_hash, read, register
-from experiments.controller.audit_paired import reader_inputs
-from experiments.controller.capped_source_policy import baseline, joint_evidence
-from experiments.controller.capped_source_repair import BACKEND as EARLY
-from experiments.controller.capped_source_repair import archive
-from experiments.controller.first_evidence_credit import BACKEND as DONOR
-from experiments.controller.semantic_writer import sha
-from experiments.controller.writer_granularity import measured_answer
+from experiments.controller import file_hash, measured_answer, read, register, text_hash as sha
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import read_response, request_cache
-from src.replay import restore_text
+from src.replay import restore_text, verified_reader_contexts
 
 PLAN = Path(__file__).with_name("protocols") / "reader_slot_credit.json"
 
@@ -74,14 +67,8 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         raise ValueError("Original trace or scores changed")
     events = [json.loads(line) for line in trace.read_bytes().splitlines()]
     spans = [s for s in events if s["kind"] == "span"]
-    queries = {q["query_id"]: q for q in events if q["kind"] == "qa"}
     rows = read(scores)["answers"]
-    inputs = reader_inputs(events, rows, questions, ev)
-    versions = {
-        (c["memory_id"], c["version"]): (i, c["after"])
-        for i, s in enumerate(spans)
-        for c in s["changes"]
-    }
+    verified = verified_reader_contexts(events, rows, questions)
     calls = [
         r
         for l in (cell / "usage.jsonl").read_bytes().splitlines()
@@ -96,20 +83,13 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         raise ValueError("Missing or duplicate native question")
     for i, q in questions.items():
         row = by_question[i]
-        ctx = [versions[tuple(ref)] for ref in queries[i]["refs"]]
+        ctx = verified[i]
         prompt = ev.build_prompt(q["question"], [text for _, text in ctx], q)
+        prompt_hash = sha(prompt)
         key = reader_key(model, prompt)
         if not by_key.get(key):
             raise ValueError(f"Missing physical reader request at {cell}, reader {i}")
         logged = by_key[key].pop()
-        if (
-            row["qa_index"] != i
-            or key != logged["cache_key"]
-            or sha(prompt) != inputs[i][0]
-        ):
-            raise ValueError(
-                f"Physical reader request differs at {cell}, reader {i}: key={key == logged['cache_key']}, prompt={sha(prompt) == inputs[i][0]}"
-            )
         hit = read_response(cache, key)
         if not hit or hit["sha256"] != logged["response_sha256"]:
             raise ValueError("Physical response has changed")
@@ -118,7 +98,7 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         if (
             v["response"].strip() != row["prediction"]
             or v["tokens"] != row["tokens"]
-            or v["prompt_sha256"] != inputs[i][0]
+            or v["prompt_sha256"] != prompt_hash
             or not math.isclose(score, row["f1"], abs_tol=1e-12)
         ):
             raise ValueError("Reader endpoint does not reproduce")
@@ -128,7 +108,7 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
                 "answer": v["response"],
                 "tokens": v["tokens"],
                 "f1": score,
-                "prompt_sha256": inputs[i][0],
+                "prompt_sha256": prompt_hash,
                 "key": key,
                 "response_sha256": hit["sha256"],
             }
@@ -144,7 +124,10 @@ def endpoint(cell, cache, expected, qa, ev, model):
 
 
 def prepare(base, study, corpus, *, verify=False):
-    base / "late-pairs"
+    from experiments.controller.capped_source_policy import baseline, joint_evidence
+    from experiments.controller.capped_source_repair import BACKEND as EARLY, archive
+    from experiments.controller.first_evidence_credit import BACKEND as DONOR
+
     parent = base / "source-compression/capped-source-credit"
     out = base / "source-compression/reader-slot-credit"
     out.mkdir(exist_ok=True)
@@ -304,6 +287,8 @@ def prepare(base, study, corpus, *, verify=False):
 
 
 def measure_response(base, out, backend, model, q, h, p, ev):
+    from experiments.controller.capped_source_repair import BACKEND as EARLY, archive
+
     os.environ["MEMSKILL_BACKEND_ID"] = backend
     cache = out / "responses"
     os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)

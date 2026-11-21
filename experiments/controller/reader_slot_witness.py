@@ -6,16 +6,13 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register, text_hash as sha
+from experiments.controller.capped_source_repair import archive
 from experiments.controller.reader_slot_credit import (
-    archive,
     endpoint,
     measure_response,
-    read,
-    register,
-    sha,
     slots,
 )
-from experiments.controller.source_compression import file_hash
 from src.credit_assignment import recovered
 from src.eval.locomo import LoCoMoEvaluator
 from src.replay import restore_text
