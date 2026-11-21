@@ -48,6 +48,12 @@ Run the following command from the repository root to see the available options.
 python main.py --help
 ```
 
+## 研究总结与交接
+
+- 查阅同模型基线、逐题 F1 的计算口径和固定测试划分。[Llama-3.1-8B 基线与对照](docs/research/llama31-paper-pair.md) · [论文评测协议](docs/research/memskill-paper-f1.md)
+- 查阅 Controller 选技实验的假设、已观察到的结果和正式评测条件。[算法实验笔记](docs/research/algorithm-notes.md) · [Span 信用配对实验](docs/research/span-credit-paired.md)
+- 换机时先从源服务器复制私有实验材料，再按交接文档恢复运行环境。文中标为本地的路径以 MemSkill 工作区为起点。[换机交接](docs/research/server-handoff.md) · [251 运行说明](docs/research/server-251.md)
+
 ## 🧩 Overview
 
 **MemSkill** is a framework for learning and evolving **memory skills** for long-horizon agents. It replaces static, hand-designed memory operations with a data-driven loop where skills are **learned, refined, and reused** from task feedback, enabling more adaptive memory construction across settings.

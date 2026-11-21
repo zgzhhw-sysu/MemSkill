@@ -6,7 +6,13 @@ __pycache__/
 /exp/
 /scripts/experiments/
 /tests/experiments/
-/docs/research/
+/docs/research/*
+!/docs/research/algorithm-notes.md
+!/docs/research/llama31-paper-pair.md
+!/docs/research/memskill-paper-f1.md
+!/docs/research/server-251.md
+!/docs/research/server-handoff.md
+!/docs/research/span-credit-paired.md
 /runs/
 /outputs/
 /results/
