@@ -16,6 +16,10 @@
     "locomo": {
       "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
       "test_indices": [8, 9],
+      "development_splits": {
+        "train": {"indices": [0, 1, 2, 3, 4, 5], "scored_questions": 885, "scored_key_sha256": "1f3e7fb9bab5f5b2003adfa67d4f6160bfa04d0b043c814662b6cf09d176c489"},
+        "validation": {"indices": [6, 7], "scored_questions": 341, "scored_key_sha256": "809d6962e3f7656c85b84e38ec67c8c012d94c119a28beb64fca9d278d28ffce"}
+      },
       "excluded_category": 5,
       "scored_questions": 314,
       "scored_key_sha256": "13f60907e23796ec66289de04aee6644430d7df7bdedde48e83ebae77baaaf86"
