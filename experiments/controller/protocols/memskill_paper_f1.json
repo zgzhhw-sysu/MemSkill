@@ -1,0 +1,32 @@
+{
+  "paper": "https://arxiv.org/pdf/2602.02474v3",
+  "upstream_revision": "f65b797338033f4f9c34822f1810f9c2747e6022",
+  "metric": "100 * mean(native per-question F1), separately for each dataset",
+  "reported_f1": {
+    "Llama-3.3-70B-Instruct": {"table": 1, "locomo": 44.21, "longmemeval": 31.12},
+    "Qwen3-Next-80B-A3B-Instruct": {"table": 1, "locomo": 42.08, "longmemeval": 25.29},
+    "Llama-3.1-8B-Instruct": {"table": 7, "locomo": 20.59, "longmemeval": 18.13}
+  },
+  "inference_defaults": {
+    "session_mode": "fixed-length", "chunk_size": 512, "chunk_overlap": 64,
+    "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
+    "retriever": "qwen3-embedding-0.6b"
+  },
+  "datasets": {
+    "locomo": {
+      "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+      "test_indices": [8, 9],
+      "excluded_category": 5,
+      "scored_questions": 314,
+      "scored_key_sha256": "13f60907e23796ec66289de04aee6644430d7df7bdedde48e83ebae77baaaf86"
+    },
+    "longmemeval": {
+      "data_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "split_file": "data/longmemeval_s_splits.json",
+      "split_sha256": "d13012b04e6e2d23aa2c57df6ee121ec55be710d7f19b2d0527a1b5457d7031f",
+      "excluded_id_suffix": "_abs",
+      "scored_questions": 101,
+      "scored_key_sha256": "92cdbb8fc3bac13e37b20cf55e246d27a05aa84d0fa6fcc1bc0d4dfa994a2445"
+    }
+  }
+}
