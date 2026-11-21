@@ -279,3 +279,11 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 后期最新的双技能数据为 10 窗 92 题，原生 0.52409，核验信用与基础回报规则同为 0.53102；其中冻结后首次出分的 11 题已单列。分别查看 `selective-rules/later/through-10.json` 的 `all` 和 `strict`，以及 `selective-rules/opportunity/later-10.json` 的逐窗机会界。三技能直接对照已冻结 25 个窗口的原始回报预测，13 道后期题的初始分数为 0.55359，文件在 `direct-allocation/raw-reference/through-09.json`。三个直接复核候选仍按原题号追踪。[逐项指标及解释](algorithm-notes.md#局部规则在后期窗口还有多少改进空间)
 
 首条活动/关系直接信用已收回。conv-26 的原题 20 在活动写入的三种修补下 F1 保持 0，关系写入为 0.85714，逐项回执在 `source-compression/activity-relation-repairs/0/outcomes/conv-26_s5.json`。此前缺少末段替换的 conv-41 四题也已全部复现，活动减时间的窗均 F1 差为 +0.07857。四题证据均位于前一场，详见 `source-compression/earlier-terminal-returns/outcomes/conv-41_s3.json`。
+
+### 三技能直接干预的当前交接
+
+251 时间前缀下的活动／关系三题已经全部裁决。原题 20、110、80 的关系减活动核验信用分别为 +0.85714、−1.00、−0.25。248 镜像下的 `late-pairs/semantic-writer/three-writer/direct-allocation/time/through-10.json` 记录完整模型。后期已测 3 窗、24 题，核验信用 0.577821，原始回报 0.577281，原生 0.564505；两段对话都已在冻结前产生物理答案。原登记后期共 18 窗、161 题，当前只有两类题有返回值。
+
+`skill-graph/complete/` 按同一道题合并多条技能边。`skill-graph/attribution/verified-complete.json` 已核对 25 个决策的单题贡献，`through-10-111.json` 给出整队列的可达范围。`direct-step/` 记录只在内层供样对话选出的放大步长。扩大供样的原题 85 在 `skill-graph/extra-donors/` 中逐项记录，后续策略在 `skill-graph/expanded/`。完整正式测试尚待候选通过预先登记的验证条件。[本轮度量与候选出处](algorithm-notes.md#同一道题上合并三种技能的核验信用) · [251 恢复命令](server-251.md#三种技能在同一道题上的信用)
+
+新增供样的原题 85 已裁决。保留关系技能时三种修补均把 F1 从 0.19355 恢复到 1，故额外选技信用为零。`skill-graph/expanded/through-10.json` 中 24 题的 F1 为 0.573458，等于 `zero_new`。在 `direct-step/decisions/evaluation-10.json` 中，核验信用与原始回报在同一组随机数下选到相同技能，单次回放 F1 都是 0.566282；同目录每窗文件保留实际技能顺序、版本、读写 token 和各策略的换技概率。早期两技能全窗口补测另有两处归档检索顺序不符，排除信息保存在 `source-compression/earlier-terminal-returns/prepared/`。conv-26 原题 89 的控制重放与原生轨迹读到的相同前五项次序不同，conv-30 原题 7 发生在替换分支。
