@@ -275,7 +275,7 @@ def summarize(reports):
     }
 
 
-def run(trainer, study, forecast, train, specs, limit):
+def run(trainer, study, forecast, train, specs, limit, *, prefix_action=0):
     root = forecast.parent
     archive = root / "factorial"
     dest = root / "semantic-writer"
@@ -290,13 +290,25 @@ def run(trainer, study, forecast, train, specs, limit):
         "archive": file_hash(archive / "manifest.json"),
         "backend": os.environ["MEMSKILL_BACKEND_ID"],
     }
+    if prefix_action and not (dest / "source-forecast.json").is_file():
+        raise ValueError("The temporal-prefix source forecast must already be frozen")
     offsets = freeze(trainer, train, specs, dest, identity)
+    source_hash = file_hash(dest / "source-forecast.json")
+    parent = dest
+    if prefix_action == 1:
+        from experiments.controller.relation_prefix_interaction import preregister
+
+        dest = parent / "activity-prefix"
+        dest.mkdir(exist_ok=True)
+        binding = preregister(dest, parent, manifest, identity, source_hash)
+    elif prefix_action != 0:
+        raise ValueError("Unknown prefix action")
     os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(dest / "responses")
     os.environ["MEMSKILL_USAGE_LOG"] = str(dest / "usage.jsonl")
     data = {c["sample_id"]: c for c in train}
     reports = []
     for sid, start in manifest["windows"][:limit]:
-        folder = archive / f"{sid}_s{start}" / "00"
+        folder = archive / f"{sid}_s{start}" / f"{prefix_action}0"
         if not (folder / "scores.json").exists():
             break
         out = dest / f"{sid}_s{start}"
@@ -312,19 +324,26 @@ def run(trainer, study, forecast, train, specs, limit):
                     specs,
                     offsets[sid, start + 1],
                     out,
+                    prefix_action=prefix_action,
                 )
-            register(
-                receipt, dict(v, forecast=file_hash(dest / "source-forecast.json"))
-            )
+            if prefix_action:
+                v.update(prefix_action=prefix_action, registration=binding)
+            register(receipt, dict(v, forecast=source_hash))
         v = read(receipt)
         (trace,) = (folder / "traces").glob("*.jsonl")
-        if v["forecast"] != file_hash(dest / "source-forecast.json") or v[
+        if v["forecast"] != source_hash or v[
             "source_trace"
         ] != file_hash(trace):
             raise ValueError("Published control or source forecast changed")
+        if prefix_action and (v["registration"] != binding or v["prefix_action"] != 1):
+            raise ValueError("Changed activity prefix registration")
         reports.append(v)
         print(sid, start, v["matched"], v.get("reason", ""), flush=True)
     if reports:
+        if prefix_action:
+            from experiments.controller.relation_prefix_interaction import report
+
+            report(parent, dest, archive, manifest, data, len(reports))
         register(dest / f"through-{len(reports)}.json", summarize(reports))
     if len(reports) == len(manifest["windows"]):
         register(dest / "summary.json", summarize(reports))

@@ -205,7 +205,7 @@ def freeze(base, study, corpus, stage):
         "manifest": b["inputs"]["manifest"],
     }
     arms = ARMS
-    if stage == "expanded":
+    if stage != "original":
         extra = root / "earlier-sources"
         more = features(extra, extra, extra / "complete.json")
         if any(vals[n] != more[n] for n in vals.keys() & more):
@@ -223,6 +223,29 @@ def freeze(base, study, corpus, stage):
             original_prefix=file_hash(orig_prefix),
         )
         arms = (*arms, "original")
+    if stage == "root-augmented":
+        from experiments.controller.matched_root_credit import root_units
+
+        root_dir = root / "earlier-root-sources"
+        more = features(root_dir, root_dir, root_dir / "complete.json")
+        if any(vals[n] != more[n] for n in vals.keys() & more):
+            raise ValueError("Changed earlier root source geometry")
+        vals = vals | more
+        extra_roots = root_units(base, study, corpus)
+        zero_units = units + [dict(u, credit=0.0) for u in extra_roots]
+        units = units + extra_roots
+        prior_local = root / "expanded/forecast.json"
+        prior_prefix = root / "expanded/long-prefix/forecast.json"
+        prior = read(prior_local)["by_stage"]
+        ext_prior = read(prior_prefix)["offsets"]
+        inputs.update(
+            root_registration=file_hash(trial / "registration.json"),
+            root_summary=file_hash(q.parent / "legacy-root-symmetry/summary.json"),
+            root_features=file_hash(root_dir / "features.json"),
+            expanded=file_hash(prior_local),
+            expanded_prefix=file_hash(prior_prefix),
+        )
+        arms = (*arms, "expanded", "zero_roots")
     if local.exists() and prefix.exists() and (trial / "edge-audit.json").exists():
         if read(local)["inputs"] != inputs or read(prefix)["inputs"] != {
             **inputs,
@@ -250,6 +273,9 @@ def freeze(base, study, corpus, stage):
                     "raw": fit_receipt(raw),
                     "credit": fit_receipt(model),
                 }
+                if stage == "root-augmented" and j == 0:
+                    zero_model = fit(zero_units, x, h, j, ("credit", "rotated"))
+                    fits[h][str(j)]["zero_roots"] = fit_receipt(zero_model)
                 for n, v in x.items():
                     if n.rsplit("_s", 1)[0] != h:
                         continue
@@ -257,13 +283,32 @@ def freeze(base, study, corpus, stage):
                     predicted[str(j)][n] = physical
                     if n in a["sources"]:
                         item = {**p, "parent": a["by_stage"][str(j)][n]["parent"]}
-                        if stage == "expanded":
+                        if stage != "original":
                             item["original"] = old[str(j)][n]["credit"]
+                        if stage == "root-augmented":
+                            old_credit = prior[str(j)][n]["credit"]
+                            if j == 1 and item["credit"] != old_credit:
+                                raise ValueError(
+                                    "Terminal forecast changed during root repair"
+                                )
+                            item.update(
+                                expanded=old_credit,
+                                zero_roots=deploy(v, raw, zero_model)[0]["credit"]
+                                if j == 0
+                                else old_credit,
+                            )
                         offsets[str(j)][n] = item
                     if j == 1 and n in b["sources"]:
                         item = {**p, "parent": b["offsets"][n]["parent"]}
-                        if stage == "expanded":
+                        if stage != "original":
                             item["original"] = ext_old[n]["credit"]
+                        if stage == "root-augmented":
+                            old_credit = ext_prior[n]["credit"]
+                            if item["credit"] != old_credit:
+                                raise ValueError(
+                                    "Long-prefix terminal forecast changed"
+                                )
+                            item.update(expanded=old_credit, zero_roots=old_credit)
                         ext[n] = item
     if any(set(d) != set(a["sources"]) for d in offsets.values()) or set(ext) != set(
         b["sources"]
@@ -291,7 +336,7 @@ def freeze(base, study, corpus, stage):
             "original": concordance(paired_edges(original), predicted),
             **(
                 {"expanded": concordance(paired_edges(units), predicted)}
-                if stage == "expanded"
+                if stage != "original"
                 else {}
             ),
         },
@@ -321,6 +366,8 @@ def run(base, study, corpus, stage):
     controls = ("raw", "raw_rank", "rotated") + (
         ("original",) if "original" in arms else ()
     )
+    if stage == "root-augmented":
+        controls += ("expanded", "zero_roots")
     score_trial(base, study, corpus, stage, local, prefix, controls)
 
 
@@ -328,7 +375,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     for k in ("base", "study", "corpus"):
         p.add_argument(k, type=Path)
-    p.add_argument("stage", choices=("original", "expanded"))
+    p.add_argument("stage", choices=("original", "expanded", "root-augmented"))
     a = p.parse_args()
     gpu()
     run(a.base, a.study, a.corpus, a.stage)

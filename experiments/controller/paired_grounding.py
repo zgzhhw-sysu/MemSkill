@@ -247,6 +247,7 @@ def main():
     parser.add_argument("--study-phase", required=True, choices=["train", "validation", "test", "probe-omitted", "probe-weaker", "replay-validation-choices", "training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths"])
     parser.add_argument("--study-forecast", type=Path, help="Frozen training-only policy for paired trajectory evaluation")
     parser.add_argument("--study-complete-donors", action="store_true", help="Measure only missing trajectories on the randomized earlier donor block")
+    parser.add_argument("--study-semantic-prefix", choices=(0, 1), type=int, default=0)
     parser.add_argument("--study-pair-limit", type=int, help="Run the first N registered training pairs")
     parser.add_argument("--study-reference", type=Path, help="Completed development study whose observed credit choices to replay")
     parser.add_argument("--study-probe-through", type=int, choices=(4, 6, 8),
@@ -282,6 +283,8 @@ def main():
     if options.study_share_probe_encoder and options.study_phase != "probe-omitted":
         parser.error("--study-share-probe-encoder requires --study-phase probe-omitted")
     paired_trial = options.study_phase in ("training-factorial", "training-late-pairs", "training-cross-prefix", "training-factorial-repairs", "training-semantic-writer", "training-late-semantic-writer", "training-turn-keys", "training-root-repairs", "training-block-repairs", "training-late-selection-labels", "training-temporal-update", "training-temporal-update-audit", "training-capped-source", "training-first-evidence", "training-witness-four-paths")
+    if options.study_semantic_prefix and options.study_phase != "training-semantic-writer":
+        parser.error("--study-semantic-prefix requires training-semantic-writer")
     if options.study_pair_limit is not None and (options.study_phase not in ("training-late-pairs", "training-cross-prefix", "training-semantic-writer", "training-late-semantic-writer", "training-block-repairs", "training-late-selection-labels") or options.study_pair_limit < 1):
         parser.error("--study-pair-limit requires a positive limit and a paired training panel")
     if paired_trial != bool(options.study_forecast):
@@ -399,7 +402,7 @@ def main():
                 run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
             elif options.study_phase == "training-semantic-writer":
                 from experiments.controller.semantic_writer import run
-                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit)
+                run(trainer, out, options.study_forecast, train, specs, options.study_pair_limit, prefix_action=options.study_semantic_prefix)
             elif options.study_phase == "training-factorial-repairs":
                 from experiments.controller.factorial_repairs import run
                 run(trainer, out, options.study_forecast, train, specs)

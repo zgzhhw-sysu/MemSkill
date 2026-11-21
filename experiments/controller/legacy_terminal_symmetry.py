@@ -218,7 +218,7 @@ def make_bank(ranker, ex, prefix, event, branch, extra):
     return bank
 
 
-def prepare(job, ranker, spans, d, p, data):
+def prepare(job, ranker, spans, d, p, data, *, strict_indices=False):
     prefix, event = spans
     ex = make_writer(p)
     idx = job["question_index"]
@@ -244,7 +244,8 @@ def prepare(job, ranker, spans, d, p, data):
         vectors = [m.embedding for m in bank.memories]
         indices, context = ranker.rank(qvec, contents, vectors)
         if (
-            _digest(context) != original["context_hash"]
+            (strict_indices and indices != original["indices"])
+            or _digest(context) != original["context_hash"]
             or [contents[i] for i in original["indices"]] != context
         ):
             return {"status": "control_ranking_did_not_repeat"}
