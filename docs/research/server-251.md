@@ -15,6 +15,8 @@ find locomo longmemeval -name baseline.json -print -exec cat {} \;
 
 运行中的服务遇到失败后等待 45 秒再试，每 30 分钟最多启动三次。已发布的历史和已缓存的贪心请求均可复用。运行目录中的五份 `memskill-llama31-*.service.txt` 记录本次服务定义。248 每 90 秒拉取已完成的逐题预测和汇总到 `~/Documents/研究生大论文/runs/llama31-paper-v1/`。两组已停的旧 Llama-3-8B 任务保留了结果和启动配置，配置以 `previous-memskill-251-` 开头。
 
+LoCoMo 另有一组按作者脚本编码批大小 64 的正式对照，同样评测 314 题。`memskill-llama31-locomo-batch64.service` 在 GPU 0 的租约内运行编码与选技，通过同一个 3、4 号卡服务完成写入和回答。入口是 `scripts/experiments/run_llama31_paper_pair_251.sh locomo-batch64`。251 的 `~/memskill-work/runs/llama31-paper-v1-locomo-batch64/worker.log` 记录进度，结果和逐题复算回执自动同步到 248 的 `~/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/`。[复跑参数与首次差异](llama31-paper-pair.md)
+
 ## 11 月 21 日的旧模型训练实验
 
 `memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
