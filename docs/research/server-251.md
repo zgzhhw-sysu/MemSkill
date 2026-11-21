@@ -23,6 +23,8 @@ LoCoMo 另有一组按作者脚本编码批大小 64 的正式对照，同样评
 
 完成训练对照后，同一编排任务调用 `locomo-credit-validation`，在 GPU 上拟合两种训练标签并确定固定偏置。冻结模型、训练回执散列及三个验证分支写入 `$work/runs/llama31-paper-v1-locomo-credit-validation/locomo/`。248 的 `memskill-pull-llama31-credit-validation` 收回模型、轨迹、响应与逐题结果，用作者提交复算全部 341 题。[配对比较口径](llama31-paper-pair.md)
 
+248 的原版收集器也备份尚在建库的长历史。它根据进行中的 `usage.jsonl` 取回相应的不可变模型响应，校验请求键、内容散列和 token 数，将已验证的前缀保存在对应数据集的 `live-recovery.json`。正式完整得分仍由 `baseline.json` 和 `upstream-score.json` 记录。对已完成的每条 LongMemEval-S 历史，收集器还会在 `native/<id>/upstream-score.json` 写入作者评分器的逐题复核结果。
+
 ## 11 月 21 日的旧模型训练实验
 
 `memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
