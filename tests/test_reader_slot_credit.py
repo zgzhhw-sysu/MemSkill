@@ -12,6 +12,15 @@ from experiments.controller.reader_slot_policy import (
 
 
 class ReaderSlotTests(unittest.TestCase):
+    def test_sham_slots_match_length_then_rank_and_preserve_duplicates(self):
+        from experiments.controller.reader_slot_credit import matched_reader_slots
+
+        self.assertEqual(matched_reader_slots([], [9, 2]), [])
+        self.assertIsNone(matched_reader_slots([0, 1], [7, 7, 7]))
+        self.assertEqual(matched_reader_slots([2], [10, 9, 10, 8, 8]), [0])
+        self.assertEqual(matched_reader_slots([2, 4], [7, 7, 7, 7, 7, 8]), [1, 3])
+        self.assertEqual(set(matched_reader_slots([0, 3], [10, 3, 11, 2])), {1, 2})
+
     def test_single_rank_is_swapped_without_shifting_other_positions(self):
         from experiments.controller.reader_slot_witness import at_rank
 

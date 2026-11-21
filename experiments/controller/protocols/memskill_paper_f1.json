@@ -12,6 +12,7 @@
     "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
     "retriever": "qwen3-embedding-0.6b"
   },
+  "longmemeval_launcher": {"script": "eval_longmemeval.sh", "action_top_k": 5, "encode_batch_size": 64},
   "training_boundary_swap": {
     "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
     "independent_repeats": 2,
@@ -24,6 +25,14 @@
       "conv-43": {"span": 33, "total_spans": 68, "questions": 178, "linked_question_indices": [14, 41, 67, 123, 124], "source_sha256": "f232a3aea55d296fa4a2fed64a44aad6a9dbc7e54b0a8459677781f60896f02d"},
       "conv-44": {"span": 31, "total_spans": 64, "questions": 123, "linked_question_indices": [31], "source_sha256": "3e2e29f26d9aa8aa3fd7c791e64e105e02e461fea9ba72efb898a39ff202690b"}
     }
+  },
+  "native_reader_ablation": {
+    "cohort": "All six preregistered LoCoMo training pivots, with every scored question in each history",
+    "exposure": "An actual ordered Reader slot contains a memory version last written at the focal span",
+    "target": "Remove every slot from the focal span, keeping the relative order of the other slots",
+    "sham": "Remove an equal number of disjoint slots minimizing total token-length distance then slot-rank distance; report unmatched when infeasible",
+    "repeat": "Use a separate greedy response cache for all exposed requests, rotate arm order by question position, reuse native receipts on unexposed questions",
+    "readout": "Report complete-history F1, all directly exposed, evidence-linked, and directly exposed unlinked; Reader contribution diagnostic only"
   },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
