@@ -269,3 +269,13 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 首条已收回的最终判定为 `legacy-root-symmetry/outcomes/conv-41_s1_p0_q67.json`。原技能、替换技能的 F1 分别为 1.00、0.50，三种同技能修补均为 0.50，该题首段信用确认为 +0.50。conv-42 第 103 题在较弱技能下补检后恢复了参考短语，F1 从 0 升至 0.40，首段选择信用为零。两条根节点裁决及时间前缀关系技能第 80 题的 −0.25 信用均已形成最终回执。
 
 首版加入首段信用的策略在 `matched-span-rank/root-augmented/later/through-09.json` 已有 9 窗 81 题，5 个实际干预位置改变了选技概率。其配对期望 F1 为 0.511809，同样本置零为 0.513554，上版为 0.515111，原生为 0.512328。本轮未晋级。另有 7 窗 61 题的四路径回执。首个关系技能双前缀窗口已完成，同一批 9 题分别得到 +0.02183、+0.02924 的关系减时间差，首选技能方向相同。两项任务均在 251 按登记窗口继续。
+
+### 独立供样确认和三技能对照
+
+最新代码以 251 为计算机，248 镜像在 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/`。双技能局部规则的 81 题回执在 `source-compression/matched-span-rank/selective-rules/later/through-09.json`。原生 0.51233，局部回报规则与加入核验信用均为 0.51990，这 9 个实际干预位置的信用修正没有触发。三技能回执在 `late-pairs/semantic-writer/three-writer/margin/through-09.json`；后期仅 13 题，核验信用比原生高 0.02585，比相同原始回报模型低 0.00238。当前都未晋级正式测试。
+
+早期 123 题补测与活动/关系直接对照在 251 后台继续。交接时查看 `source-compression/earlier-terminal-returns/outcomes/`、`source-compression/activity-relation-repairs/0/outcomes-complete.json` 以及 `late-pairs/semantic-writer/three-writer/direct-allocation/time/forecast.json`。最后一项需等时间前缀 12 窗都完成较弱技能复核；另一个双前缀版本还要等第二批 12 窗。原题在不同技能对中可能重复，不能合计为独立测试题。[本轮结果和分母](algorithm-notes.md#在独立供样对话上确认选技规则) · [251 恢复命令](server-251.md#双技能局部规则早期回报补测与三技能概率分配)
+
+后期最新的双技能数据为 10 窗 92 题，原生 0.52409，核验信用与基础回报规则同为 0.53102；其中冻结后首次出分的 11 题已单列。分别查看 `selective-rules/later/through-10.json` 的 `all` 和 `strict`，以及 `selective-rules/opportunity/later-10.json` 的逐窗机会界。三技能直接对照已冻结 25 个窗口的原始回报预测，13 道后期题的初始分数为 0.55359，文件在 `direct-allocation/raw-reference/through-09.json`。三个直接复核候选仍按原题号追踪。[逐项指标及解释](algorithm-notes.md#局部规则在后期窗口还有多少改进空间)
+
+首条活动/关系直接信用已收回。conv-26 的原题 20 在活动写入的三种修补下 F1 保持 0，关系写入为 0.85714，逐项回执在 `source-compression/activity-relation-repairs/0/outcomes/conv-26_s5.json`。此前缺少末段替换的 conv-41 四题也已全部复现，活动减时间的窗均 F1 差为 +0.07857。四题证据均位于前一场，详见 `source-compression/earlier-terminal-returns/outcomes/conv-41_s3.json`。

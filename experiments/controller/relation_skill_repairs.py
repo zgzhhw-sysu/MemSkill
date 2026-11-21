@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller.activity_relation_repairs import activity_rows
 from experiments.controller.capped_source_repair import diagnose
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.factorial_rollout import read
@@ -26,7 +27,7 @@ from src.replay import restore_text
 PLAN = Path(__file__).with_name("protocols") / "relation_skill_repairs.json"
 
 
-def candidates(questions, rows, source_turns):
+def candidates(questions, rows, source_turns, baseline="temporal"):
     ev = LoCoMoEvaluator(SimpleNamespace())
     jobs = []
     linked = 0
@@ -36,7 +37,7 @@ def candidates(questions, rows, source_turns):
         if not set(q["evidence"]).intersection(source_turns):
             continue
         linked += 1
-        t, rel = r["temporal"], r["relation"]
+        t, rel = r[baseline], r["relation"]
         truth = ev.get_ground_truth(q)
         if recovered(t, rel, truth) or recovered(rel, t, truth):
             jobs.append(
@@ -68,7 +69,9 @@ def check_response(receipts, folder):
     raise ValueError("Missing archived relation writer response")
 
 
-def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
+def forecast_window(
+    parent, archive, data, sid, start, bit, protocol, ranker, *, baseline="temporal"
+):
     folder = parent / f"{sid}_s{start}"
     pair = read(folder / "pair.json")
     qa = window(data, start, 2)["qa"]
@@ -95,10 +98,28 @@ def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
     }
     if not pair["matched"]:
         return dict(base, reason=pair["reason"])
-    linked, jobs = candidates(qa, pair["rows"], end["source_turns"])
+    semantic_end = end
+    rows = pair["rows"]
+    if baseline == "activity":
+        cell = archive / folder.name / f"{bit}1"
+        spans, rows = activity_rows(
+            cell, archive / "responses", spans, qa, rows, protocol
+        )
+        prefix, end = spans
+        if rows is None:
+            return dict(base, matched=False, reason="activity_write_fault")
+        base["raw_pairs"] = [
+            {
+                "original_index": q["original_index"],
+                "relation": q["relation"]["f1"],
+                "activity": q["activity"]["f1"],
+            }
+            for q in rows
+        ]
+    linked, jobs = candidates(qa, rows, end["source_turns"], baseline)
     if linked != base["linked"]:
         raise ValueError("Changed focal support")
-    if not jobs:
+    if not jobs and baseline == "temporal":
         return base
     choice = read(folder / "choice.json")
     write = read(folder / "write.json")
@@ -114,8 +135,9 @@ def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
     if (
         relation[:-1] != end["selected_skills"][:-1]
         or relation[-1]["name"] != "handle_entity_relationships"
-        or end["selected_skills"][-1]["name"] != "capture_temporal_context"
-        or end["selected_skills"][-1]["source_rule"] != relation[-1]["source_rule"]
+        or semantic_end["selected_skills"][-1]["name"] != "capture_temporal_context"
+        or semantic_end["selected_skills"][-1]["source_rule"]
+        != relation[-1]["source_rule"]
     ):
         raise ValueError("Different terminal intervention")
     skill = [skill_spec(op) for op in ops(relation)]
@@ -133,6 +155,11 @@ def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
         or execution_fault(e["parsed_actions"], e["applied"], e["skills"])
         for e in (*spans, alt)
     )
+    if baseline == "activity" and fault:
+        base.pop("raw_pairs")
+        return dict(base, matched=False, reason="direct_edge_write_fault")
+    if not jobs:
+        return base
     d = {
         "questions": [
             {"qa_index": i, "original_index": q["original_index"]}
@@ -140,14 +167,14 @@ def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
         ]
     }
     for arm, e, bank, key in (
-        ("control", end, list(restore_text(spans).values()), "temporal"),
+        ("control", end, list(restore_text(spans).values()), baseline),
         ("swap", alt, write["contents"], "relation"),
     ):
         d[arm] = {
             "bank_hash": _digest(bank),
             "actions": e["parsed_actions"],
             "writer_skills": e["skills"],
-            "qa": {str(i): r[key] for i, r in enumerate(pair["rows"])},
+            "qa": {str(i): r[key] for i, r in enumerate(rows)},
         }
     for job in jobs:
         result = (
@@ -159,7 +186,7 @@ def forecast_window(parent, archive, data, sid, start, bit, protocol, ranker):
     return base
 
 
-def run(base, study, corpus, bit, phase):
+def run(base, study, corpus, bit, phase, *, baseline="temporal"):
     semantic = base / "source-compression/semantic-writer"
     parent = semantic / "activity-prefix" if bit else semantic
     archive = semantic.parent / "factorial"
@@ -176,12 +203,19 @@ def run(base, study, corpus, bit, phase):
     data = {
         r["sample_id"]: r for r in read(corpus) if r["sample_id"] in protocol["train"]
     }
-    out = semantic.parent / "relation-skill-repairs" / str(bit)
+    direct = baseline == "activity"
+    out = (
+        semantic.parent
+        / ("activity-relation-repairs" if direct else "relation-skill-repairs")
+        / str(bit)
+    )
     dest = out / phase
     dest.mkdir(exist_ok=True, parents=True)
     frozen = parent / ("registration.json" if bit else "summary.json")
     registration = {
-        "plan": file_hash(PLAN),
+        "plan": file_hash(
+            PLAN.with_name("activity_relation_repairs.json") if direct else PLAN
+        ),
         "manifest": file_hash(archive / "manifest.json"),
         "parent": file_hash(frozen),
         "protocol": file_hash(study / "protocol.json"),
@@ -209,13 +243,29 @@ def run(base, study, corpus, bit, phase):
         if not before.exists():
             continue
         inputs = {"registration": file_hash(reg), "parent": file_hash(before)}
+        if direct and phase == "prepared":
+            cell = archive / key / f"{bit}1"
+            (trace,) = (cell / "traces").glob("*.jsonl")
+            inputs.update(
+                activity_trace=file_hash(trace),
+                activity_scores=file_hash(cell / "scores.json"),
+                activity_usage=file_hash(cell / "usage.jsonl"),
+            )
         if f.exists():
             if read(f)["inputs"] != inputs:
                 raise ValueError("Changed upstream window")
         elif phase == "prepared":
             with history_embeddings():
                 result = forecast_window(
-                    parent, archive, data[sid], sid, n, bit, protocol, ranker
+                    parent,
+                    archive,
+                    data[sid],
+                    sid,
+                    n,
+                    bit,
+                    protocol,
+                    ranker,
+                    baseline=baseline,
                 )
             register(f, dict(result, inputs=inputs))
         else:
@@ -255,5 +305,6 @@ if __name__ == "__main__":
         p.add_argument(key, type=Path)
     p.add_argument("bit", type=int, choices=(0, 1))
     p.add_argument("phase", choices=("prepared", "outcomes"))
+    p.add_argument("--baseline", choices=("temporal", "activity"), default="temporal")
     a = p.parse_args()
-    run(a.base, a.study, a.corpus, a.bit, a.phase)
+    run(a.base, a.study, a.corpus, a.bit, a.phase, baseline=a.baseline)

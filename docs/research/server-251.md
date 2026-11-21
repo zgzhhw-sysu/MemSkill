@@ -565,3 +565,34 @@ done
 | `semantic-writer/activity-prefix` | `contrasts/through-NN.json` 给出共享窗口的题数、两种前缀下各自的关系减时间 F1，以及允许按前缀选技所增加的事后上限。 |
 | `relation-skill-repairs/{0,1}` | 0 表示前次时间写入，1 表示前次活动写入。每个 `outcomes/conv-*.json` 记录尝试、匹配、局部证据数、候选以及同技能修补的结果。 |
 | `matched-span-rank/root-augmented` | `forecast.json` 保存各首段和末段的预测。逐题策略概率、已观测的配对 F1 及同批新增标签置零的对照见 `later`，完整四路径见 `replica`。 |
+
+### 双技能局部规则、早期回报补测与三技能概率分配
+
+这些版本沿用 251 的守护租约。GPU 3 承担局部规则拟合、Qwen 检索和两臂读者输入核对，GPU 4 承担三技能数值拟合。写入和问答走 18773 的限载 BF16 服务。用下列命令恢复所需的用户服务，活动任务会跳过。
+
+```bash
+source "$HOME/memskill-work/deploy/env-251.sh"
+cd "$work/run-linked-questions-v1"
+resume() {
+    local unit="memskill-251-$1"
+    shift
+    systemctl --user is-active --quiet "$unit" && return 0
+    systemd-run --user --collect --unit="$unit" -p Restart=on-failure -p RestartSec=40s \
+        --working-directory="$PWD" bash "$PWD/scripts/experiments/$1" "${@:2}"
+}
+resume matched-span-selective-rules run_matched_span_251.sh selective-rules
+for phase in writers prepared outcomes; do
+    resume "earlier-returns-$phase" run_earlier_returns_251.sh "$phase"
+done
+resume three-skill-margin run_three_skill_margin_251.sh
+for mode in raw-reference time both; do
+    resume "direct-allocation-$mode" run_three_skill_margin_251.sh "$mode"
+done
+for phase in prepared outcomes; do
+    resume "activity-relation-$phase" run_relation_repairs_251.sh "$phase" activity
+done
+```
+
+结果均在 `~/memskill-work/runs/paired-251-linked-eight`。局部规则看 `source-compression/matched-span-rank/selective-rules/{models.json,later,replica,long-prefix}`，`base_rule` 是消融主对照。早期完整回报看 `source-compression/earlier-terminal-returns/{outcomes,through-*.json}`。第三条技能边看 `source-compression/activity-relation-repairs/{0,1}` 的完整标记及逐窗 `outcomes`。`late-pairs/semantic-writer/three-writer/margin` 和同级 `direct-allocation/{raw-reference,time,both}` 中的逐题分数在 `questions`，汇总中 `by_partition.evaluation` 是时间较晚的评价窗口。`raw-reference` 只固定使用原始回报的第三条边，`time` 会核对这些预测在打开核验信用后完全相同。
+
+每次产生新的双技能窗口后，局部规则程序同时更新 `selective-rules/opportunity/`。用同一窗口数的回执对齐 `later/through-NN.json` 和 `opportunity/later-NN.json`。字段 `approved`、`discovered`、`unrestricted` 分别表示在通过确认的候选、全部已发现候选、所有允许的概率方向中事后选择的上界。248 的 `memskill-248-pull-linked-eight` 定期拉回这些回执；原始问答和响应保存在运行镜像内。

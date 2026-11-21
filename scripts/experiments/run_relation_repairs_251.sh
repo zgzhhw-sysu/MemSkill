@@ -8,7 +8,9 @@ export MEMSKILL_API_BASE=http://127.0.0.1:18773/v1 MEMSKILL_API_TIMEOUT_S=600
 export MEMSKILL_ENCODER_DUTY=.30 MEMSKILL_ENCODER_MAX_BATCH=2
 base="$work/runs/paired-251-linked-eight"
 semantic="$base/source-compression/semantic-writer"
-root="$base/source-compression/relation-skill-repairs"
+baseline=${2:-temporal}
+case $baseline in temporal) folder=relation-skill-repairs ;; activity) folder=activity-relation-repairs ;; *) exit 2 ;; esac
+root="$base/source-compression/$folder"
 phase=${1:?expected prepared or outcomes}
 case $phase in prepared|outcomes) ;; *) exit 2 ;; esac
 while [[ ! -f "$root/0/$phase-complete.json" || ! -f "$root/1/$phase-complete.json" ]]; do
@@ -31,7 +33,7 @@ while [[ ! -f "$root/0/$phase-complete.json" || ! -f "$root/1/$phase-complete.js
         if [[ $pending == false && $(find "$out/$phase" -maxdepth 1 -name 'conv-*.json' 2>/dev/null | wc -l) != 12 ]]; then continue; fi
         mkdir -p "$out"
         export MEMSKILL_USAGE_LOG="$out/usage.jsonl"
-        cmd=("$MEMSKILL_PYTHON" -u -m experiments.controller.relation_skill_repairs "$base" "$work/study-linked-eight-gpu" "$LOCOMO_DATA" "$bit" "$phase")
+        cmd=("$MEMSKILL_PYTHON" -u -m experiments.controller.relation_skill_repairs "$base" "$work/study-linked-eight-gpu" "$LOCOMO_DATA" "$bit" "$phase" --baseline "$baseline")
         rc=0
         if [[ $phase == prepared ]]; then
             python3 "$guard" run --gpus 3 -- "${cmd[@]}" >>"$out/$phase.log" 2>&1 || rc=$?
