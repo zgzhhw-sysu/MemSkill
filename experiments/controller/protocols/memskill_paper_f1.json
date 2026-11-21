@@ -53,6 +53,10 @@
     "select": "Freeze the largest rank for which at least one state keeps its native ordered top-K and at least one replaces only its last skill by the native next-ranked skill. Every calibration state must have one of these two outcomes. Save no candidate if the set is empty.",
     "transfer": "Evaluate the frozen rank unchanged on the remaining five registered training histories. No QA answers, rewards or validation/test histories may enter rank selection."
   },
+  "forward_rank_skill_projection": {
+    "layer": "op_net.2.weight",
+    "motivation": "After the actor projection preserved the action at every rank on conv-26, test the final skill encoder projection. It transforms each candidate embedding before it is paired with the state. Inherit the same calibration, transfer and selection rules. Make no layer or rank choices using QA outcomes."
+  },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,

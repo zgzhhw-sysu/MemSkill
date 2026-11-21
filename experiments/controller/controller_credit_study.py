@@ -24,7 +24,7 @@ from src.trainer import get_trainer
 
 
 @torch.no_grad()
-def screen_forward_rank(native, checkpoint, out, history):
+def screen_forward_rank(native, checkpoint, out, history, *, skill_projection=False):
     """Test which retained ranks change only the skill at the deployed action boundary."""
     import time
     from experiments.designer.paper_date_pair import CHECKPOINT_SHA, MODEL, history_spans
@@ -32,6 +32,11 @@ def screen_forward_rank(native, checkpoint, out, history):
 
     paper = read(PROTOCOL)
     rule = paper["forward_rank_boundary"]
+    if skill_projection:
+        rule = rule | paper["forward_rank_skill_projection"]
+    saved = out / (history + ".json")
+    if saved.exists() and read(saved)["method"] != rule:
+        raise ValueError("Use a separate output directory for each rank study")
     cell = paper["training_boundary_swap"]["histories"][history]
     plan = read(native / "locomo/protocol.json")
     if (file_hash(checkpoint) != CHECKPOINT_SHA or plan["checkpoint"] != CHECKPOINT_SHA or plan["split"] != "train"
@@ -453,6 +458,8 @@ if __name__ == "__main__":
         for arg in ("native", "checkpoint", "out"):
             parser.add_argument(arg, type=Path)
         parser.add_argument("history")
+        parser.add_argument("--skill-projection", action="store_true",
+                            help="Screen the preregistered final skill encoder projection")
         screen_forward_rank(**vars(parser.parse_args(sys.argv[2:])))
     else:
         run()
