@@ -1,4 +1,5 @@
 import copy
+import importlib.util
 import json
 import os
 import tempfile
@@ -19,6 +20,25 @@ from src.revision_validation import check_exposure, compare_revisions
 
 
 class ReplayTest(unittest.TestCase):
+    @unittest.skipUnless(torch.cuda.is_available() and importlib.util.find_spec("triton"), "requires CUDA and Triton")
+    def test_skylakex_cuda_search_preserves_duplicate_memory_versions(self):
+        rng = np.random.default_rng(31)
+        query = rng.standard_normal(1024, dtype=np.float32)
+        vector = rng.standard_normal(1024, dtype=np.float32)
+        bank = MemoryBank()
+        for i in range(7):
+            bank.add_memory(str(i), vector, state_encoder_embedding=vector)
+        for use_state in (False, True):
+            # Measured on OpenBLAS 0.3.29 SkylakeX. Rows 4 and 5 score higher
+            # than the identical first four. Normalization also lifts the final row.
+            groups = np.array([0, 0, 0, 0, 1, 1, int(use_state)], dtype=np.float32)
+            expected = np.argsort(groups)[::-1][:3].tolist()
+            with self.subTest(use_state=use_state), patch.dict(os.environ, MEMSKILL_MEMORY_SEARCH="cuda-skylakex"):
+                with patch.object(np, "dot", side_effect=AssertionError("unexpected CPU dot product")):
+                    contents, ids = bank.retrieve(query, top_k=3, use_state_encoder=use_state)
+                self.assertEqual(ids, expected)
+                self.assertEqual(contents, [str(i) for i in expected])
+
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA memory ranking requires a GPU")
     def test_cuda_search_preserves_native_ids_for_tied_memories(self):
         bank = MemoryBank()

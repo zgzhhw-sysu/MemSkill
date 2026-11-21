@@ -23,7 +23,11 @@ case "${1:-baseline}" in
     *) echo "Expected backend, baseline or paired" >&2; exit 2 ;;
 esac
 export MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
-export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH=cuda
+export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH="${MEMSKILL_MEMORY_SEARCH:-cuda}"
+if [[ "$MEMSKILL_MEMORY_SEARCH" == cuda-skylakex ]]; then
+    run="$run-cuda-skylakex"
+    export CC="${CC:-$HOME/.conda/envs/agemem/bin/x86_64-conda-linux-gnu-cc}" OPENBLAS_NUM_THREADS=1
+fi
 api=http://127.0.0.1:18831/v1
 while ! curl -fsS --max-time 3 "$api/models" > /dev/null 2>&1; do
     systemctl --user is-active --quiet memskill-llama31-baseline-tp2.service || exit 2

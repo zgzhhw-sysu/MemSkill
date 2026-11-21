@@ -19,11 +19,17 @@
 
 还尝试过只对 GPU 排名前 20 及边界附近的候选行按原版重算。在这 93 个分块中，按原始动作顺序重建的 89 次非空检索都复现了参照 ID。候选复核将需要计算的行数从 59,183 降到 2,502，但 16 次的前 20 个 ID 顺序发生变化。正式基线继续对分数接近的查询执行完整原版复核。逐段计数保存在 `legacy-rank-audit/state-shortlist.json`。
 
+另有一条已验证的 251 专用路径，可在新实验中设置 `MEMSKILL_MEMORY_SEARCH=cuda-skylakex`。对 1024 维 FP32 向量，Triton 在 GPU 上使用与本机单线程 OpenBLAS 0.3.29 SkylakeX 一致的点积累加顺序，PyTorch 在同一卡上按 NumPy 的顺序归一化。只把每条记忆的一个标量交回 NumPy 排序，以复现并列分数的版本顺序。251 脚本将该配置的结果写入单独的 `llama31-paper-v1-cuda-skylakex` 目录。进行中的原版基线沿用已登记的 `cuda-native-ties-v1`。[OpenBLAS 对应实现](https://github.com/OpenMathLib/OpenBLAS/blob/v0.3.29/kernel/x86_64/sgemv_t_4.c)
+
+在 3.1 的四段实际写入前缀上，89 次非空检索的 59,183 个相似度全部与参照相等。在早期 LoCoMo 的两份完整库上，429 次查询的 492,796 个分数逐位相同。在本轮 3.1 的 `conv-49` 完整库上又核对了 156 道题和 50 个分块，每次返回的 20 个记忆 ID、顺序与向量均与原版一致。单行库只有一个可选 ID，直接取索引。运行证据保存在 `legacy-rank-audit/cuda-reduction-fma.json`、`gpu-reduction-final-banks.json` 和 `skylakex-parity.json`。
+
 ## Forward-only 论文能检验的假设
 
 Huang、Balashankar 和 Aminifar 用小批输入前向计算激活的角度集中程度，找出小奇异值方向贡献较分散的权重矩阵，再在验证集上选矩阵和保留的秩比例。执行时保留较大的奇异值。文章表 2 的 36.7 倍是 GPT-J 层级搜索相对 LASER 穷举的平均计算加速。它没有给出 MemSkill 的问答 F1，也不能据此估计本项目的增益。[算法 1 与表 2](https://arxiv.org/html/2611.10610v1)
 
 **优先检验 Controller。** 在一次前向中，`state_net` 投影当前 span 和已检索记忆的状态，`op_net` 投影候选技能，`actor_head` 对每个状态与技能组合打分。正式推理按分数选取有序 top-K。可以先在训练对话上收集这些激活，比较 `actor_head[0]` 的原始权重与几个预先固定的截秩版本。该层结合状态和技能，最后的标量输出层只有一个奇异值。[Controller 实现](../../src/controller.py) · [正式选技入口](../../src/inference/memory.py)
+
+在 251 的 RTX 3090 上只读取了冻结 checkpoint 的权重并做奇异值分解。`actor_head[0]` 的权重形状是 256 × 512，分别需要前 161、193、235 个奇异方向才能保留 90%、95%、99% 的平方奇异值总和。最后一层的权重形状是 1 × 256，秩为 1。这个测量用于确定可操作的层。任何截秩的选技影响和 F1 都需要后续实测。数据在运行目录的 `controller-spectrum.json`。
 
 项目里的 span 信用可以给截秩方向提供行为依据。对同一写入前状态，只替换 K 个位置中的一个技能，复用既有配对重放得到两条分支后续的逐题 F1 差。例如替换第 7 名和第 8 名技能，若 B 分支的 F1 更高，就检查候选矩阵是否在这个 span 提高 B 相对 A 的分数与选择概率。按训练对话留一做筛选，参考答案仅进入训练后的收益计算。对角度筛选、加入成对信用筛选、同秩随机方向以及原始 Controller 分别评估，同时记录各技能总体使用率，检验候选能否把技能分给更有收益的 span。
 

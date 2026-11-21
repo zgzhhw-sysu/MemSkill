@@ -102,14 +102,17 @@ def run(args, root, rank, workers):
     config = AgenticMemoryConfig().update_from_args(args)
     config.share_serial_encoders = True
     memory_search = os.environ.get("MEMSKILL_MEMORY_SEARCH", "numpy")
-    if memory_search not in {"numpy", "cuda"}:
+    if memory_search not in {"numpy", "cuda", "cuda-skylakex"}:
         raise ValueError("Unknown memory search device")
-    if memory_search == "cuda":
+    if memory_search != "numpy":
         import torch
         if args.device != "cuda" or not torch.cuda.is_available():
             raise RuntimeError("CUDA memory search requires the encoder GPU lease")
         torch.set_float32_matmul_precision("highest")
-        memory_search = "cuda-native-ties-v1"
+        if memory_search == "cuda-skylakex":
+            memory_search = "cuda-skylakex-fp32-v1"
+        else:
+            memory_search = "cuda-native-ties-v1"
     plan = {"dataset": args.dataset, "test_keys": spec["scored_key_sha256"],
             "model": model_info, "backend": os.environ["MEMSKILL_BACKEND_ID"],
             "checkpoint": CHECKPOINT_SHA, "skills": VERSIONS, "settings": paper["inference_defaults"],
