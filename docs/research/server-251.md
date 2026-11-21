@@ -596,3 +596,19 @@ done
 结果均在 `~/memskill-work/runs/paired-251-linked-eight`。局部规则看 `source-compression/matched-span-rank/selective-rules/{models.json,later,replica,long-prefix}`，`base_rule` 是消融主对照。早期完整回报看 `source-compression/earlier-terminal-returns/{outcomes,through-*.json}`。第三条技能边看 `source-compression/activity-relation-repairs/{0,1}` 的完整标记及逐窗 `outcomes`。`late-pairs/semantic-writer/three-writer/margin` 和同级 `direct-allocation/{raw-reference,time,both}` 中的逐题分数在 `questions`，汇总中 `by_partition.evaluation` 是时间较晚的评价窗口。`raw-reference` 只固定使用原始回报的第三条边，`time` 会核对这些预测在打开核验信用后完全相同。
 
 每次产生新的双技能窗口后，局部规则程序同时更新 `selective-rules/opportunity/`。用同一窗口数的回执对齐 `later/through-NN.json` 和 `opportunity/later-NN.json`。字段 `approved`、`discovered`、`unrestricted` 分别表示在通过确认的候选、全部已发现候选、所有允许的概率方向中事后选择的上界。248 的 `memskill-248-pull-linked-eight` 定期拉回这些回执；原始问答和响应保存在运行镜像内。
+
+### 三种技能在同一道题上的信用
+
+在上述 251 环境及 `resume` 函数中执行下列命令。两个策略从相同的 12 个时间前缀窗口开始，完整版本等待活动—关系的所有裁决。归因程序随新裁决和物理窗口更新，只使用 251 的受控 GPU 租约。
+
+```bash
+for phase in graph-masked graph-complete graph-attribution; do
+    resume "$phase" run_three_skill_margin_251.sh "$phase"
+done
+```
+
+在 `late-pairs/semantic-writer/three-writer/skill-graph/` 下，`registration.json` 记录登记时已出现的训练裁决和后期轨迹。各版本的 `early-held-histories.json` 按训练对话留出，`through-NN.json` 的 `by_partition.evaluation` 只含后期窗口。目录 `attribution/` 中的数字串按原题 20、110、80 的顺序表示是否纳入活动与关系之间的直接信用。`x` 表示该题尚待裁决。`verified-complete.json` 核对按单题贡献重建的 25 个目标与完整模型独立拟合的结果。`coverage-NN.json` 可按对话或题型查看实测、异常和待测题数。
+
+`resume graph-donors run_graph_donors_251.sh` 接续较晚 7 个已划定的供样窗口。该进程先在物理卡 3 上准备三种修补，再由卡 5、6 的 BF16 服务复读。用 `resume graph-expanded run_three_skill_margin_251.sh graph-expanded` 接续扩展版，用 `resume direct-step run_three_skill_margin_251.sh direct-step` 接续按内层对话决定步长的版本。`skill-graph/extra-donors/` 保存新题裁决；`skill-graph/expanded/` 的 `original` 与 `zero_new` 分别比较原版本和清零新增标签。端点放大试验在同级 `direct-step/`，`models.json` 列出每个供样对话的校准成绩，`evaluation-bounds-NN.json` 的分母始终是全部 161 道后期题。
+
+各图模型及 `direct-step/` 的 `decisions/` 保存相同随机数下各策略实际选中的技能索引。有序技能及版本在 `branches[action].skills`，`writer` 为该末段写入的输入、输出 token，`reader` 按 `questions` 顺序记录每题输入、输出 token。两项均来自对应的物理分支。汇总文件 `evaluation-NN.json` 同时列出抽样 F1、相对原始回报实际换技的窗口数，以及按概率计算的换技机会。

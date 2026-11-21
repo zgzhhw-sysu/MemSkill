@@ -297,18 +297,35 @@ def aggregate(rows, *, direct=False):
         "window_oracle": avg(lambda w: max(w["means"])),
     }
     if direct:
-        relation_rate = rates["credit"][2] / (1 - rates["credit"][0])
-        result["conditional_matched_rate"] = avg(
-            lambda w: (
-                w["p"]["credit"][0] * w["means"][0]
-                + (1 - w["p"]["credit"][0])
-                * ((1 - relation_rate) * w["means"][1] + relation_rate * w["means"][2])
+        for arm in ("credit", "soft"):
+            if arm not in rates:
+                continue
+            relation_rate = rates[arm][2] / (1 - rates[arm][0])
+            key = (
+                "conditional_matched_rate"
+                if arm == "credit"
+                else "parent_conditional_matched_rate"
             )
-        )
+            result[key] = avg(
+                lambda w, arm=arm, rate=relation_rate: (
+                    w["p"][arm][0] * w["means"][0]
+                    + (1 - w["p"][arm][0])
+                    * ((1 - rate) * w["means"][1] + rate * w["means"][2])
+                )
+            )
     return result
 
 
-def score(base, path, allocate=distributions, *, direct=False):
+def score(
+    base,
+    path,
+    allocate=distributions,
+    *,
+    direct=False,
+    eligible=True,
+    extra_controls=(),
+    replay_choices=False,
+):
     out = path.parent
     late = base / "late-pairs"
     semantic = late / "semantic-writer"
@@ -435,6 +452,10 @@ def score(base, path, allocate=distributions, *, direct=False):
             "registered_windows": 25,
         }
         register(out / f"through-{len(hashes):02d}.json", result)
+        if replay_choices:
+            from experiments.controller.skill_choice_replay import record
+
+            record(base, path, result)
         active = [v for v in by_history.values() if v["questions"]]
         intervals = {}
         if len(active) >= 2:
@@ -470,7 +491,7 @@ def score(base, path, allocate=distributions, *, direct=False):
                 if f"{w['dialogue']}_s{w['start']}" in split["evaluation"]
             )
             ok = False
-            if ev["questions"] >= 0.9 * den and strict["questions"]:
+            if eligible and ev["questions"] >= 0.9 * den and strict["questions"]:
                 y = ev["f1"]
                 ok = (
                     y["credit"] >= y["native"] + 0.02
@@ -479,6 +500,7 @@ def score(base, path, allocate=distributions, *, direct=False):
                         y["raw"],
                         y["rotated"],
                         y["uniform"],
+                        *(y[k] for k in extra_controls),
                         *ev["fixed"],
                         ev["matched_rate"],
                     )
@@ -496,7 +518,11 @@ def score(base, path, allocate=distributions, *, direct=False):
                     for k, v in ev["f1"].items()
                     if k in ("parent_raw", "parent_credit", "time_only")
                 ]
-                ok = ev["f1"]["credit"] > max(ev["conditional_matched_rate"], *compared)
+                ok = ev["f1"]["credit"] > max(
+                    ev["conditional_matched_rate"],
+                    ev.get("parent_conditional_matched_rate", 0.0),
+                    *compared,
+                )
             register(
                 out / "summary.json",
                 dict(result, coverage=ev["questions"] / den, training_gate=ok),

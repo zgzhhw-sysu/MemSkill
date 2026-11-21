@@ -6,10 +6,34 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 base="$work/runs/paired-251-linked-eight"
 parent="$base/late-pairs/semantic-writer/three-writer"
 mode=${1:-margin}
+gpu=4
 case $mode in
     margin)
         out="$parent/margin"
         cmd=(experiments.controller.three_skill_margin "$base" "$work/study-linked-eight-gpu" "$LOCOMO_DATA") ;;
+    direct-step)
+        gpu=3
+        out="$parent/direct-step"
+        cmd=(experiments.controller.direct_credit_step "$base")
+        until [[ -f "$parent/skill-graph/complete/forecast.json" && -f "$parent/direct-allocation/time/forecast.json" ]]; do sleep 15; done ;;
+    graph-attribution)
+        gpu=3
+        graph="$parent/skill-graph"
+        out="$graph/attribution"
+        cmd=(experiments.controller.skill_graph_attribution "$base")
+        until [[ -f "$graph/masked/forecast.json" ]]; do sleep 10; done ;;
+    graph-masked|graph-complete|graph-expanded)
+        phase=${mode#graph-}
+        gpu=3
+        out="$parent/skill-graph/$phase"
+        cmd=(experiments.controller.skill_graph_policy "$base" "$phase")
+        direct="$base/source-compression/activity-relation-repairs/0"
+        until [[ -f "$parent/margin/forecast.json" && -f "$direct/prepared-complete.json" ]]; do sleep 25; done
+        if [[ $phase == complete ]]; then
+            until [[ -f "$direct/outcomes-complete.json" && -f "$parent/skill-graph/masked/forecast.json" ]]; do sleep 25; done
+        elif [[ $phase == expanded ]]; then
+            until [[ -f "$parent/skill-graph/complete/forecast.json" && -f "$parent/skill-graph/extra-donors/outcomes-complete.json" ]]; do sleep 25; done
+        fi ;;
     time|both|raw-reference)
         out="$parent/direct-allocation/$mode"
         cmd=(experiments.controller.direct_skill_allocation "$base" "$mode")
@@ -28,9 +52,14 @@ mkdir -p "$out"
 last=-1
 until [[ -f "$out/summary.json" ]]; do
     count=$(find "$parent" -maxdepth 1 -name 'conv-*.json' | wc -l)
+    if [[ $mode == graph-attribution ]]; then
+        direct="$base/source-compression/activity-relation-repairs/0/outcomes"
+        count+=":$(find "$direct" -maxdepth 1 -name 'conv-*.json' | wc -l)"
+        if [[ -f "$graph/complete/forecast.json" ]]; then count+=":final"; fi
+    fi
     if [[ $count != "$last" ]]; then
         rc=0
-        python3 "$guard" run --gpus 4 -- "$MEMSKILL_PYTHON" -u -m "${cmd[@]}" >>"$out/policy.log" 2>&1 || rc=$?
+        python3 "$guard" run --gpus "$gpu" -- "$MEMSKILL_PYTHON" -u -m "${cmd[@]}" >>"$out/policy.log" 2>&1 || rc=$?
         if ((rc==0)); then
             last=$count
             if [[ $mode == raw-reference ]]; then exit 0; fi
