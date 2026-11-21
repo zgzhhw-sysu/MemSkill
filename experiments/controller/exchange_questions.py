@@ -17,7 +17,7 @@ from experiments.controller.source_compression import file_hash, register
 from src.episode_trace import reference_match
 from src.eval.locomo import LoCoMoEvaluator
 from src.eval_utils import normalize_answer, ps
-from src.evaluation_cache import digest, read_response, request_cache
+from src.evaluation_cache import digest, publish_response, read_response, request_cache
 from src.llm_utils import get_llm_response_via_api
 
 PLAN = Path(__file__).with_name("protocols") / "exchange_credit.json"
@@ -234,7 +234,7 @@ def population(base, study, corpus):
     return path
 
 
-def call(out, prompt, kind, limit):
+def call(out, prompt, kind, limit, *, reuse_from=None):
     if (
         os.environ.get("MEMSKILL_BACKEND_ID") != BACKEND
         or os.environ.get("MEMSKILL_API_BASE") != "http://127.0.0.1:18773/v1"
@@ -252,6 +252,22 @@ def call(out, prompt, kind, limit):
     }
     _, key = request_cache(os.environ["MEMSKILL_API_BASE"], params, kind)
     v = read_response(cache, key)
+    if not v and reuse_from is not None:
+        previous = read_response(reuse_from, key)
+        if previous:
+            payload = previous["payload"]
+            if payload["prompt_sha256"] != hashlib.sha256(prompt.encode()).hexdigest():
+                raise ValueError("Different archived GPU prompt")
+            publish_response(
+                cache,
+                key,
+                payload["prompt_sha256"],
+                payload["response"],
+                *payload["tokens"],
+            )
+            v = read_response(cache, key)
+            if v["sha256"] != previous["sha256"]:
+                raise ValueError("Different response for the same GPU request")
     if not v:
         subprocess.run(
             [
