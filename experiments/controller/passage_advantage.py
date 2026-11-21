@@ -79,6 +79,22 @@ def direction_report(items):
     }
 
 
+def decision_probabilities(arms, logits, mixtures=None):
+    """Apply a frozen ensemble's directional masses to the actual native propensity."""
+    values = {a: v.sigmoid() for a, v in logits.items()}
+    for arm, (toward_temporal, toward_activity) in (mixtures or {}).items():
+        if (
+            arm in values
+            or min(toward_temporal, toward_activity) < 0
+            or not 0 <= toward_temporal + toward_activity <= 1
+        ):
+            raise ValueError("Invalid or conflicting conditional mixture")
+        values[arm] = (1 - toward_temporal - toward_activity) * values[
+            "native"
+        ] + toward_activity
+    return {a: float(values[a]) for a in arms}
+
+
 def key(bits):
     return "".join(map(str, bits))
 
@@ -136,7 +152,10 @@ def score_window(
             )
             logits = {a: raw + u for a, u in adj.items()}
             logits.update(native=z, terminal=term, raw=raw)
-            probs = {a: float(logits[a].sigmoid()) for a in arms}
+            mixture = (
+                packet["mixtures"][nodes[j]][node] if "mixtures" in packet else None
+            )
+            probs = decision_probabilities(arms, logits, mixture)
             if (
                 ps.setdefault(node, probs) != probs
                 or contexts.setdefault(node, c[j]) != c[j]

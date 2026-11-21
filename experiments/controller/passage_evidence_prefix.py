@@ -12,7 +12,10 @@ from experiments.controller.audit_cross_window import verified_decision
 from experiments.controller.evidence_transport_data import sources
 from experiments.controller.factorial_rollout import read
 from experiments.controller.late_credit_kernel import support
-from experiments.controller.passage_advantage import summarize_panel
+from experiments.controller.passage_advantage import (
+    decision_probabilities,
+    summarize_panel,
+)
 from experiments.controller.passage_evidence_actor import (
     ARMS,
     case_scores,
@@ -197,7 +200,11 @@ def evaluate(base, path):
             z, term, anchor = anchor_logits(d, models[sid], weights[sid])
             logits = {k: anchor + v for k, v in frozen["offsets"][session].items()}
             logits.update(native=z, terminal=term, raw=anchor)
-            p = {k: float(logits[k].sigmoid()) for k in arms}
+            mixture = None
+            if "mixtures" in frozen:
+                reached = 1 + int(w["background"][-1]) if w["background"] else 0
+                mixture = frozen["mixtures"][session][reached]
+            p = decision_probabilities(arms, logits, mixture)
         if any(
             abs(p[k] - r["probabilities"][k]) > 1e-10 for k in ("native", "terminal")
         ):

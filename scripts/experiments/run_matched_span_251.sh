@@ -43,6 +43,9 @@ case $phase in
             if (( rc==75 )); then sleep 30; elif (( rc!=0 )); then exit "$rc"; fi
         done
         exit ;;
+    selective-rules)
+        module=experiments.controller.selective_span_policy
+        until [[ -f "$root/root-augmented/calibration/summary.json" && -f "$root/consensus/original/votes.json" ]]; do sleep 30; done ;;
     original) ;;
     root-augmented)
         until [[ -f "$root/earlier-root-sources/complete.json" && -f "$src/legacy-root-symmetry/summary.json" && -f "$root/expanded/edge-audit.json" ]]; do sleep 30; done ;;
@@ -50,6 +53,7 @@ case $phase in
         until [[ -f "$root/earlier-sources/complete.json" && -f "$src/legacy-terminal-symmetry/summary.json" && -f "$root/original/edge-audit.json" ]]; do sleep 30; done ;;
     *) exit 2 ;;
 esac
+if [[ $phase != selective-rules ]]; then args+=("$phase"); fi
 last=''
 result="$policy_root/$phase"
 mkdir -p "$result"
@@ -64,7 +68,7 @@ PY
 )
     if [[ $state != "$last" ]]; then
         rc=0
-        python3 "$guard" run --gpus 3 -- "$MEMSKILL_PYTHON" -u -m "$module" "${args[@]}" "$phase" >>"$result/policy.log" 2>&1 || rc=$?
+        python3 "$guard" run --gpus 3 -- "$MEMSKILL_PYTHON" -u -m "$module" "${args[@]}" >>"$result/policy.log" 2>&1 || rc=$?
         if (( rc==0 )); then last=$state; elif (( rc!=75 )); then exit "$rc"; fi
     fi
     sleep 35
