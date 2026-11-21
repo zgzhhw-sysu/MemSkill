@@ -19,6 +19,8 @@ LoCoMo 另有一组按作者脚本编码批大小 64 的正式对照，同样评
 
 251 的 `memskill-llama31-locomo-development` 等待批大小 64 的 314 题正式基线与作者入口复核完成，再在 GPU 0 的租约上依次运行 `locomo-train` 和 `locomo-validation`。两组沿用同一套 GPU 3、4 写入与问答服务，分别记录未改动策略的训练和验证轨迹。结果在 `~/memskill-work/runs/llama31-paper-v1-locomo-train/` 和同级 `llama31-paper-v1-locomo-validation/`。248 按对话收回预测、缓存、记忆库、轨迹与 Controller 输入，按各自划分独立计分。[开发集题数和输入格式](llama31-paper-pair.md)
 
+251 的 `memskill-llama31-training-swap-panel` 等待两套原版基线的独立复核回执，再运行训练对照。每段先执行 `locomo-train-swap conv-ID 分块编号`，随后用相同入口追加重复编号 `1` 和 `2`。每次重复的两个分支分别保存在 `$work/runs/llama31-paper-v1-locomo-train-swap/conv-ID/span-N/repeats/R/locomo/{native,swap}/conv-ID/`，使用各自的响应缓存。248 的 `memskill-pull-llama31-training-swaps` 收回两臂原始回答与写入，校验散列，再用作者评分器复算两组逐题差值。[训练分块和重复次序](llama31-paper-pair.md)
+
 ## 11 月 21 日的旧模型训练实验
 
 `memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
