@@ -1,5 +1,6 @@
 """Matched on-policy update: same native transitions, frozen skills, three reward treatments."""
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -10,6 +11,8 @@ from statistics import mean
 import numpy as np
 import torch
 
+from experiments.controller import file_hash, read, register
+from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores
 from experiments.designer.designer_pilot import prefix, save
 from src.cli import set_seed
 from src.data_processing.datasets import load_dataset, split_data
@@ -18,6 +21,200 @@ from src.controller import PPOBuffer
 from src.episode_trace import skill_spec
 from src.revision_validation import evaluate_bank
 from src.trainer import get_trainer
+
+
+def state_features(states):
+    """Give the native session and retrieved-memory embeddings equal feature weight."""
+    if states.shape[-1] % 2 or not states.isfinite().all():
+        raise ValueError("Expected finite concatenated session and memory vectors")
+    return torch.cat([torch.nn.functional.normalize(x, dim=-1) for x in states.double().chunk(2, dim=-1)], dim=-1)
+
+
+def credit_targets(measurement, linked, prior):
+    deltas = {int(i): v for i, v in measurement["f1_deltas"].items()}
+    if len(deltas) != measurement["questions"] or not linked or not set(linked) <= deltas.keys():
+        raise ValueError("Incomplete paired training outcomes")
+    if any(not -1 <= v <= 1 for v in deltas.values()):
+        raise ValueError("Invalid per-question F1 difference")
+    terminal = mean(deltas.values())
+    if abs(100 * terminal - measurement["difference_points"]) > 1e-9:
+        raise ValueError("Terminal reward differs from the per-question mean")
+    return [terminal, (sum(deltas[j] for j in linked) + prior * terminal) / (len(linked) + prior)]
+
+
+def fit_state_credit(states, outcomes, ridge):
+    """Identical intercept and dual ridge estimator for both reward treatments."""
+    x = state_features(states)
+    y = outcomes.double()
+    if len(x) < 1 or y.shape != (len(x), 2) or not y.isfinite().all() or ridge <= 0:
+        raise ValueError("Expected paired finite rewards for separate training histories")
+    center, intercept = x.mean(0), y.mean(0)
+    z = x - center
+    gram = z @ z.T + ridge * torch.eye(len(z), dtype=z.dtype, device=z.device)
+    coef = z.T @ torch.linalg.solve(gram, y - intercept)
+    return coef, intercept - center @ coef
+
+
+def shift_boundary_logits(logits, outgoing, incoming, k, shift):
+    """Keep both logits in their original interval and all other skills fixed."""
+    edge = logits.topk(k + 1, dim=-1).indices[..., -2:]
+    eligible = (edge == outgoing).any(-1) & (edge == incoming).any(-1)
+    gap = logits[..., incoming] - logits[..., outgoing]
+    target = (gap + shift.to(logits)).clamp(-gap.abs(), gap.abs())
+    delta = torch.where(eligible, (target - gap) / 2, 0.)
+    result = logits.clone()
+    result[..., incoming] += delta
+    result[..., outgoing] -= delta
+    return result, eligible
+
+
+def match_skill_rate(logits, shift, outgoing, incoming, k, limit):
+    """Match the learned hard selection count on native training states with a constant shift."""
+    learned, eligible = shift_boundary_logits(logits, outgoing, incoming, k, shift)
+    def counts(x):
+        return (x.topk(k, dim=-1).indices == incoming).any(-1).sum(-1)
+    target = counts(learned)
+    gap = (logits[:, outgoing] - logits[:, incoming])[eligible]
+    bounds = torch.cat((gap.clamp(-limit, limit), logits.new_tensor([-limit, 0., limit]))).unique(sorted=True)
+    shifts = torch.cat((bounds, (bounds[1:] + bounds[:-1]) / 2))
+    grid = logits.expand(len(shifts), -1, -1)
+    static, _ = shift_boundary_logits(grid, outgoing, incoming, k, shifts[:, None])
+    visits = counts(static)
+    nearest = (visits - target).abs()
+    best = torch.where(nearest == nearest.min(), shifts.abs(), torch.inf).argmin()
+    return {"shift": shifts[best].item(), "spans": len(logits), "eligible": int(eligible.sum()),
+            "native_selected": int(counts(logits)), "span_selected": int(target), "rate_selected": int(visits[best]),
+            "disagreement_with_span": int(((static[best].topk(k).indices == incoming).any(-1)
+                                            != (learned.topk(k).indices == incoming).any(-1)).sum())}
+
+
+def freeze_paper_credit(train, swaps, output, device, data_file):
+    """Use only registered training spans and both independently generated pairs."""
+    if torch.device(device).type != "cuda":
+        raise ValueError("Paper Controller fitting requires the GPU lease")
+    paper = read(PROTOCOL)
+    panel, spec = paper["training_boundary_swap"], paper["state_credit"]
+    protocol = read(train / "protocol.json")
+    if (protocol.get("split") != "train" or protocol.get("dataset") != "locomo"
+            or protocol.get("question_keys") != paper["datasets"]["locomo"]["development_splits"]["train"]["scored_key_sha256"]
+            or protocol.get("encode_batch_size") != 64):
+        raise ValueError("Unexpected native training protocol")
+    _, questions = load_split_cohort("locomo", Path(data_file), paper["datasets"]["locomo"], "train")
+    inputs, rewards, sources, included = [], [], {}, []
+    history_states, history_logits = [], []
+    candidate_names = None
+    for sid, cell in panel["histories"].items():
+        index = cell["span"]
+        folder = train / "native" / sid
+        archived = folder / "controller-inputs.npz"
+        archive_hash = file_hash(archived)
+        if archive_hash != read(folder / "audit.json")["policy_inputs_sha256"]:
+            raise ValueError("Native training Controller inputs changed")
+        with np.load(archived, allow_pickle=False) as bank:
+            if bank["span_ids"].tolist() != list(range(cell["total_spans"])):
+                raise ValueError("Incomplete native Controller states")
+            states = bank["states"]
+            state = states[index]
+            names = bank["candidate_names"].tolist()
+        trace, = (folder / "traces").glob("*.jsonl")
+        with trace.open() as stream:
+            policies = [row["policy"] for line in stream if (row := json.loads(line))["kind"] == "span"]
+        if ((candidate_names is not None and names != candidate_names)
+                or any(p["candidates"] != names or p["state_sha256"] != hashlib.sha256(x.tobytes()).hexdigest()
+                       for p, x in zip(policies, states, strict=True))):
+            raise ValueError("Native training trajectory differs from the archived Controller inputs")
+        candidate_names = names
+        history_states.append(states)
+        history_logits.extend(p["logits"] for p in policies)
+        state_hash = hashlib.sha256(state.tobytes()).hexdigest()
+        targets, receipts, pairs = [], [], []
+        subset = {key: qa for key, qa in questions.items() if key[0] == sid}
+        for repeat in range(1, panel["independent_repeats"] + 1):
+            root = swaps / sid / f"span-{index}" / "repeats" / str(repeat) / "locomo"
+            path = root / "swap" / sid / "measurement.json"
+            run_protocol = read(root / "protocol.json")
+            fork = run_protocol.pop("training_swap")
+            m = read(path)
+            if (run_protocol != protocol or (fork["history"], fork["span"], fork["repeat"]) != (sid, index, repeat)
+                    or m["sample_id"] != sid or m["repeat"] != repeat or not m["registered_span"]
+                    or m["state_sha256"] != state_hash or m["span_id"] != index or m["matched_prefix_spans"] != index
+                    or m["linked_question_indices"] != cell["linked_question_indices"] or m["questions"] != cell["questions"]
+                    or not m["writer_prompt_changed"]):
+                raise ValueError(f"Repeat differs from its native training fork at {sid}/{repeat}")
+            if (m["artifacts"]["scores.json"] != file_hash(path.parent / "scores.json")
+                    or m["native_scores_sha256"] != file_hash(root / "native" / sid / "scores.json")):
+                raise ValueError("Paired answers changed after measurement")
+            left, right = [question_scores("locomo", subset, [root / arm / sid / "scores.json"]) for arm in ("native", "swap")]
+            if {str(k[1]): right[k] - left[k] for k in subset} != m["f1_deltas"]:
+                raise ValueError("Published credit disagrees with the original per-question answers")
+            pairs.append((m["outgoing"], m["incoming"]))
+            targets.append(credit_targets(m, cell["linked_question_indices"], spec["prior_questions"]))
+            receipts.append(file_hash(path))
+        if len(set(pairs)) != 1:
+            raise ValueError("Independent repeats disagree on the original boundary pair")
+        sources[sid] = {"pair": pairs[0], "span": index, "state_sha256": state_hash, "inputs_sha256": archive_hash,
+                        "trace_sha256": file_hash(trace), "measurements": receipts, "repeat_targets": targets}
+        if set(pairs[0]) == {spec["outgoing"], spec["incoming"]}:
+            sign = 1 if pairs[0][1] == spec["incoming"] else -1
+            inputs.append(state)
+            rewards.append([sign * mean(column) for column in zip(*targets, strict=True)])
+            included.append(sid)
+    if len(included) < 2:
+        raise ValueError("Fewer than two training histories measured the registered skill pair")
+    states = torch.as_tensor(np.stack(inputs), device=device)
+    y = torch.tensor(rewards, device=device, dtype=torch.float64)
+    for i, sid in enumerate(included):
+        keep = torch.arange(len(y), device=device) != i
+        w, b = fit_state_credit(states[keep], y[keep], spec["ridge"])
+        sources[sid]["leave_history_out_prediction"] = (state_features(states[i]) @ w + b).tolist()
+    w, b = fit_state_credit(states, y, spec["ridge"])
+    model = {"schema": 1, "treatments": ["terminal", "span"], "spec": spec, "train_protocol_sha256": file_hash(train / "protocol.json"),
+             "checkpoint": protocol["checkpoint"], "sources": sources, "weight": w.T.tolist(), "bias": b.tolist()}
+    all_states = torch.as_tensor(np.concatenate(history_states), device=device)
+    all_logits = torch.tensor(history_logits, dtype=torch.float32, device=device)
+    shift = spec["max_logit_shift"] * torch.tanh((state_features(all_states) @ w[:, 1] + b[1]) / spec["reward_scale"])
+    model["rate"] = match_skill_rate(all_logits, shift, candidate_names.index(spec["outgoing"]),
+                                     candidate_names.index(spec["incoming"]), protocol["settings"]["action_top_k"], spec["max_logit_shift"])
+    register(output, model)
+    return model
+
+
+@contextmanager
+def learned_skill_boundary(trainer, model, arm):
+    """Apply the frozen pre-write state score inside the original Controller forward."""
+    idx = model["treatments"].index(arm) if arm != "rate" else None
+    spec = model["spec"]
+    if idx is not None:
+        w = torch.tensor(model["weight"][idx], dtype=torch.float64, device=trainer.device)
+        b = w.new_tensor(model["bias"][idx])
+    names = [op.name for op in trainer.operation_bank.get_candidate_operations()]
+    outgoing, incoming = (names.index(spec[k]) for k in ("outgoing", "incoming"))
+    k = trainer.controller.action_top_k
+    records = []
+    state = None
+
+    def capture(module, args):
+        nonlocal state
+        state = args[0]
+
+    def adjust(module, args, output):
+        logits = output[0, :, 0]
+        value = None
+        if arm == "rate":
+            shift = logits.new_tensor(model["rate"]["shift"])
+        else:
+            value = state_features(state) @ w + b
+            shift = spec["max_logit_shift"] * torch.tanh(value / spec["reward_scale"])
+        adjusted, eligible = shift_boundary_logits(logits, outgoing, incoming, k, shift)
+        result = adjusted.reshape_as(output)
+        records.append({"eligible": bool(eligible), "prediction": value.item() if value is not None else None,
+                        "native_logits": logits.tolist(), "changed_logits": adjusted.tolist(),
+                        "native_top_k": [names[i] for i in logits.topk(k).indices.tolist()],
+                        "native_probabilities": logits.softmax(0).tolist()})
+        return result
+
+    with trainer.controller.register_forward_pre_hook(capture), trainer.controller.actor_head.register_forward_hook(adjust):
+        yield records
 
 
 def log_margins(trainer, batch, alternatives):

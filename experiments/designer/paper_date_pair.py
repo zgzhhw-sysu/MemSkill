@@ -246,9 +246,11 @@ def measure_training_swap(trainer, sample, args, root, original, questions, star
         save(measurement, record)
 
 
-def summarize_if_complete(dataset, output, questions, types, active_arms, published, split="test"):
+def summarize_if_complete(dataset, output, questions, types, active_arms, published, split="test", native_root=None):
     histories = dict.fromkeys(sid for sid, _ in questions)
     reports = {arm: [output.parent / arm / sid / "scores.json" for sid in histories] for arm in active_arms}
+    if native_root is not None:
+        reports["native"] = [native_root / "native" / sid / "scores.json" for sid in histories]
     if any(not path.exists() for paths in reports.values() for path in paths):
         return
     scores_by_arm = {arm: question_scores(dataset, questions, paths) for arm, paths in reports.items()}
@@ -273,6 +275,27 @@ def summarize_if_complete(dataset, output, questions, types, active_arms, publis
         dated = 100 * mean(scores_by_arm["dated"].values())
         summary.update(dated_f1=dated, gain_f1_points=dated - native,
                        paired=compare_revisions(arms["native"], arms["dated"]))
+    if "span" in scores_by_arm:
+        for arm in active_arms:
+            summary[arm + "_f1"] = 100 * mean(scores_by_arm[arm].values())
+        summary["by_history"] = {sid: {arm: 100 * mean(v for k, v in vals.items() if k[0] == sid)
+                                       for arm, vals in scores_by_arm.items()} for sid in histories}
+        summary["paired"] = {}
+        from experiments.controller.turn_key_credit import paired_interval
+        keys = ("spans", "eligible_spans", "probability_changes", "selection_changes", "membership_changes", "incoming_selections")
+        summary["exposure"] = {}
+        for arm in active_arms:
+            exposure = {}
+            for sid in histories:
+                audit = json.loads((output.parent / arm / sid / "audit.json").read_bytes())
+                exposure[sid] = {k: audit[k] for k in keys}
+            summary["exposure"][arm] = exposure
+        for other in ("native", "terminal", "rate"):
+            deltas = [scores_by_arm["span"][k] - scores_by_arm[other][k] for k in questions]
+            sizes = [sum(k[0] == sid for k in questions) for sid in histories]
+            differences = [row["span"] - row[other] for row in summary["by_history"].values()]
+            summary["paired"][other] = {"history_bootstrap_95_points": paired_interval(sizes, differences), "difference_points": 100 * mean(deltas), "higher": sum(d > 0 for d in deltas),
+                                         "lower": sum(d < 0 for d in deltas), "equal": sum(d == 0 for d in deltas)}
     save(output, summary)
 
 
@@ -356,6 +379,20 @@ def run(args, root, rank, workers):
         if repeat:
             plan["training_swap"].update(repeat=repeat, arms="independent-postfork-v1",
                                          usage_sha256=file_hash(original / "usage.jsonl"))
+    credit_base = os.environ.get("MEMSKILL_STATE_CREDIT_BASE")
+    native_validation = None
+    if credit_base:
+        from experiments.controller.controller_credit_study import freeze_paper_credit, learned_skill_boundary
+        if split != "validation" or args.dataset != "locomo" or workers != 1 or swap_history:
+            raise ValueError("Frozen state-credit comparison requires the LoCoMo validation split")
+        native_validation = Path(credit_base + "-locomo-validation") / "locomo"
+        if json.loads((native_validation / "protocol.json").read_bytes()) != plan or not (native_validation / "baseline.json").is_file():
+            raise ValueError("Validation comparison needs the complete native run with identical settings")
+        model = freeze_paper_credit(Path(credit_base + "-locomo-train") / "locomo", Path(credit_base + "-locomo-train-swap"),
+                                   root / "frozen.json", args.device, args.data_file)
+        if model["checkpoint"] != CHECKPOINT_SHA:
+            raise ValueError("Training and evaluation Controller checkpoints differ")
+        plan["state_credit_sha256"] = file_hash(root / "frozen.json")
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -381,6 +418,8 @@ def run(args, root, rank, workers):
     skill = trainer.operation_bank.operations[SKILL]
     types = {row["question_id"]: row["question_type"] for row in samples} if args.dataset == "longmemeval" else {}
     active_arms = ("native",) if os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") == "1" else tuple(VERSIONS)
+    if credit_base:
+        active_arms = (*model["treatments"], "rate")
     with reuse_qwen_retriever(trainer.state_encoder._base_encoder, args.retriever):
         if swap_history:
             sample, = [s for s in samples if trainer.data_processor.get_sample_id(s) == swap_history]
@@ -392,8 +431,8 @@ def run(args, root, rank, workers):
                 continue
             for arm in active_arms:
                 # The edit changes only the executor hook. Keep the checkpoint's skill embeddings in place.
-                skill.source_rule = None if arm == "native" else "dated_relative_turns"
-                if skill_spec(skill)["version"] != VERSIONS[arm]:
+                skill.source_rule = None if arm != "dated" else "dated_relative_turns"
+                if skill_spec(skill)["version"] != VERSIONS["dated" if arm == "dated" else "native"]:
                     raise ValueError(f"Unexpected {arm} skill version")
                 directory = root / arm / sid
                 directory.parent.mkdir(exist_ok=True)
@@ -401,22 +440,44 @@ def run(args, root, rank, workers):
                     with TemporaryDirectory(dir=directory.parent) as temp:
                         staged = Path(temp) / sid
                         staged.mkdir()
-                        with collect_policy_inputs(trainer, staged) if split != "test" else nullcontext():
+                        subset = {k: q for k, q in questions.items() if k[0] == sid}
+                        context = collect_policy_inputs(trainer, staged) if split != "test" else nullcontext()
+                        if credit_base:
+                            context = learned_skill_boundary(trainer, model, arm)
+                        with context as decisions:
                             run_traced_history(trainer, sample, args, staged)
                         stats = inspect_trace(staged / "traces", sid)
-                        if split != "test":
+                        if credit_base:
+                            spans = history_spans(staged)
+                            for decision, event in zip(decisions, spans, strict=True):
+                                if decision["changed_logits"] != event["policy"]["logits"]:
+                                    raise ValueError("Deployed logits differ from the actual Controller forward")
+                                selected = [s["name"] for s in event["selected_skills"]]
+                                decision["selected_top_k"] = selected
+                                decision["first_draw_changed"] = decision["native_probabilities"] != event["policy"]["first_draw_probabilities"]
+                            stats["eligible_spans"] = sum(d["eligible"] for d in decisions)
+                            stats["incoming_selections"] = sum(model["spec"]["incoming"] in d["selected_top_k"] for d in decisions)
+                            stats["probability_changes"] = sum(d["first_draw_changed"] for d in decisions)
+                            stats["selection_changes"] = sum(d["selected_top_k"] != d["native_top_k"] for d in decisions)
+                            stats["membership_changes"] = sum(set(d["selected_top_k"]) != set(d["native_top_k"]) for d in decisions)
+                            save(staged / "policy-comparison.json", decisions)
+                            stats["artifacts"] = {"policy-comparison.json": file_hash(staged / "policy-comparison.json")}
+                            stats["cost"] = measured_cost(staged, spans, len(subset))
+                        elif split != "test":
                             stats["policy_inputs_sha256"] = file_hash(staged / "controller-inputs.npz")
-                        subset = {k: q for k, q in questions.items() if k[0] == sid}
                         stats["f1_percent"] = score_answers(args.dataset, subset, [staged / "scores.json"])
                         save(staged / "audit.json", stats)
                         staged.rename(directory)
                 elif split != "test":
                     audit = json.loads((directory / "audit.json").read_bytes())
-                    if file_hash(directory / "controller-inputs.npz") != audit["policy_inputs_sha256"]:
+                    if credit_base:
+                        if file_hash(directory / "policy-comparison.json") != audit["artifacts"]["policy-comparison.json"]:
+                            raise ValueError(f"Archived policy comparison changed for {sid}")
+                    elif file_hash(directory / "controller-inputs.npz") != audit["policy_inputs_sha256"]:
                         raise ValueError(f"Archived policy inputs changed for {sid}")
                 print(f"Complete {args.dataset} {index+1}/{len(samples)} {sid} {arm}", flush=True)
     published = paper["reported_f1"]["Llama-3.1-8B-Instruct"][args.dataset]
-    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published, split)
+    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published, split, native_validation)
 
 
 if __name__ == "__main__":
