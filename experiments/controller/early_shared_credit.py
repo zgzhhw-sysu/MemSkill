@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.earliest_skill_evaluation import arm_data, available
 from experiments.controller.earliest_three_skills import (
     alternate_slots,
@@ -13,7 +14,6 @@ from experiments.controller.earliest_three_skills import (
 )
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import (
     make_bank,
     make_writer,
@@ -21,7 +21,6 @@ from experiments.controller.legacy_terminal_symmetry import (
     ops,
 )
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_skill_shared_credit import (
     EDGES,
     RULES,

@@ -4,11 +4,10 @@ import argparse
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.exchange_paths import Ranking
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.writer_format_trial import prepare
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import history_embeddings, read_response

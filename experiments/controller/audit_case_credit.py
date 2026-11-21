@@ -8,11 +8,10 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.case_credit import KINDS, corrections, possible_offsets, vote, vote_request
-from experiments.controller.factorial_rollout import read
 from experiments.controller.outcome_credit import matched_offset
 from experiments.controller.retrieval_competition import budgets, summarize
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import digest
 
 ARMS = (

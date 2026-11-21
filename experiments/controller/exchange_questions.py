@@ -10,10 +10,9 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.late_pair_trial import paths
 from experiments.controller.reply_probes import exchanges
-from experiments.controller.source_compression import file_hash, register
 from src.episode_trace import reference_match
 from src.eval.locomo import LoCoMoEvaluator
 from src.eval_utils import normalize_answer, ps

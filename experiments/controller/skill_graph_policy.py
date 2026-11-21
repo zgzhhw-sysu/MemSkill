@@ -6,11 +6,10 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.skill_graph_data import registration, training_rows
 from experiments.controller.skill_graph_extension import extra_rows
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_skill_margin import aggregate, distributions, score
 from experiments.controller.three_writer_credit import three_probabilities
 from experiments.controller.turn_key_credit import paired_interval

@@ -8,15 +8,14 @@ from statistics import mean
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.retrieval_competition import (
     learn,
     mass,
     probability,
     summarize,
 )
-from experiments.controller.source_compression import file_hash, register
 
 PLAN = Path(__file__).with_name("protocols") / "root_overlap_credit.json"
 ARMS = ("overlap", "prior", "rate", "return_only", "native", "terminal")

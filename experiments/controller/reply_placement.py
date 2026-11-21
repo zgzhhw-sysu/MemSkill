@@ -7,8 +7,8 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_prefix_return import scored_at
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_pair_trial import paths as assigned_paths
 from experiments.controller.reply_probes import PLAN
 from experiments.controller.retrieval_competition import (
@@ -18,7 +18,6 @@ from experiments.controller.retrieval_competition import (
     probability,
     summarize,
 )
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.writer_block_policy import trajectory_table
 from src.evaluation_cache import digest
 

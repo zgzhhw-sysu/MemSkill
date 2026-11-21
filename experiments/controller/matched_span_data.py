@@ -10,15 +10,14 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.exchange_paths import Ranking
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import census
 from experiments.controller.query_displacement_data import (
     encode_groups,
     registration,
     store_vectors,
 )
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest

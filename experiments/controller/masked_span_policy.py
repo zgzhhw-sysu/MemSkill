@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.assisted_span_backup import (
     cell_table,
     continuation,
@@ -25,8 +26,6 @@ from experiments.controller.evidence_transport import (
     root_targets,
 )
 from experiments.controller.evidence_transport_capacity import compare_suffixes
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 
 MODES = ("paired", "difficulty", "assisted", "resolved")
 

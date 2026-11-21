@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import archive
 from experiments.controller.complete_donor_paths import decision_context
 from experiments.controller.exchange_questions import (
@@ -21,9 +22,7 @@ from experiments.controller.exchange_questions import (
     quote,
     verify_question,
 )
-from experiments.controller.factorial_rollout import read
 from experiments.controller.resume_status import check_equal_source_choice
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import (
     execution_fault,
     hidden_retrieval_candidate,

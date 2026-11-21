@@ -9,14 +9,13 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.evidence_transport_data import sources
 from experiments.controller.exchange_questions import population, verify_question
 from experiments.controller.exchange_status import panel_state, resolved, stage_jobs
-from experiments.controller.factorial_rollout import read
 from experiments.controller.passage_advantage import evaluate
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.passage_evidence_prefix import evaluate as evaluate_prefix
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 
 ARMS = (

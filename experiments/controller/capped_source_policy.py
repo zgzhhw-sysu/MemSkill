@@ -9,8 +9,8 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import affected, archive, census
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_credit_kernel import (
     donor_observations,
     early_observations,
@@ -21,7 +21,6 @@ from experiments.controller.late_credit_kernel import (
 )
 from experiments.controller.late_pair_trial import paths
 from experiments.controller.retrieval_competition import summarize
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import recovered
 from src.eval.locomo import LoCoMoEvaluator
 

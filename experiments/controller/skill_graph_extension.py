@@ -3,12 +3,11 @@
 import argparse
 from pathlib import Path
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.exchange_paths import Ranking
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import measure
 from experiments.controller.relation_skill_repairs import forecast_window
 from experiments.controller.skill_graph_data import credits
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import history_embeddings
 
 PLAN = Path(__file__).with_name("protocols") / "skill_graph_extension.json"

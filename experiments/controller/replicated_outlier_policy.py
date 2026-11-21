@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.shared_outlier_policy import (
     allocate,
@@ -14,7 +14,6 @@ from experiments.controller.shared_outlier_policy import (
     fit_correction,
     skill_report,
 )
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_action_bounds import report as population_bounds
 from experiments.controller.three_skill_margin import score
 from experiments.controller.three_skill_shared_credit import SKILLS

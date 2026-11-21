@@ -6,9 +6,8 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.semantic_writer import summarize
-from experiments.controller.source_compression import file_hash, register
 
 PLAN = Path(__file__).with_name("protocols") / "semantic_writer_balanced.json"
 

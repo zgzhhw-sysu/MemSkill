@@ -8,11 +8,10 @@ from statistics import mean
 import torch
 from torch.nn import functional as F
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.late_pair_policy import assignments
 from experiments.controller.paired_grounding import window
 from experiments.controller.semantic_writer import REL, TEMP, sha, source_offsets, trial
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import history_embeddings
 from src.replay import dated_turn_groups
 

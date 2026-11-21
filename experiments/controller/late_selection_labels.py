@@ -6,13 +6,12 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.factorial_repairs import checked_cell, final_probe
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_pair_policy import assignments
 from experiments.controller.late_pair_trial import paths
 from experiments.controller.paired_grounding import window
 from experiments.controller.root_write_repairs import check_root, seed_controls
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import recovered
 from src.evaluation_cache import history_embeddings
 from src.rag_utils import get_embeddings

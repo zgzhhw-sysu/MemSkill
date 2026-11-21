@@ -8,14 +8,13 @@ from pathlib import Path
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.earliest_three_skills import (
     alternate_slots,
     verify_response,
 )
-from experiments.controller.factorial_rollout import read
 from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.skill_choice_replay import decisions, uniform
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 from src.evaluation_cache import digest
 

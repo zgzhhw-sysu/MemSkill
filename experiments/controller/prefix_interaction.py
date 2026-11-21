@@ -8,8 +8,7 @@ from statistics import mean
 import torch
 from torch.nn.functional import cosine_similarity
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from experiments.controller.terminal_capacity import optimal_rates, table
 
 PLAN = Path(__file__).with_name("protocols") / "prefix_interaction.json"

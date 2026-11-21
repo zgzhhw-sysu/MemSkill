@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.direct_skill_allocation import (
     direct_distributions,
     features,
 )
-from experiments.controller.factorial_rollout import read
 from experiments.controller.resume_status import check_equal_source_choice
 from experiments.controller.semantic_writer import (
     REL,
@@ -20,7 +20,6 @@ from experiments.controller.semantic_writer import (
 )
 from experiments.controller.skill_graph_policy import allocate as graph_allocate
 from experiments.controller.skill_graph_policy import predict
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import ACTIVITY, three_probabilities
 from experiments.controller.witness_passage_policy import limited
 from src.episode_trace import skill_spec

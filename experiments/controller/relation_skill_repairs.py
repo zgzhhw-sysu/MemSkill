@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import diagnose
 from experiments.controller.exchange_paths import Ranking
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_terminal_symmetry import (
     make_writer,
     measure,
@@ -17,7 +17,6 @@ from experiments.controller.legacy_terminal_symmetry import (
 from experiments.controller.paired_grounding import window
 from experiments.controller.relation_prefix_interaction import PREFIX_NAMES
 from experiments.controller.semantic_writer import measured_readers, sha
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import _digest, execution_fault, recovered
 from src.episode_trace import skill_spec
 from src.eval.locomo import LoCoMoEvaluator

@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.factorial_repairs import checked_cell, replay_writes
-from experiments.controller.factorial_rollout import read
 from experiments.controller.paired_grounding import window
 from experiments.controller.root_write_repairs import seed_controls
 from experiments.controller.semantic_writer import (
@@ -20,7 +20,6 @@ from experiments.controller.semantic_writer import (
     probabilities,
     sha,
 )
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.temporal_update_forecast import PLAN, UPDATE
 from experiments.controller.writer_granularity import measured_answer
 from src.credit_assignment import _digest, execution_fault, recovered

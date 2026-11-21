@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_cross_window import verified_decision
 from experiments.controller.evidence_transport_data import sources
-from experiments.controller.factorial_rollout import read
 from experiments.controller.late_credit_kernel import support
 from experiments.controller.passage_advantage import (
     decision_probabilities,
@@ -22,7 +22,6 @@ from experiments.controller.passage_evidence_actor import (
     gpu,
     score_sessions,
 )
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import (
     anchor_logits,
     cases,

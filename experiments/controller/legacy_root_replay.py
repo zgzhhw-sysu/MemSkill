@@ -8,10 +8,10 @@ import numpy as np
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import writer
 from experiments.controller.exchange_paths import Ranking, clean_marker
 from experiments.controller.exchange_questions import call
-from experiments.controller.factorial_rollout import read
 from experiments.controller.legacy_root_pivots import PLAN
 from experiments.controller.legacy_terminal_symmetry import (
     make_writer,
@@ -20,7 +20,6 @@ from experiments.controller.legacy_terminal_symmetry import (
     source,
 )
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from src.credit_assignment import _digest, execution_fault, hidden_retrieval_candidate
 from src.episode_trace import evidence_turns
 from src.evaluation_cache import encode_batch, history_embeddings

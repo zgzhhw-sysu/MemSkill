@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_policy import (
     baseline,
     cell_scores,
@@ -16,8 +17,6 @@ from experiments.controller.capped_source_policy import (
     surviving_credit,
 )
 from experiments.controller.exchange_paths import Ranking
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passages import clean
 from src.data_processing.locomo import LoCoMoProcessor
 from src.eval.locomo import LoCoMoEvaluator

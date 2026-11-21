@@ -8,7 +8,7 @@ from statistics import mean
 
 import torch
 
-from experiments.controller.factorial_rollout import read
+from experiments.controller import file_hash, read, register
 from experiments.controller.matched_span_data import (
     PLAN,
     extra_units,
@@ -21,7 +21,6 @@ from experiments.controller.passage_evidence_actor import gpu
 from experiments.controller.passage_evidence_prefix import evaluate as evaluate_prefix
 from experiments.controller.policy_capacity import summarize_capacity
 from experiments.controller.query_displacement_data import registration
-from experiments.controller.source_compression import file_hash, register
 from experiments.controller.witness_passage_policy import limited
 
 ARMS = (

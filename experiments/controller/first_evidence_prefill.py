@@ -7,8 +7,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.capped_source_repair import diagnose, writer
-from experiments.controller.factorial_rollout import read
 from experiments.controller.first_evidence_credit import (
     BACKEND,
     events,
@@ -16,7 +16,6 @@ from experiments.controller.first_evidence_credit import (
     register_trial,
 )
 from experiments.controller.semantic_writer import sha
-from experiments.controller.source_compression import file_hash, register
 from src.evaluation_cache import publish_response, read_response, request_cache
 from src.executor import Executor, deployment_operations
 from src.llm_utils import get_llm_response_via_api
