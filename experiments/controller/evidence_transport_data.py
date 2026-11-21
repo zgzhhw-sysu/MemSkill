@@ -6,8 +6,7 @@ from statistics import mean
 import numpy as np
 import torch
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash
+from experiments.controller import file_hash, read
 
 
 def sources(dest, device):

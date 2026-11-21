@@ -7,8 +7,8 @@ from itertools import product
 from pathlib import Path
 from statistics import mean
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
+
 
 PLAN = Path(__file__).with_name("protocols") / "matched_third_skill_capacity.json"
 

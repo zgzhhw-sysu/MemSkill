@@ -6,8 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from experiments.controller.factorial_rollout import read
-from experiments.controller.source_compression import file_hash, register
+from experiments.controller import file_hash, read, register
 from src.evaluation_cache import digest
 
 

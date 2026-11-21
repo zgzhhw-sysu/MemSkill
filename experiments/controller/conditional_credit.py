@@ -13,17 +13,13 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_source_compression import check_forecasts, panel
 from experiments.controller.factorial_rollout import CELLS, load_cell, record_scored_paths, summarize_window
 from experiments.controller.granularity_placement import load_panel
 from experiments.controller.paired_grounding import window
-from experiments.controller.source_compression import file_hash, register
 from src.data_processing.locomo import LoCoMoProcessor
 from src.eval import get_evaluator
-
-
-def read(path):
-    return json.loads(path.read_bytes())
 
 
 def coupled_paths(p, q, strength):

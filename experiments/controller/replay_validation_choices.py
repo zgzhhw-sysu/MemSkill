@@ -7,17 +7,10 @@ from pathlib import Path
 from statistics import mean
 from tempfile import TemporaryDirectory
 
+from experiments.controller import file_hash as digest, read
 from experiments.controller.audit_paired import probability, reader_inputs
 from experiments.designer.designer_pilot import save
 from src.revision_validation import evaluate_bank
-
-
-def read(path):
-    return json.loads(path.read_bytes())
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def verified_schedule(directory, weights, steps):

@@ -8,9 +8,9 @@ import re
 
 import torch
 
+from experiments.controller import file_hash, read as read_json, register
 from experiments.controller.audit_source_compression import check_forecasts, panel
 from experiments.controller.paired_policy import _shift_for_mean_probability, _training_states
-from experiments.controller.source_compression import file_hash, register
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import encode_batch
 from src.rag_utils import init_context_model, set_retriever_flash_attn
@@ -18,7 +18,7 @@ from src.replay import dated_turn_groups
 
 
 def read(p):
-    return json.loads(p.read_bytes())
+    return read_json(p)
 
 
 def mask_speakers(text, conversation):

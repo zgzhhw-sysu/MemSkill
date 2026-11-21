@@ -11,18 +11,14 @@ from tempfile import TemporaryDirectory
 import torch
 from torch.nn import functional as F
 
+from experiments.controller import file_hash, read, register
 from experiments.controller.audit_source_compression import check_forecasts
 from experiments.controller.paired_grounding import window
 from experiments.controller.replay_validation_choices import verify_rollout
-from experiments.controller.source_compression import file_hash, register
 from src.revision_validation import evaluate_bank
 
 
 CELLS = tuple(itertools.product((0, 1), repeat=2))
-
-
-def read(path):
-    return json.loads(path.read_bytes())
 
 
 def record_scored_paths(archive, forecast):
