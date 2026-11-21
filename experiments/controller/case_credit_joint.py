@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.case_credit_bounds import possible_offsets
+from experiments.controller.case_credit import possible_offsets
 from experiments.controller.factorial_rollout import read
 from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_writer_credit import question_links

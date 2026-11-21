@@ -2,15 +2,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from experiments.controller.audit_case_credit import score
+from experiments.controller.audit_case_credit import interval, score
 from experiments.controller.case_credit import (
     corrections,
     examples,
     excerpt,
+    possible_offsets,
     prompt,
     vote,
 )
-from experiments.controller.case_credit_bounds import interval, possible_offsets
 from experiments.controller.source_compression import register
 from src.evaluation_cache import digest
 

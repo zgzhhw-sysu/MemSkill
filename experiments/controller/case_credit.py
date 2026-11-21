@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+from itertools import product
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -124,6 +125,41 @@ def corrections(votes):
     }
 
 
+def vote_request(text):
+    """Construct the request shared by measurement and both receipt audits."""
+    return {
+        "model": "llama3-8b",
+        "temperature": 0,
+        "max_tokens": 3,
+        "messages": [{"role": "user", "content": text}],
+    }
+
+
+def possible_offsets(target, dest):
+    keys = []
+    observed = {}
+    for kind in KINDS:
+        for text in target["prompts"][kind]:
+            key = digest(vote_request(text))
+            keys.append(key)
+            path = dest / "responses" / (key + ".json")
+            if path.exists() and key not in observed:
+                record = read(path)
+                if key != record["request"]:
+                    raise ValueError("Wrong source prompt response")
+                observed[key] = vote(record["reply"], False)
+    missing = sorted(set(keys) - observed.keys())
+    offsets = set()
+    for completion in product((-1, 0, 1), repeat=len(missing)):
+        votes = observed | dict(zip(missing, completion, strict=True))
+        by_kind = {
+            kind: [votes[keys[2 * j]], -votes[keys[2 * j + 1]]]
+            for j, kind in enumerate(KINDS)
+        }
+        offsets.add(corrections(by_kind)["credit"])
+    return sorted(offsets), observed
+
+
 def registration(base, study, corpus):
     source, late = base / "source-compression", base / "late-pairs"
     out = source / "case-credit"
@@ -225,12 +261,7 @@ def measure(out, targets):
         for kind, strings in target["prompts"].items():
             votes[kind] = []
             for reverse, text in enumerate(strings):
-                payload = {
-                    "model": "llama3-8b",
-                    "temperature": 0,
-                    "max_tokens": 3,
-                    "messages": [{"role": "user", "content": text}],
-                }
+                payload = vote_request(text)
                 key = digest(payload)
                 saved = responses / (key + ".json")
                 if not saved.exists():

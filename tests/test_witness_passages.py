@@ -4,8 +4,7 @@ from pathlib import Path
 
 import torch
 
-from experiments.controller.witness_passage_factorial import ready
-from experiments.controller.witness_passage_labels import assignments
+from experiments.controller.witness_passage_factorial import assignments, ready
 from experiments.controller.witness_passage_policy import (
     cases,
     contrast_scores,
