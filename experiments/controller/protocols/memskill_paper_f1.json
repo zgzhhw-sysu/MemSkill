@@ -29,6 +29,7 @@
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
     "training": "mean of independent repeats per history; equal weights across histories",
+    "rate_search": "monotone search over representable FP32 shifts under deployed top-k",
     "rate_control": "constant boundary logit shift with closest incoming-skill count on all native training states, minimum absolute shift on ties",
     "validation": "two complete histories; native, terminal, span and rate-matched fixed bias from empty memory banks"
   },

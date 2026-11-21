@@ -102,6 +102,11 @@ class PaperF1Test(unittest.TestCase):
         self.assertEqual((static["span_selected"], static["rate_selected"], static["disagreement_with_span"]), (1, 1, 2))
         tied = match_skill_rate(logits[:1].expand(2, -1), torch.tensor([.1, 0.]), 1, 2, 2, .1)
         self.assertEqual((tied["span_selected"], tied["rate_selected"], tied["shift"]), (1, 0, 0.))
+        # Equal real-valued logit gaps can cross at different deployed FP32 shifts.
+        base = torch.tensor([1., 2., 8., 32., 128., 512.])
+        same_gap = torch.stack((base + 1, base + .03125, base, base - 1), dim=-1)
+        rounded = match_skill_rate(same_gap, torch.tensor([0., 0., 0., .1, .1, .1]), 1, 2, 2, .1)
+        self.assertEqual((rounded["span_selected"], rounded["rate_selected"]), (3, 3))
 
     def test_independent_repeat_seeds_only_preceding_writes_and_checks_them_on_resume(self):
         from experiments.designer.paper_date_pair import seed_writer_prefix
