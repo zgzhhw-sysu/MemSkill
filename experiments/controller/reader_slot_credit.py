@@ -443,6 +443,7 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_co
              "backend": meta["backend"], "history": sid, "span": pivot, "rows": rows})
     os.environ["MEMSKILL_USAGE_LOG"] = str(trial / "usage.jsonl")
     rows_out = []
+    generate = not verify and not (trial / "scores.json").is_file()
     arms = ["repeat", "target", "sham"]
     for ordinal, ((i, q), ctx) in enumerate(zip(questions.items(), contexts, strict=True)):
         record = rows[i]
@@ -457,7 +458,7 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_co
             contents = [text for j, (_, text) in enumerate(ctx) if j not in remove]
             prompt = ev.build_prompt(q["question"], contents, q)
             key = reader_key(model, prompt)
-            if not verify:
+            if generate:
                 measured_answer(prompt, model, q, ev, fresh)
             receipt = read_response(fresh, key)
             if not receipt or receipt["payload"]["prompt_sha256"] != sha(prompt):
@@ -487,7 +488,7 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_co
                 old = previous[row["qa_index"]]["answers"]
                 if old["repeat"] != row["answers"]["repeat"]:
                     raise ValueError("Copy and version arms must share the same native Reader response")
-                diffs.append(row["answers"]["target"]["f1"] - old["target"]["f1"])
+                diffs.append(float(row["answers"]["target"]["f1"]) - old["target"]["f1"])
             summary[name]["copy_minus_version"] = {
                 "points": 100 * mean(diffs) if diffs else None,
                 "higher": sum(v > 0 for v in diffs), "equal": sum(v == 0 for v in diffs), "lower": sum(v < 0 for v in diffs)
