@@ -460,9 +460,11 @@ def measure_copy_interaction(version_dir, expected, protocol, sid, pivot, questi
     effects = {}
     for name in sorted({k for row in rows for k in row["effects"]}):
         values = [r["effects"][name] for r in rows if name in r["effects"]]
+        # Subtracting paired F1 differences can leave roundoff on a mathematical tie.
+        positive = sum(v > 1e-12 for v in values)
+        negative = sum(v < -1e-12 for v in values)
         effects[name] = {"questions": len(values), "points": 100 * mean(values),
-                         "positive": sum(v > 0 for v in values), "zero": sum(v == 0 for v in values),
-                         "negative": sum(v < 0 for v in values)}
+                         "positive": positive, "negative": negative, "zero": len(values) - positive - negative}
     register(out / "summary.json", {"history": sid, "span": pivot, "questions": len(questions),
              "expanded_questions": len(rows), "matched_questions": sum(r["control"] is not None for r in design.values()),
              "effects": effects, "plan_sha256": file_hash(out / "plan.json"), "scores_sha256": file_hash(out / "scores.json")})
