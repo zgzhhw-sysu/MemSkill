@@ -1,6 +1,8 @@
 """
 Memory Bank: Stores and retrieves memory items
 """
+import os
+
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Union
 import copy
@@ -259,28 +261,38 @@ class MemoryBank:
 
         # Get embeddings matrix based on embedding type
         embeddings = self._get_embeddings_matrix(use_state_encoder=use_state_encoder)
-        embeddings_for_sim = embeddings
-
-        if use_state_encoder or self.retriever_name == 'dragon':
-            emb_norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings_for_sim = embeddings / (emb_norms + 1e-8)
-
-        # Compute similarities (normalize embeddings only for similarity)
-        if isinstance(query_embedding, np.ndarray):
-            q = query_embedding.reshape(1, -1).astype('float32')
-        else:
-            q = np.asarray(query_embedding, dtype='float32').reshape(1, -1)
-
-        # Normalize query
-        q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
-
-        # Compute similarities
-        similarities = np.dot(q_norm, embeddings_for_sim.T)[0]
-
-        # Get top-k indices
+        normalize_memories = use_state_encoder or self.retriever_name == 'dragon'
         actual_k = min(top_k, len(self.memories))
-        top_indices = np.argsort(similarities)[::-1][:actual_k]
+        top_indices = None
+        if os.environ.get("MEMSKILL_MEMORY_SEARCH") == "cuda":
+            import torch
 
+            matrix = torch.as_tensor(embeddings, device="cuda", dtype=torch.float32)
+            query = torch.as_tensor(query_embedding, device=matrix.device, dtype=torch.float32).reshape(-1)
+            if normalize_memories:
+                matrix = matrix / (torch.linalg.vector_norm(matrix, dim=1, keepdim=True) + 1e-8)
+            query = query / (torch.linalg.vector_norm(query) + 1e-8)
+            similarities = torch.mv(matrix, query)
+            values, indices = similarities.sort(descending=True)
+            boundary = values[:actual_k + 1]
+            # A changed order of equal/near-equal scores can change which memory version gets credit.
+            # Bound float32 norm/dot rounding by the vector length and the largest possible inner product.
+            max_norm = 1.0 if normalize_memories else torch.linalg.vector_norm(matrix, dim=1).amax()
+            margin = 4 * torch.finfo(matrix.dtype).eps * matrix.shape[1] * max_norm
+            gaps = boundary[:-1] - boundary[1:]
+            if actual_k >= 0 and (torch.isfinite(boundary).all() & (gaps > margin).all()).item():
+                top_indices = indices[:actual_k].cpu().numpy()
+
+        if top_indices is None:
+            # Preserve upstream BLAS accumulation and NumPy's tie order when ranking is ambiguous.
+            embeddings_for_sim = embeddings
+            if normalize_memories:
+                emb_norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                embeddings_for_sim = embeddings / (emb_norms + 1e-8)
+            q = np.asarray(query_embedding, dtype='float32').reshape(1, -1)
+            q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
+            similarities = np.dot(q_norm, embeddings_for_sim.T)[0]
+            top_indices = np.argsort(similarities)[::-1][:actual_k]
         # Update access statistics
         for idx in top_indices:
             self.memories[idx].access_count += 1
