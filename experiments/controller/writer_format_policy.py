@@ -16,10 +16,11 @@ from experiments.controller.source_compression import file_hash, register
 from experiments.controller.three_skill_margin import margin_fit, score
 from experiments.controller.witness_passage_policy import limited
 from experiments.controller.writer_format_history import archive as history_archive
+from experiments.controller.writer_format_sampling import SAMPLED
 from experiments.controller.writer_format_trial import CELLS, effects, shares
 
 SENSITIVITY = Path(__file__).with_name("protocols") / "writer_format_sensitivity.json"
-MODES = ("sensitivity", "verified", "dense", "history", "transfer")
+MODES = ("sensitivity", "verified", "dense", "history", "transfer", *SAMPLED)
 
 
 def collect(base, src, mode):
@@ -262,6 +263,30 @@ def allocate(native, packet):
     }
 
 
+def predict(model, comparisons, source):
+    pred = scores_at(model, source, "cuda")
+    for k, c in comparisons.items():
+        s = scores_at(c, source, "cuda")
+        for arm in ("credit", "raw"):
+            pred[k + "_" + arm] = s[arm]
+    return pred
+
+
+def surveyed_samples(rows, survey, key):
+    result = []
+    for r in rows:
+        v = survey["windows"][r["node"]]
+        if "excluded" in v:
+            continue
+        if v["n"] <= 0 or v[key] is None:
+            raise ValueError("Incomplete window estimate")
+        total, difference = r["raw"], v[key]
+        result.append(
+            {**r, "component_raw": [(total + difference) / 2, (total - difference) / 2]}
+        )
+    return result
+
+
 def freeze(base, mode):
     src = base / "source-compression/writer-format-credit"
     three = base / "late-pairs/semantic-writer/three-writer"
@@ -274,12 +299,16 @@ def freeze(base, mode):
     f = out / "forecast.json"
     e = earlyout / "forecast.json"
     historic = history_archive(base) if mode in ("history", "transfer") else None
+    sampled = mode in SAMPLED
+    survey_path = src / "sampling" / (mode + ".json")
     identity = {
         "parent": file_hash(parent),
         "early": file_hash(early),
         "registration": file_hash(src / "registration.json"),
         "stage": file_hash(
-            historic
+            survey_path
+            if sampled
+            else historic
             if mode == "history"
             else SENSITIVITY
             if mode == "sensitivity"
@@ -287,6 +316,9 @@ def freeze(base, mode):
             / (("readers" if mode == "dense" else "verified") + "-complete.json")
         ),
     }
+    if sampled:
+        identity["verified"] = file_hash(src / "verified-complete.json")
+        identity["frame"] = file_hash(src / "sampling/frame.json")
     if historic is not None:
         identity["historical"] = file_hash(historic)
     original_factor = three / "writer-format-verified/forecast.json"
@@ -300,7 +332,25 @@ def freeze(base, mode):
         ):
             raise ValueError("Changed writer/format forecast")
         return f
-    rows, excluded = collect(base, src, mode)
+    rows, excluded = collect(base, src, "verified" if sampled else mode)
+    controls = {}
+    if sampled:
+        survey = read(survey_path)
+        if survey["frame"] != identity["frame"] or set(survey["windows"]) != {
+            r["node"] for r in rows
+        }:
+            raise ValueError("Changed sampled-difference population")
+        excluded.update(
+            {k: v["excluded"] for k, v in survey["windows"].items() if "excluded" in v}
+        )
+        proxy = surveyed_samples(rows, survey, "proxy")
+        if mode != "proxy":
+            controls = {
+                "proxy": proxy,
+                "sample_only": surveyed_samples(rows, survey, "sample_only"),
+            }
+        rows = proxy if mode == "proxy" else surveyed_samples(rows, survey, "corrected")
+        controls["whole"] = rows
     history_rows = read(historic)["rows"] if historic is not None else ()
     earlier_without = early.parent / "writer-format-verified/forecast.json"
     without = read(original_factor)["windows"] if mode == "transfer" else {}
@@ -312,7 +362,7 @@ def freeze(base, mode):
     models = {}
     later = read(parent)["windows"]
     original = read(early)
-    if mode == "dense" and len({r["history"] for r in rows}) < 2:
+    if (mode == "dense" or sampled) and len({r["history"] for r in rows}) < 2:
         register(
             out / "unavailable.json",
             {
@@ -324,12 +374,18 @@ def freeze(base, mode):
         return None
     for h in sorted({w["history"] for w in original["windows"].values()}):
         with limited():
-            m = fit(rows, h, "cuda", dense=mode == "dense", history=history_rows)
-            models[h] = m
+            m = fit(
+                rows, h, "cuda", dense=mode == "dense" or sampled, history=history_rows
+            )
+            counter = {
+                k: fit(v, h, "cuda", dense=k != "whole") for k, v in controls.items()
+            }
+            models[h] = {**m, "comparison_models": counter} if sampled else m
+
             for k, w in later.items():
                 if k.rsplit("_s", 1)[0] != h:
                     continue
-                pred = scores_at(m, w["scores"]["source_features"], "cuda")
+                pred = predict(m, counter, w["scores"]["source_features"])
                 if (
                     mode in ("sensitivity", "verified")
                     and abs(pred["raw"] - w["scores"]["direct"]["raw"]) > 1e-10
@@ -348,7 +404,7 @@ def freeze(base, mode):
                 ps = probabilities(
                     native,
                     native.new_tensor(p["direct_raw"][0]),
-                    scores_at(m, w["features"], "cuda"),
+                    predict(m, counter, w["features"]),
                 )
                 if (
                     mode in ("sensitivity", "verified")
@@ -423,11 +479,13 @@ if __name__ == "__main__":
             f,
             allocate,
             direct=True,
-            eligible=a.mode not in ("sensitivity", "history"),
+            eligible=a.mode not in ("sensitivity", "history", "proxy", "sample1"),
             extra_controls=("swapped", "equal", "undivided")
             + (
                 ("zero_history", "zero_current", "no_transport")
                 if a.mode == "transfer"
+                else ("proxy_credit", "sample_only_credit", "whole_credit")
+                if a.mode == "sample2"
                 else ()
             ),
             replay_choices=True,

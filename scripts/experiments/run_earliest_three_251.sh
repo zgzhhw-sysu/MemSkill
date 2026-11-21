@@ -21,15 +21,18 @@ if [[ $phase == forecast ]]; then
     done
     exit 0
 fi
-if [[ $phase == evaluation || $phase == state-evaluation || $phase == writer-format-sensitivity || $phase == writer-format-verified || $phase == writer-format-dense || $phase == writer-format-history || $phase == writer-format-transfer ]]; then
+if [[ $phase == evaluation || $phase == state-evaluation || $phase == temporal-gate || $phase == outlier-total || $phase == outlier-components || $phase == writer-format-sensitivity || $phase == writer-format-verified || $phase == writer-format-dense || $phase == writer-format-history || $phase == writer-format-transfer || $phase == writer-format-proxy || $phase == writer-format-sample1 || $phase == writer-format-sample2 ]]; then
     policy="$out"
     flags=()
     device=3
     if [[ $phase == writer-format-* ]]; then policy="$out/$phase"; flags+=(--factor "${phase#writer-format-}"); device=1; fi
+    if [[ $phase == writer-format-proxy || $phase == writer-format-sample1 || $phase == writer-format-sample2 ]]; then device=0; fi
+    if [[ $phase == outlier-* ]]; then policy="$out/$phase"; flags+=(--outlier "$phase"); device=0; fi
+    if [[ $phase == temporal-gate ]]; then policy="$out/temporal-gate"; flags+=(--gate); device=0; fi
     if [[ $phase == state-evaluation ]]; then policy="$out/checkpoint-odds"; flags+=(--state); fi
     prior_state=
     while [[ ! -f "$policy/evaluation/summary.json" ]]; do
-        if [[ $phase == writer-format-dense && -f "$base/late-pairs/semantic-writer/three-writer/$phase/unavailable.json" ]]; then exit 0; fi
+        if [[ $phase == writer-format-* && -f "$base/late-pairs/semantic-writer/three-writer/$phase/unavailable.json" ]]; then exit 0; fi
         if [[ -f "$policy/forecast.json" ]]; then
             state=$(find "$earlier/outcomes" "$out/readers" "$out/pairs" "$out/judged" -maxdepth 1 -name 'conv-*.json' -printf '%p\n' 2>/dev/null | sort || true)
             if [[ -n $state && $prior_state != "$state" || ( -f "$out/judged-complete.json" && -f "$earlier/outcomes-complete.json" ) ]]; then

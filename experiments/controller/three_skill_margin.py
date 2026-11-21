@@ -18,7 +18,7 @@ PLAN = Path(__file__).with_name("protocols") / "three_skill_margin.json"
 MODELS = ("raw", "credit", "rotated")
 
 
-def margin_fit(x, y, w, c, v, *, constraint_x=None, penalty=None):
+def margin_fit(x, y, w, c, v, *, constraint_x=None, penalty=None, constraint_offset=None):
     """Convex squared-hinge regularization; the raw ridge solution is the zero-credit limit."""
     if constraint_x is None:
         constraint_x = x
@@ -31,8 +31,10 @@ def margin_fit(x, y, w, c, v, *, constraint_x=None, penalty=None):
     if not v.any():
         return raw, raw
 
+    offset = 0.0 if constraint_offset is None else constraint_offset
+
     def objective(b):
-        residual = (c.abs() - c.sign() * (constraint_x @ b)).clamp_min(0)
+        residual = (c.abs() - c.sign() * (constraint_x @ b + offset)).clamp_min(0)
         return (
             (w * ((x @ b) - y).square()).sum()
             + (penalty * b.square()).sum()
@@ -41,7 +43,7 @@ def margin_fit(x, y, w, c, v, *, constraint_x=None, penalty=None):
 
     beta = raw.clone()
     for _ in range(40):
-        gap = constraint_x @ beta - c
+        gap = constraint_x @ beta + offset - c
         active = v * (c.sign() * gap < 0)
         gradient = gram @ beta - rhs + constraint_x.T @ (active * gap)
         if gradient.abs().max() < 1e-10:
