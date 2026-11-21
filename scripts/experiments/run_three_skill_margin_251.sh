@@ -46,6 +46,14 @@ case $mode in
             until [[ -f "$early/shared-weak-credit/${mode#outlier-}.json" && -f "$parent/outlier-components/forecast.json" ]]; do sleep 15; done
         fi
         if [[ $mode != outlier-total ]]; then until [[ -f "$shared/outcomes-complete.json" ]]; do sleep 20; done; fi ;;
+    outlier-replicated-initial|outlier-replicated-final)
+        gpu=0
+        wave=${mode#outlier-replicated-}
+        out="$parent/$mode"
+        cmd=(experiments.controller.replicated_outlier_policy "$base" "$wave")
+        until [[ -f "$base/source-compression/earliest-three-skills/shared-weak-credit/registration.json" ]]; do sleep 15; done
+        "$MEMSKILL_PYTHON" -m "${cmd[@]}" --register-only
+        until [[ -f "$base/source-compression/earliest-three-skills/outlier-$wave/forecast.json" ]]; do sleep 20; done ;;
     temporal-gate)
         gpu=0
         out="$parent/temporal-gate"

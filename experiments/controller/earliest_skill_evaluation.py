@@ -511,6 +511,8 @@ if __name__ == "__main__":
             "outlier-components",
             "outlier-initial",
             "outlier-final",
+            "outlier-replicated-initial",
+            "outlier-replicated-final",
         ),
     )
     model.add_argument(

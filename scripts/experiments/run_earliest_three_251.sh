@@ -21,7 +21,7 @@ if [[ $phase == forecast ]]; then
     done
     exit 0
 fi
-if [[ $phase == evaluation || $phase == state-evaluation || $phase == temporal-gate || $phase == outlier-total || $phase == outlier-components || $phase == outlier-initial || $phase == outlier-final || $phase == writer-format-sensitivity || $phase == writer-format-verified || $phase == writer-format-dense || $phase == writer-format-history || $phase == writer-format-transfer || $phase == writer-format-proxy || $phase == writer-format-sample1 || $phase == writer-format-sample2 ]]; then
+if [[ $phase == evaluation || $phase == state-evaluation || $phase == temporal-gate || $phase == outlier-* || $phase == writer-format-sensitivity || $phase == writer-format-verified || $phase == writer-format-dense || $phase == writer-format-history || $phase == writer-format-transfer || $phase == writer-format-proxy || $phase == writer-format-sample1 || $phase == writer-format-sample2 ]]; then
     policy="$out"
     flags=()
     device=3

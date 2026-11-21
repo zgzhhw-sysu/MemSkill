@@ -2,6 +2,7 @@
 
 import json
 import os
+from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -133,6 +134,30 @@ def binary_scores(base, spec, prediction, history):
     )
 
 
+def signed_direction_bounds(raw, delta, scores):
+    """Extremize any sign-preserving logit update shared by all questions in a window."""
+    weights = (raw / 0.05).softmax(0)
+    signs = delta.sign().tolist()
+    negative = [i for i, x in enumerate(signs) if x < 0]
+    candidates = [weights]
+    # A negative action ranges from its raw weight to zero. A positive one
+    # ranges from its raw weight to infinity, where it takes all learned mass.
+    for k in range(1, min(len(negative), len(signs) - 1) + 1):
+        for removed in combinations(negative, k):
+            p = weights.clone()
+            p[list(removed)] = 0
+            candidates.append(p / p.sum())
+    for i, x in enumerate(signs):
+        if x > 0:
+            vertex = torch.zeros_like(weights)
+            vertex[i] = 1
+            candidates.append(vertex)
+    values = torch.stack(
+        [contrast_bounds(0.8 * (p - weights), scores) for p in candidates]
+    )
+    return [float(values[:, 0].min()), float(values[:, 1].max())]
+
+
 def report(base, forecast):
     out = forecast.parent
     panel = base / "late-pairs/semantic-writer/panel.json"
@@ -157,6 +182,7 @@ def report(base, forecast):
         if r["sample_id"] in {w["dialogue"] for w in spec}
     }
     windows = {}
+    directions = {}
     sources = {}
     for w in spec:
         name = f"{w['dialogue']}_s{w['start']}"
@@ -204,7 +230,7 @@ def report(base, forecast):
             )
             bounds = contrast_bounds(delta, table).tolist()
             controls = {}
-            for key_control in ("zero_new", "previous"):
+            for key_control in ("zero_new", "previous", "unreplicated"):
                 if key_control not in s.get("outlier", {}):
                     continue
                 reference = t(raw) + t(s["outlier"][key_control])
@@ -223,6 +249,16 @@ def report(base, forecast):
                             "Expanded-credit comparison changed the issued probabilities"
                         )
                 controls[key_control] = contrast_bounds(shift, table).tolist()
+            if "unreplicated" in s.get("outlier", {}):
+                update = t(s["outlier"]["credit"])
+                envelope = signed_direction_bounds(t(raw), update, table)
+                if envelope[0] > bounds[0] + 1e-10 or envelope[1] < bounds[1] - 1e-10:
+                    raise ValueError("Signed class excludes the issued correction")
+                directions[name] = {
+                    "n": len(values),
+                    "signs": update.sign().tolist(),
+                    "bounds": envelope,
+                }
         windows[name] = {
             "n": len(values),
             "status": status,
@@ -269,3 +305,23 @@ def report(base, forecast):
             ],
         },
     )
+    if directions:
+        if set(windows) != set(directions):
+            raise ValueError("Incomplete signed policy class")
+        measured = folder / ("bounds-" + digest(inputs) + ".json")
+        register(
+            folder / ("directions-" + digest(inputs) + ".json"),
+            {
+                "bounds": file_hash(measured),
+                "n": n,
+                "windows": directions,
+                "class_minus_raw": [
+                    sum(r["bounds"][j] for r in directions.values()) / n
+                    for j in range(2)
+                ],
+                "eligible_windows": sum(any(r["signs"]) for r in directions.values()),
+                "eligible_questions": sum(
+                    r["n"] for r in directions.values() if any(r["signs"])
+                ),
+            },
+        )
