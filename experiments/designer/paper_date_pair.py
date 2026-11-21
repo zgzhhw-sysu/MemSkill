@@ -121,6 +121,18 @@ def run(args, root, rank, workers):
             "encode_batch_size": args.encode_batch_size, "flash_attention": config.use_flash_attn}
     if os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") == "1":
         plan["native_policy_trace"] = "first-draw-logits-v1"
+    prefill_only = os.environ.get("MEMSKILL_QWEN_PREFILL_ONLY") == "1"
+    if prefill_only:
+        import torch
+        if args.device != "cuda":
+            raise ValueError("The Qwen prefill comparison requires a GPU")
+        free, total = torch.cuda.mem_get_info()
+        # Leave 1 GiB free on the shared 251 card, and cap this encoder at 3.25 GiB.
+        budget = min(3328 * 2**20, free - 2**30)
+        if budget < 2250 * 2**20:
+            raise RuntimeError("Insufficient free GPU memory for the batch-64 encoder")
+        torch.cuda.set_per_process_memory_fraction(budget / total)
+        plan["encoder_kv_cache"] = False
     protocol = root / "protocol.json"
     with (root / "protocol.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -137,6 +149,11 @@ def run(args, root, rank, workers):
         return
     set_seed(args.seed)
     trainer = get_trainer(args, config)
+    if prefill_only:
+        base = trainer.state_encoder._base_encoder
+        if base is not trainer.op_encoder._base_encoder or base is not trainer.memory_bank_encoder._base_encoder:
+            raise ValueError("Expected one shared Qwen encoder for the serial comparison")
+        base.model[0].auto_model.config.use_cache = False
     trainer.load_checkpoint(args.load_checkpoint)
     skill = trainer.operation_bank.operations[SKILL]
     _, _, test = split_data(load_dataset(args.data_file, args.dataset), args.dataset)
