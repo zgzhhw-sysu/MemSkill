@@ -293,3 +293,5 @@ conv-43 这条路径已完成全部 10 题，固定技能重测后均分增加 0
 模型计算继续在 251 进行，248 的结果镜像为 `../runs/span_credit/251-bf16/linked-eight-gpu/logs/`。先看 `source-compression/earliest-three-skills/` 的 `forecast.json`、`pairs/`、`judged/` 和最新的 `evaluation/snapshot-*.json`。早期队列共 123 道不同原题，有 91 题通过旧分支的检索重放。直接信用在共同抽样下使 conv-43 第 3–4 场由活动技能换为关系技能。首个完成实测的窗口是 conv-41 第 3–4 场，其 4 题全部涉及前一场，原题答案及三技能分数已对齐。
 
 新状态策略的后期结果在 `late-pairs/semantic-writer/three-writer/checkpoint-odds/through-10.json`。已有的 24 道后期题中，期望 F1 为 0.578094，同设计原始回报为 0.577469；在共同抽样中两者选技相同。独立测试仍留出。等待早期所有窗口完成后，`earliest-credit-update/` 会将新增的经核验信用用于下一次拟合，并与保留新增原始回报、清零新增信用的版本对照。[算法及逐项指标](algorithm-notes.md#用写入前的原生技能偏好调节-span-信用) · [251 恢复命令](server-251.md#原始轨迹的第三种技能与状态条件概率)
+
+后期队列又收回 conv-43 的 12 题。最新的 `checkpoint-odds/through-11.json` 含 4 个匹配评估窗口、36 题，状态信用 0.553433，同设计原始回报 0.553411，关闭状态特征 0.553919。对话配对区间跨零，未晋级。查 `questions/evaluation-11.json` 可分题型查看，查 `decisions/evaluation-11.json` 可查看 36 题上的共同抽样 F1 0.552774 和读写成本。251 的完整自动化测试共 276 项，全部通过。
