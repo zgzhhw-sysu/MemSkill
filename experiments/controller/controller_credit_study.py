@@ -73,19 +73,45 @@ def match_skill_rate(logits, shift, outgoing, incoming, k, limit):
     learned, eligible = shift_boundary_logits(logits, outgoing, incoming, k, shift)
     def counts(x):
         return (x.topk(k, dim=-1).indices == incoming).any(-1).sum(-1)
-    target = counts(learned)
-    gap = (logits[:, outgoing] - logits[:, incoming])[eligible]
-    bounds = torch.cat((gap.clamp(-limit, limit), logits.new_tensor([-limit, 0., limit]))).unique(sorted=True)
-    shifts = torch.cat((bounds, (bounds[1:] + bounds[:-1]) / 2))
-    grid = logits.expand(len(shifts), -1, -1)
-    static, _ = shift_boundary_logits(grid, outgoing, incoming, k, shifts[:, None])
-    visits = counts(static)
-    nearest = (visits - target).abs()
-    best = torch.where(nearest == nearest.min(), shifts.abs(), torch.inf).argmin()
-    return {"shift": shifts[best].item(), "spans": len(logits), "eligible": int(eligible.sum()),
-            "native_selected": int(counts(logits)), "span_selected": int(target), "rate_selected": int(visits[best]),
-            "disagreement_with_span": int(((static[best].topk(k).indices == incoming).any(-1)
+    if logits.dtype != torch.float32 or limit <= 0:
+        raise ValueError("Rate matching requires native FP32 logits and a positive shift limit")
+    native, target = int(counts(logits)), int(counts(learned))
+    direction = 1 if target >= native else -1
+    last = int(np.float32(limit).view(np.uint32))
+    visited = {0: native}
+
+    def shift_at(bits):
+        return direction * float(np.uint32(bits).view(np.float32))
+
+    def visits(bits):
+        if bits not in visited:
+            adjusted, _ = shift_boundary_logits(logits, outgoing, incoming, k, logits.new_tensor(shift_at(bits)))
+            visited[bits] = int(counts(adjusted))
+        return visited[bits]
+
+    def first_reaching(number):
+        # Nonnegative finite FP32 magnitudes have the same order as their unsigned bits.
+        # Selection count is monotone as the incoming skill rises and its competitor falls.
+        left, right = 0, last
+        while left < right:
+            mid = (left + right) // 2
+            if direction * (visits(mid) - number) >= 0:
+                right = mid
+            else:
+                left = mid + 1
+        return left
+
+    endpoint = visits(last)
+    reachable = min(target, endpoint) if direction > 0 else max(target, endpoint)
+    upper = first_reaching(reachable)
+    closest = min((upper, max(upper - 1, 0)), key=lambda i: (abs(visits(i) - target), i))
+    best = first_reaching(visits(closest))
+    static, _ = shift_boundary_logits(logits, outgoing, incoming, k, logits.new_tensor(shift_at(best)))
+    return {"shift": shift_at(best), "spans": len(logits), "eligible": int(eligible.sum()),
+            "native_selected": native, "span_selected": target, "rate_selected": int(counts(static)),
+            "disagreement_with_span": int(((static.topk(k).indices == incoming).any(-1)
                                             != (learned.topk(k).indices == incoming).any(-1)).sum())}
+
 
 
 def freeze_paper_credit(train, swaps, output, device, data_file):
