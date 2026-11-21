@@ -10,8 +10,8 @@ from statistics import mean
 from tempfile import TemporaryDirectory
 from urllib.request import urlopen
 
-from experiments.controller import file_hash, measured_cost
-from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores, score_answers
+from experiments.controller import file_hash, measured_cost, register
+from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort, question_scores, read_locked_json, score_answers, validation_decision
 from src.cli import set_seed
 from src.config import AgenticMemoryConfig, get_agentic_memory_args
 from src.episode_trace import inspect_trace, skill_spec
@@ -257,6 +257,10 @@ def summarize_if_complete(dataset, output, questions, types, active_arms, publis
     if "span" in scores_by_arm:
         for arm in active_arms:
             summary[arm + "_f1"] = 100 * mean(scores_by_arm[arm].values())
+        if split == "test":
+            summary["difference_from_paper_by_arm"] = {
+                arm: summary[arm + "_f1"] - published for arm in scores_by_arm
+            }
         summary["by_history"] = {sid: {arm: 100 * mean(v for k, v in vals.items() if k[0] == sid)
                                        for arm, vals in scores_by_arm.items()} for sid in histories}
         summary["paired"] = {}
@@ -282,6 +286,18 @@ def run(args, root, rank, workers):
     paper = json.loads(PROTOCOL.read_text())
     spec = paper["datasets"][args.dataset]
     split = os.environ.get("MEMSKILL_PAPER_SPLIT", "test")
+    credit_base = os.environ.get("MEMSKILL_STATE_CREDIT_BASE")
+    if credit_base:
+        if (split not in ("validation", "test") or args.dataset != "locomo" or workers != 1
+                or os.environ.get("MEMSKILL_SWAP_HISTORY")):
+            raise ValueError("Frozen state-credit comparison requires the LoCoMo validation or test split")
+        validation = Path(credit_base + "-locomo-credit-validation") / "locomo"
+        if split == "test":
+            decision = validation_decision(validation, paper)
+            if not decision["selected"]:
+                raise ValueError("The frozen span policy did not qualify on validation")
+            if root.resolve() == validation.resolve():
+                raise ValueError("Test output must be distinct from validation")
     samples, questions = load_split_cohort(args.dataset, Path(args.data_file), spec, split)
     if split != "test" and (os.environ.get("MEMSKILL_PAPER_NATIVE_ONLY") != "1"
                             or os.environ.get("MEMSKILL_TRACE_NATIVE_POLICY") != "1" or args.device != "cuda"):
@@ -369,17 +385,25 @@ def run(args, root, rank, workers):
         if repeat:
             plan["training_swap"].update(repeat=repeat, arms="independent-postfork-v1",
                                          usage_sha256=file_hash(original / "usage.jsonl"))
-    credit_base = os.environ.get("MEMSKILL_STATE_CREDIT_BASE")
-    native_validation = None
+    native_reference = None
     if credit_base:
         from experiments.controller.controller_credit_study import freeze_paper_credit, learned_skill_boundary
-        if split != "validation" or args.dataset != "locomo" or workers != 1 or swap_history:
-            raise ValueError("Frozen state-credit comparison requires the LoCoMo validation split")
-        native_validation = Path(credit_base + "-locomo-validation") / "locomo"
-        if json.loads((native_validation / "protocol.json").read_bytes()) != plan or not (native_validation / "baseline.json").is_file():
-            raise ValueError("Validation comparison needs the complete native run with identical settings")
-        model = freeze_paper_credit(Path(credit_base + "-locomo-train") / "locomo", Path(credit_base + "-locomo-train-swap"),
-                                   root / "frozen.json", args.device, args.data_file)
+        native_run = "-locomo-batch64" if split == "test" else "-locomo-validation"
+        native_reference = Path(credit_base + native_run) / "locomo"
+        if root.resolve() == native_reference.resolve():
+            raise ValueError("Use distinct directories for the policy comparison and native baseline")
+        if json.loads((native_reference / "protocol.json").read_bytes()) != plan or not (native_reference / "baseline.json").is_file():
+            raise ValueError("Comparison needs the complete native run with identical settings")
+        if split == "test":
+            model = read_locked_json(validation / "frozen.json", decision["frozen_sha256"])
+            register(root / "frozen.json", model)
+            if file_hash(root / "frozen.json") != decision["frozen_sha256"]:
+                raise ValueError("The test run requires the validated frozen weights")
+            register(root / "validation-decision.json", decision)
+            plan["validation_decision_sha256"] = file_hash(root / "validation-decision.json")
+        else:
+            model = freeze_paper_credit(Path(credit_base + "-locomo-train") / "locomo", Path(credit_base + "-locomo-train-swap"),
+                                       root / "frozen.json", args.device, args.data_file)
         if model["checkpoint"] != CHECKPOINT_SHA:
             raise ValueError("Training and evaluation Controller checkpoints differ")
         plan["state_credit_sha256"] = file_hash(root / "frozen.json")
@@ -460,7 +484,7 @@ def run(args, root, rank, workers):
                         staged.rename(directory)
                 else:
                     inspect_trace(directory / "traces", sid)
-                if split != "test":
+                if credit_base or split != "test":
                     audit = json.loads((directory / "audit.json").read_bytes())
                     if credit_base:
                         if file_hash(directory / "policy-comparison.json") != audit["artifacts"]["policy-comparison.json"]:
@@ -469,7 +493,7 @@ def run(args, root, rank, workers):
                         raise ValueError(f"Archived policy inputs changed for {sid}")
                 print(f"Complete {args.dataset} {index+1}/{len(samples)} {sid} {arm}", flush=True)
     published = paper["reported_f1"]["Llama-3.1-8B-Instruct"][args.dataset]
-    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published, split, native_validation)
+    summarize_if_complete(args.dataset, Path(args.out_file), questions, types, active_arms, published, split, native_reference)
 
 
 if __name__ == "__main__":

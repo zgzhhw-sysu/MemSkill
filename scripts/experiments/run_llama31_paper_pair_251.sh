@@ -34,7 +34,7 @@ case "$mode" in
         export MEMSKILL_MEMORY_SEARCH=cuda-skylakex PYTORCH_ALLOC_CONF=expandable_segments:True
         export MEMSKILL_GREEDY_EVAL_CACHE="$run/greedy-cache"
         ;;
-    locomo-batch64|locomo-train|locomo-validation|locomo-train-swap|locomo-credit-validation)
+    locomo-batch64|locomo-train|locomo-validation|locomo-train-swap|locomo-credit-validation|locomo-credit-test)
         datasets=(locomo)
         encoder_batch=64
         run="$baseline_run-$mode"
@@ -56,6 +56,12 @@ case "$mode" in
                 export MEMSKILL_SWAP_REPEAT="$4"
                 run="$run/repeats/$4"
             fi
+        elif [[ "$mode" == locomo-credit-test ]]; then
+            test -s "$baseline_run/paired-baselines-verified.json"
+            test -s "$baseline_run-locomo-credit-validation/locomo/upstream-score.json"
+            export MEMSKILL_STATE_CREDIT_BASE="$baseline_run"
+            export MEMSKILL_GREEDY_EVAL_CACHE="$baseline_run/greedy-cache"
+            report=comparison.json
         elif [[ "$mode" == locomo-credit-validation ]]; then
             test -s "$baseline_run/paired-baselines-verified.json"
             test -s "$baseline_run-locomo-train-swap/panel-summary.json"
@@ -69,7 +75,7 @@ case "$mode" in
         export PYTORCH_ALLOC_CONF=expandable_segments:True
         ;;
     paired) export MEMSKILL_PAPER_NATIVE_ONLY=0; report=comparison.json ;;
-    *) echo "Expected backend, baseline, longmemeval-launcher, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap, locomo-credit-validation or paired" >&2; exit 2 ;;
+    *) echo "Expected backend, baseline, longmemeval-launcher, locomo-batch64, locomo-train, locomo-validation, locomo-train-swap, locomo-credit-validation, locomo-credit-test or paired" >&2; exit 2 ;;
 esac
 export MEMSKILL_DEVICE=cuda MEMSKILL_ENCODER_DUTY=0.8 MEMSKILL_MEMORY_SEARCH="${MEMSKILL_MEMORY_SEARCH:-cuda}"
 if [[ "$MEMSKILL_MEMORY_SEARCH" == cuda-skylakex ]]; then
@@ -91,7 +97,7 @@ for dataset in "${datasets[@]}"; do
         --encode-batch-size "$encoder_batch" --reward-metric f1 --out-file "$run/$dataset/$report" \
         --save-dir "$run/$dataset/checkpoints" --log-dir "$run/$dataset/logs"
 done
-if [[ "$MEMSKILL_PAPER_SPLIT" != test || "$mode" == longmemeval-launcher ]]; then
+if [[ "$MEMSKILL_PAPER_SPLIT" != test || "$mode" == longmemeval-launcher || "$mode" == locomo-credit-test ]]; then
     exit 0
 elif [[ "$mode" == locomo-batch64 ]]; then
     run="$baseline_run"
