@@ -41,6 +41,12 @@
     "repeat": "Share exact measured requests with the earlier version ablation, including every repeated native answer. Generate only previously unseen prompts.",
     "readout": "Paired F1 for exact-copy deletion minus original version deletion, all histories and the subset with additional copies; measure shared text dependence without assigning its full effect to a single write."
   },
+  "native_reader_copy_interaction": {
+    "cohort": "Every scored training question with an actually retrieved focal version and at least one identical copy from another span at the six registered pivots. Report coverage of each full history.",
+    "design": "Cross removal of focal versions D and other identical texts C. For the control S, match C to equally many nonfocal, noncopy slots using token lengths and ranks after D is removed. Compare S alone and D+S; omit both controls if infeasible.",
+    "credit": "Average the focal marginal with copies present and absent. Report the analogous copy-group marginal and their sum. The control-adjusted interaction is the focal marginal with copies removed minus that with matched background removed.",
+    "inference": "Reuse the measured original, D, and D+C responses; rotate the new conditions in question order. Keep each retained slot in its native order and share only exact request receipts. These are training Reader effects."
+  },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,

@@ -349,17 +349,18 @@ def measured_hybrids(base, out, corpus):
     )
 
 
-def matched_reader_slots(target, lengths):
+def matched_reader_slots(target, lengths, *, removed=()):
     """Match disjoint slots by total absolute token-length difference, then rank distance."""
     from scipy.optimize import linear_sum_assignment
 
-    others = [i for i in range(len(lengths)) if i not in target]
+    ranks = {slot: rank for rank, slot in enumerate(i for i in range(len(lengths)) if i not in removed)}
+    others = [i for i in ranks if i not in target]
     if len(others) < len(target):
         return None
     if not target:
         return []
     stride = len(lengths) ** 2 + 1
-    cost = [[abs(lengths[i] - lengths[j]) * stride + abs(i - j) for j in others] for i in target]
+    cost = [[abs(lengths[i] - lengths[j]) * stride + abs(ranks[i] - ranks[j]) for j in others] for i in target]
     _, selected = linear_sum_assignment(cost)
     return [others[j] for j in selected]
 
@@ -373,7 +374,101 @@ def focal_reader_slots(context, pivot, exact_copies=False):
     return [j for j, (_, text) in enumerate(context) if text in texts]
 
 
-def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_copies=False):
+def ablation_answer(ctx, remove, q, ev, model, cache, generate):
+    prompt = ev.build_prompt(q["question"], [text for j, (_, text) in enumerate(ctx) if j not in remove], q)
+    key = reader_key(model, prompt)
+    if generate:
+        measured_answer(prompt, model, q, ev, cache)
+    receipt = read_response(cache, key)
+    prompt_hash = sha(prompt)
+    if not receipt or receipt["payload"]["prompt_sha256"] != prompt_hash:
+        raise ValueError("Missing measured Reader response")
+    payload = receipt["payload"]
+    return {"answer": payload["response"], "tokens": payload["tokens"],
+            "f1": float(ev.compute_f1(payload["response"], ev.get_ground_truth(q), q)),
+            "key": key, "response_sha256": receipt["sha256"], "prompt_sha256": prompt_hash}
+
+
+def copy_contrasts(answers):
+    f = {arm: row["f1"] for arm, row in answers.items()}
+    present = f["full"] - f["no_focal"]
+    absent = f["no_copies"] - f["neither"]
+    focal = (present + absent) / 2
+    joint = f["full"] - f["neither"]
+    effects = {"focal_with_copies": present, "focal_without_copies": absent, "focal_order_average": focal,
+               "copies_order_average": joint - focal, "joint": joint}
+    if "no_control" in f:
+        effects["copies_vs_control_given_no_focal"] = f["no_focal_control"] - f["neither"]
+        effects["interaction_vs_control"] = absent - (f["no_control"] - f["no_focal_control"])
+    return effects
+
+
+def measure_copy_interaction(version_dir, expected, protocol, sid, pivot, questions, contexts, ev, model, verify):
+    exact = version_dir / "exact-text"
+    out = version_dir / "copy-interaction"
+    if verify and not (out / "summary.json").is_file():
+        raise ValueError("No completed copy interaction to verify")
+    out.mkdir(exist_ok=True)
+    cache = version_dir / "greedy-cache"
+    anchors = []
+    for directory in (version_dir, exact):
+        summary = read(directory / "summary.json")
+        plan = read(directory / "plan.json")
+        if (summary["plan_sha256"] != file_hash(directory / "plan.json") or plan["native"] != expected
+                or summary["scores_sha256"] != file_hash(directory / "scores.json")):
+            raise ValueError("Reader interaction inputs differ from the measured native and copy deletions")
+        anchors.append((plan, {r["qa_index"]: r["answers"] for r in read(directory / "scores.json")}))
+    if anchors[1][0]["version_summary_sha256"] != file_hash(version_dir / "summary.json"):
+        raise ValueError("Copy deletion used a different focal version measurement")
+    design = {}
+    for (i, q), ctx in zip(questions.items(), contexts, strict=True):
+        direct = focal_reader_slots(ctx, pivot)
+        target = focal_reader_slots(ctx, pivot, True)
+        original, copied = (plan["rows"][str(i)] for plan, _ in anchors)
+        if (original["target"] != direct or copied["target"] != target or original["lengths"] != copied["lengths"]
+                or anchors[0][1][i]["repeat"] != anchors[1][1][i]["repeat"]):
+            raise ValueError("Comparison does not share the same native Reader context")
+        extra = [j for j in target if j not in direct]
+        if extra:
+            control = matched_reader_slots(extra, original["lengths"], removed=direct)
+            design[i] = {"focal": direct, "copies": extra, "control": control}
+    register(out / "plan.json", {"protocol": protocol, "history": sid, "span": pivot, "questions": len(questions),
+             "version_summary_sha256": file_hash(version_dir / "summary.json"), "copy_summary_sha256": file_hash(exact / "summary.json"),
+             "rows": design})
+    os.environ["MEMSKILL_USAGE_LOG"] = str(out / "usage.jsonl")
+    generate = not verify and not (out / "scores.json").is_file()
+    rows = []
+    for (i, q), ctx in zip(questions.items(), contexts, strict=True):
+        if i not in design:
+            continue
+        focal, copies, control = (design[i][k] for k in ("focal", "copies", "control"))
+        answers = {}
+        for arm, remove, anchor in (("full", [], anchors[0][1][i]["repeat"]),
+                                    ("no_focal", focal, anchors[0][1][i]["target"]),
+                                    ("neither", focal + copies, anchors[1][1][i]["target"])):
+            answers[arm] = ablation_answer(ctx, remove, q, ev, model, cache, False)
+            if answers[arm] != anchor:
+                raise ValueError("Measured factorial endpoint differs from the previous deletion arm")
+        arms = [("no_copies", copies)]
+        if control is not None:
+            arms.extend([("no_control", control), ("no_focal_control", focal + control)])
+        start = len(rows) % len(arms)
+        for arm, remove in arms[start:] + arms[:start]:
+            answers[arm] = ablation_answer(ctx, remove, q, ev, model, cache, generate)
+        rows.append({"qa_index": i, "answers": answers, "effects": copy_contrasts(answers)})
+    register(out / "scores.json", rows)
+    effects = {}
+    for name in sorted({k for row in rows for k in row["effects"]}):
+        values = [r["effects"][name] for r in rows if name in r["effects"]]
+        effects[name] = {"questions": len(values), "points": 100 * mean(values),
+                         "positive": sum(v > 0 for v in values), "zero": sum(v == 0 for v in values),
+                         "negative": sum(v < 0 for v in values)}
+    register(out / "summary.json", {"history": sid, "span": pivot, "questions": len(questions),
+             "expanded_questions": len(rows), "matched_questions": sum(r["control"] is not None for r in design.values()),
+             "effects": effects, "plan_sha256": file_hash(out / "plan.json"), "scores_sha256": file_hash(out / "scores.json")})
+
+
+def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_copies=False, copy_interaction=False):
     from transformers import AutoTokenizer
     from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort
 
@@ -414,6 +509,9 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_co
     if (len(spans) != cell["total_spans"] or spans[pivot]["span_id"] != pivot
             or sha(spans[pivot]["source"]) != cell["source_sha256"] or linked != cell["linked_question_indices"]):
         raise ValueError("Focal span or evidence question registration differs")
+    if copy_interaction:
+        return measure_copy_interaction(version_trial, expected, spec["native_reader_copy_interaction"], sid,
+                                        pivot, questions, contexts, ev, model, verify)
     rows = {}
     protocol = spec["native_reader_ablation"]
     links = {}
@@ -455,20 +553,9 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_co
             if not record["target"]:
                 answers[arm] = record["archived"]
                 continue
-            contents = [text for j, (_, text) in enumerate(ctx) if j not in remove]
-            prompt = ev.build_prompt(q["question"], contents, q)
-            key = reader_key(model, prompt)
-            if generate:
-                measured_answer(prompt, model, q, ev, fresh)
-            receipt = read_response(fresh, key)
-            if not receipt or receipt["payload"]["prompt_sha256"] != sha(prompt):
-                raise ValueError("Missing measured Reader response")
-            if arm == "repeat" and key != record["archived"]["key"]:
+            answers[arm] = ablation_answer(ctx, remove, q, ev, model, fresh, generate)
+            if arm == "repeat" and answers[arm]["key"] != record["archived"]["key"]:
                 raise ValueError("Native repeat request changed")
-            payload = receipt["payload"]
-            answers[arm] = {"answer": payload["response"], "tokens": payload["tokens"],
-                            "f1": ev.compute_f1(payload["response"], ev.get_ground_truth(q), q),
-                            "key": key, "response_sha256": receipt["sha256"], "prompt_sha256": sha(prompt)}
         rows_out.append({"qa_index": i, "linked": record["linked"], "direct": bool(record["target"]), "answers": answers})
     register(trial / "scores.json", rows_out)
     groups = {"all": rows_out, "direct": [r for r in rows_out if r["direct"]],
@@ -505,12 +592,14 @@ if __name__ == "__main__":
     p.add_argument("--read", action="store_true")
     p.add_argument("--verify", action="store_true")
     p.add_argument("--paper-history", help="Measure the preassigned training span using a native run, output directory and corpus")
-    p.add_argument("--exact-copies", action="store_true", help="Also remove exact text copies from other source spans in a completed paper history")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--copy-interaction", action="store_true", help="Cross focal-version, identical-copy and matched background deletions")
+    mode.add_argument("--exact-copies", action="store_true", help="Also remove exact text copies from other source spans in a completed paper history")
     a = p.parse_args()
-    if a.exact_copies and not a.paper_history:
-        p.error("--exact-copies requires --paper-history")
+    if (a.exact_copies or a.copy_interaction) and not a.paper_history:
+        p.error("Copy measurements require --paper-history")
     if a.paper_history:
-        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history, verify=a.verify, exact_copies=a.exact_copies)
+        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history, verify=a.verify, exact_copies=a.exact_copies, copy_interaction=a.copy_interaction)
         raise SystemExit(0)
     o = prepare(a.base, a.study, a.corpus, verify=a.verify)
     if a.read:
