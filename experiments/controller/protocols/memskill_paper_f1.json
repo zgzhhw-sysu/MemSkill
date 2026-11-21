@@ -47,6 +47,12 @@
     "credit": "Average the focal marginal with copies present and absent. Report the analogous copy-group marginal and their sum. The control-adjusted interaction is the focal marginal with copies removed minus that with matched background removed.",
     "inference": "Reuse the measured original, D, and D+C responses; rotate the new conditions in question order. Keep each retained slot in its native order and share only exact request receipts. These are training Reader effects."
   },
+  "forward_rank_boundary": {
+    "layer": "actor_head.0.weight", "calibration": "conv-26",
+    "screen": "Search retained ranks from full rank minus one through 1 on all native training states in the first registered history. Use FP64 SVD, cast each truncated weight to native FP32 and execute the serial deterministic Controller.",
+    "select": "Freeze the largest rank for which at least one state keeps its native ordered top-K and at least one replaces only its last skill by the native next-ranked skill. Every calibration state must have one of these two outcomes. Save no candidate if the set is empty.",
+    "transfer": "Evaluate the frozen rank unchanged on the remaining five registered training histories. No QA answers, rewards or validation/test histories may enter rank selection."
+  },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
