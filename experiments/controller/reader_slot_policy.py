@@ -16,8 +16,8 @@ from experiments.controller.audit_prefix_return import scored_at
 from experiments.controller.credit_rank_allocation import audit_long_prefix
 from experiments.controller.late_credit_kernel import kernel_effect, score, support
 from experiments.controller.outcome_credit import matched_offset
+from experiments.controller.capped_source_repair import BACKEND as EARLY
 from experiments.controller.reader_slot_credit import (
-    EARLY,
     PLAN,
     components,
     reader_key,

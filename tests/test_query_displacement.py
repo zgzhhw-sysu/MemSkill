@@ -11,9 +11,9 @@ from torch.nn import functional as F
 
 from experiments.controller.legacy_terminal_symmetry import measure, report, source
 from experiments.controller.policy_capacity import window_capacity
-from experiments.controller.query_displacement_audit import score
 from experiments.controller.query_displacement_data import encode_questions
 from experiments.controller.query_displacement_policy import (
+    score_rank_predictions,
     compile_fold,
     contrast,
     index_mask,
@@ -296,7 +296,7 @@ class QueryDisplacementTest(unittest.TestCase):
         )
         self.assertEqual(window_capacity(w)["unbounded"], 0.5)
         self.assertEqual(
-            score(
+            score_rank_predictions(
                 [
                     {
                         "actual": 1.0,

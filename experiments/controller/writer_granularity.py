@@ -13,7 +13,7 @@ from experiments.controller.resume_status import load_episode
 from src.data_processing.locomo import LoCoMoProcessor
 from src.evaluation_cache import digest
 from src.eval import get_evaluator
-from src.llm_utils import get_llm_response_via_api
+from experiments.controller import measured_answer
 from src.memory_bank import MemoryBank
 from src.rag_utils import get_embeddings, set_retriever_flash_attn
 from src.replay import attributed_turn_pairs, restore_text
@@ -164,14 +164,6 @@ def build_jobs(study, data_path, *, repair_multiline=False, skill_budget=None):
                                                      for a, ctx in contexts.items()}
                 jobs.append(job)
     return {"windows": windows, "jobs": jobs, "model": protocol["model"]}
-
-
-def measured_answer(prompt, model, q, ev, cache):
-    os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)
-    answer, n_in, n_out = get_llm_response_via_api(
-        prompt, LLM_MODEL=model, MAX_TOKENS=32, TAU=0.0, base_url=os.environ["MEMSKILL_API_BASE"],
-        api_key=os.environ.get("MEMSKILL_API_KEY", "local-only"))
-    return {"answer": answer, "tokens": [n_in, n_out], "f1": ev.compute_f1(answer, ev.get_ground_truth(q), q)}
 
 
 def run(study, data_path, output, *, repair_multiline=False, skill_budget=None):

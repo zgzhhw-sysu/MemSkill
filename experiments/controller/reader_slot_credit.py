@@ -11,17 +11,10 @@ from pathlib import Path
 from statistics import mean
 from types import SimpleNamespace
 
-from experiments.controller import file_hash, read, register
-from experiments.controller.audit_paired import reader_inputs
-from experiments.controller.capped_source_policy import baseline, joint_evidence
-from experiments.controller.capped_source_repair import BACKEND as EARLY
-from experiments.controller.capped_source_repair import archive
-from experiments.controller.first_evidence_credit import BACKEND as DONOR
-from experiments.controller.semantic_writer import sha
-from experiments.controller.writer_granularity import measured_answer
+from experiments.controller import file_hash, measured_answer, read, register, text_hash as sha
 from src.eval.locomo import LoCoMoEvaluator
 from src.evaluation_cache import read_response, request_cache
-from src.replay import restore_text
+from src.replay import restore_text, verified_reader_contexts
 
 PLAN = Path(__file__).with_name("protocols") / "reader_slot_credit.json"
 
@@ -74,14 +67,8 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         raise ValueError("Original trace or scores changed")
     events = [json.loads(line) for line in trace.read_bytes().splitlines()]
     spans = [s for s in events if s["kind"] == "span"]
-    queries = {q["query_id"]: q for q in events if q["kind"] == "qa"}
     rows = read(scores)["answers"]
-    inputs = reader_inputs(events, rows, questions, ev)
-    versions = {
-        (c["memory_id"], c["version"]): (i, c["after"])
-        for i, s in enumerate(spans)
-        for c in s["changes"]
-    }
+    verified = verified_reader_contexts(events, rows, questions)
     calls = [
         r
         for l in (cell / "usage.jsonl").read_bytes().splitlines()
@@ -96,20 +83,13 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         raise ValueError("Missing or duplicate native question")
     for i, q in questions.items():
         row = by_question[i]
-        ctx = [versions[tuple(ref)] for ref in queries[i]["refs"]]
+        ctx = verified[i]
         prompt = ev.build_prompt(q["question"], [text for _, text in ctx], q)
+        prompt_hash = sha(prompt)
         key = reader_key(model, prompt)
         if not by_key.get(key):
             raise ValueError(f"Missing physical reader request at {cell}, reader {i}")
         logged = by_key[key].pop()
-        if (
-            row["qa_index"] != i
-            or key != logged["cache_key"]
-            or sha(prompt) != inputs[i][0]
-        ):
-            raise ValueError(
-                f"Physical reader request differs at {cell}, reader {i}: key={key == logged['cache_key']}, prompt={sha(prompt) == inputs[i][0]}"
-            )
         hit = read_response(cache, key)
         if not hit or hit["sha256"] != logged["response_sha256"]:
             raise ValueError("Physical response has changed")
@@ -118,7 +98,7 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
         if (
             v["response"].strip() != row["prediction"]
             or v["tokens"] != row["tokens"]
-            or v["prompt_sha256"] != inputs[i][0]
+            or v["prompt_sha256"] != prompt_hash
             or not math.isclose(score, row["f1"], abs_tol=1e-12)
         ):
             raise ValueError("Reader endpoint does not reproduce")
@@ -128,7 +108,7 @@ def measured_contexts(cell, cache, expected, questions, ev, model):
                 "answer": v["response"],
                 "tokens": v["tokens"],
                 "f1": score,
-                "prompt_sha256": inputs[i][0],
+                "prompt_sha256": prompt_hash,
                 "key": key,
                 "response_sha256": hit["sha256"],
             }
@@ -144,7 +124,10 @@ def endpoint(cell, cache, expected, qa, ev, model):
 
 
 def prepare(base, study, corpus, *, verify=False):
-    base / "late-pairs"
+    from experiments.controller.capped_source_policy import baseline, joint_evidence
+    from experiments.controller.capped_source_repair import BACKEND as EARLY, archive
+    from experiments.controller.first_evidence_credit import BACKEND as DONOR
+
     parent = base / "source-compression/capped-source-credit"
     out = base / "source-compression/reader-slot-credit"
     out.mkdir(exist_ok=True)
@@ -304,6 +287,8 @@ def prepare(base, study, corpus, *, verify=False):
 
 
 def measure_response(base, out, backend, model, q, h, p, ev):
+    from experiments.controller.capped_source_repair import BACKEND as EARLY, archive
+
     os.environ["MEMSKILL_BACKEND_ID"] = backend
     cache = out / "responses"
     os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(cache)
@@ -379,7 +364,16 @@ def matched_reader_slots(target, lengths):
     return [others[j] for j in selected]
 
 
-def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
+def focal_reader_slots(context, pivot, exact_copies=False):
+    """Find actual focal versions or all identical displayed texts of those versions."""
+    direct = [j for j, (origin, _) in enumerate(context) if origin == pivot]
+    if not exact_copies:
+        return direct
+    texts = {context[j][1] for j in direct}
+    return [j for j, (_, text) in enumerate(context) if text in texts]
+
+
+def paper_reader_ablation(native, output, corpus, sid, *, verify=False, exact_copies=False):
     from transformers import AutoTokenizer
     from experiments.controller.paper_f1 import PROTOCOL, load_split_cohort
 
@@ -400,11 +394,12 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
         raise ValueError("Reader tokenizer or model revision differs from the native run")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
     cache = native / "greedy-cache"
-    trial = output / sid
+    version_trial = output / sid
+    trial = version_trial / "exact-text" if exact_copies else version_trial
     if verify and not all((trial / name).is_file() for name in ("plan.json", "scores.json", "summary.json")):
         raise ValueError("The archived Reader comparison is incomplete")
     trial.mkdir(parents=True, exist_ok=True)
-    fresh = trial / "greedy-cache"
+    fresh = version_trial / "greedy-cache"
     if fresh.resolve() == cache.resolve():
         raise ValueError("The native repeat requires an independent request cache")
     os.environ["MEMSKILL_GREEDY_EVAL_CACHE"] = str(fresh)
@@ -420,15 +415,35 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
             or sha(spans[pivot]["source"]) != cell["source_sha256"] or linked != cell["linked_question_indices"]):
         raise ValueError("Focal span or evidence question registration differs")
     rows = {}
+    protocol = spec["native_reader_ablation"]
+    links = {}
+    if exact_copies:
+        original_plan = read(version_trial / "plan.json")
+        original_result = read(version_trial / "summary.json")
+        if (original_plan["protocol"] != protocol or original_plan["native"] != expected
+                or original_result["plan_sha256"] != file_hash(version_trial / "plan.json")
+                or original_result["scores_sha256"] != file_hash(version_trial / "scores.json")):
+            raise ValueError("Exact-copy measurement requires the completed native version ablation")
+        links["version_summary_sha256"] = file_hash(version_trial / "summary.json")
+        previous = {r["qa_index"]: r for r in read(version_trial / "scores.json")}
+        protocol = spec["native_reader_copy_ablation"]
+    expanded = []
     for i, ctx, orig in zip(questions, contexts, archived, strict=True):
-        target = [j for j, (origin, _) in enumerate(ctx) if origin == pivot]
+        target = focal_reader_slots(ctx, pivot, exact_copies)
+        if exact_copies:
+            direct = focal_reader_slots(ctx, pivot)
+            if original_plan["rows"][str(i)]["target"] != direct:
+                raise ValueError("Original Reader exposure differs from the native trace")
+            if len(target) > len(direct):
+                expanded.append(i)
         lengths = [len(ids) for ids in tokenizer([text for _, text in ctx], add_special_tokens=False)["input_ids"]]
         rows[i] = {"target": target, "sham": matched_reader_slots(target, lengths), "lengths": lengths,
                    "linked": i in linked, "archived": orig}
-    register(trial / "plan.json", {"protocol": spec["native_reader_ablation"], "native": expected,
+    register(trial / "plan.json", {"protocol": protocol, "native": expected, **links,
              "backend": meta["backend"], "history": sid, "span": pivot, "rows": rows})
     os.environ["MEMSKILL_USAGE_LOG"] = str(trial / "usage.jsonl")
     rows_out = []
+    generate = not verify and not (trial / "scores.json").is_file()
     arms = ["repeat", "target", "sham"]
     for ordinal, ((i, q), ctx) in enumerate(zip(questions.items(), contexts, strict=True)):
         record = rows[i]
@@ -443,7 +458,7 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
             contents = [text for j, (_, text) in enumerate(ctx) if j not in remove]
             prompt = ev.build_prompt(q["question"], contents, q)
             key = reader_key(model, prompt)
-            if not verify:
+            if generate:
                 measured_answer(prompt, model, q, ev, fresh)
             receipt = read_response(fresh, key)
             if not receipt or receipt["payload"]["prompt_sha256"] != sha(prompt):
@@ -459,12 +474,25 @@ def paper_reader_ablation(native, output, corpus, sid, *, verify=False):
     groups = {"all": rows_out, "direct": [r for r in rows_out if r["direct"]],
               "linked": [r for r in rows_out if r["linked"]],
               "direct_unlinked": [r for r in rows_out if r["direct"] and not r["linked"]]}
+    if exact_copies:
+        groups["extra_copies"] = [r for r in rows_out if r["qa_index"] in expanded]
     summary = {}
     for name, group in groups.items():
         matched = [r for r in group if "sham" in r["answers"]]
         summary[name] = {"questions": len(group), "matched_questions": len(matched),
                          "f1": {a: 100 * mean(r["answers"][a]["f1"] for r in group) for a in ("archived", "repeat", "target")} if group else {},
                          "matched_f1": {a: 100 * mean(r["answers"][a]["f1"] for r in matched) for a in arms} if matched else {}}
+        if exact_copies:
+            diffs = []
+            for row in group:
+                old = previous[row["qa_index"]]["answers"]
+                if old["repeat"] != row["answers"]["repeat"]:
+                    raise ValueError("Copy and version arms must share the same native Reader response")
+                diffs.append(float(row["answers"]["target"]["f1"]) - old["target"]["f1"])
+            summary[name]["copy_minus_version"] = {
+                "points": 100 * mean(diffs) if diffs else None,
+                "higher": sum(v > 0 for v in diffs), "equal": sum(v == 0 for v in diffs), "lower": sum(v < 0 for v in diffs)
+            }
     register(trial / "summary.json", {"history": sid, "span": pivot, "groups": summary,
              "plan_sha256": file_hash(trial / "plan.json"), "scores_sha256": file_hash(trial / "scores.json")})
 
@@ -477,9 +505,12 @@ if __name__ == "__main__":
     p.add_argument("--read", action="store_true")
     p.add_argument("--verify", action="store_true")
     p.add_argument("--paper-history", help="Measure the preassigned training span using a native run, output directory and corpus")
+    p.add_argument("--exact-copies", action="store_true", help="Also remove exact text copies from other source spans in a completed paper history")
     a = p.parse_args()
+    if a.exact_copies and not a.paper_history:
+        p.error("--exact-copies requires --paper-history")
     if a.paper_history:
-        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history, verify=a.verify)
+        paper_reader_ablation(a.base, a.study, a.corpus, a.paper_history, verify=a.verify, exact_copies=a.exact_copies)
         raise SystemExit(0)
     o = prepare(a.base, a.study, a.corpus, verify=a.verify)
     if a.read:
