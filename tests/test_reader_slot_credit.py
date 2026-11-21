@@ -12,6 +12,14 @@ from experiments.controller.reader_slot_policy import (
 
 
 class ReaderSlotTests(unittest.TestCase):
+    def test_exact_copy_policy_preserves_text_and_slot_identity(self):
+        from experiments.controller.reader_slot_credit import focal_reader_slots
+        ctx = [(2, "Same"), (1, "same"), (6, "Same"), (2, "Same "), (2, "Same"), (1, "Same ")]
+        self.assertEqual(focal_reader_slots(ctx, 6), [2])
+        self.assertEqual(focal_reader_slots(ctx, 6, True), [0, 2, 4])
+        self.assertEqual(focal_reader_slots(ctx, 1, True), [1, 3, 5])
+        self.assertEqual(focal_reader_slots(ctx, 5, True), [])
+
     def test_sham_slots_match_length_then_rank_and_preserve_duplicates(self):
         from experiments.controller.reader_slot_credit import matched_reader_slots
 

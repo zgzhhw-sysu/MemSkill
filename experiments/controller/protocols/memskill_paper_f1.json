@@ -34,6 +34,13 @@
     "repeat": "Use a separate greedy response cache for all exposed requests, rotate arm order by question position, reuse native receipts on unexposed questions",
     "readout": "Report complete-history F1, all directly exposed, evidence-linked, and directly exposed unlinked; Reader contribution diagnostic only"
   },
+  "native_reader_copy_ablation": {
+    "cohort": "All scored questions in the same six training histories and the same preregistered focal spans",
+    "target": "Extend the directly retrieved focal versions to every slot with exactly the same displayed text. Preserve case, whitespace and the relative order of all other slots.",
+    "sham": "Recompute a disjoint equal-count length- and rank-matched deletion on the extended slots; report infeasible controls separately.",
+    "repeat": "Share exact measured requests with the earlier version ablation, including every repeated native answer. Generate only previously unseen prompts.",
+    "readout": "Paired F1 for exact-copy deletion minus original version deletion, all histories and the subset with additional copies; measure shared text dependence without assigning its full effect to a single write."
+  },
   "state_credit": {
     "outgoing": "handle_entity_relationships", "incoming": "delete",
     "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
