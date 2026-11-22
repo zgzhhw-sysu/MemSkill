@@ -184,7 +184,7 @@ LongMemEval-S 的六组评估按同一条完整历史依次执行。对于冻结
 source ~/memskill-work/deploy/env-251.sh
 cd "$work/run-linked-questions-v1"
 systemd-run --user --unit=memskill-251-retrieval-competition bash "$PWD/scripts/experiments/run_retrieval_competition_251.sh"
-systemd-run --user --unit=memskill-251-root-write-repairs bash "$PWD/scripts/experiments/run_root_write_repairs_251.sh"
+systemd-run --user --unit=memskill-251-root-write-repairs bash "$PWD/scripts/experiments/run_factorial_repairs_251.sh" root
 systemd-run --user --unit=memskill-251-root-overlap bash "$PWD/scripts/experiments/run_root_overlap_251.sh"
 ```
 
