@@ -283,7 +283,7 @@ cd ~/memskill-work/run-linked-questions-v1
 systemctl --user status memskill-251-case-credit memskill-251-case-credit-joint memskill-251-audit-case-credit
 # 瞬时服务已退出、仍有未完成的窗口时，按需恢复对应任务。
 systemd-run --user --collect --unit=memskill-251-case-credit --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_case_credit_251.sh"
-systemd-run --user --collect --unit=memskill-251-case-credit-joint --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_case_credit_joint_251.sh"
+systemd-run --user --collect --unit=memskill-251-case-credit-joint --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/run_case_credit_251.sh" joint
 systemd-run --user --collect --unit=memskill-251-audit-case-credit --property=Restart=on-failure --property=RestartSec=45 bash "$PWD/scripts/experiments/audit_case_credit_251.sh"
 ```
 
