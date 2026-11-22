@@ -224,7 +224,7 @@ bash scripts/experiments/paired_holdout.sh
 
 `memskill-251-retrieval-competition` 使用 GPU 1 的 30% 占空比 Qwen 编码器重建选技前的检索特征，GPU 上拟合留一对话的两阶段策略，按已落盘的随机配对窗口增量计分。结果在 `~/memskill-work/runs/paired-251-linked-eight/source-compression/retrieval-competition/`。`fit.json`、`preexisting.json` 分别保存模型和冻结前已有分数的窗口。`calibration.json` 对应 91 道训练题，`through-NN.json` 中的 `prospective` 给出严格前瞻成绩，`diagnostics-NN.json` 记录分阶段概率、逻辑读写 token 和晋级判据。各组原来的选技顺序与逐题回答可按存档窗口和路径位回查。`capacity.json` 使用已测四路径，给出保持两阶段用技次数的可行事后策略以及放宽次数约束的上界。
 
-`memskill-251-root-write-repairs` 使用原归档的 GPU 1 编码器和 GPU 7 的 22% 占空比生成服务。启动程序为 `scripts/experiments/run_root_write_repairs_251.sh`。结果位于同级的 `root-write-repairs/<窗口>/`，每个 `q<原始题号>-suffix<动作>.json` 保存两条事实重放、补写后重跑的写入轨迹与补检后回答。相同的本地贪心请求复用有校验的原归档；新请求和 token 写到独立响应目录及窗口用量日志。两个任务都按 251 的 GPU 租约运行。
+`memskill-251-root-write-repairs` 使用原归档的 GPU 1 编码器和 GPU 7 的 22% 占空比生成服务。启动命令为 `bash scripts/experiments/run_factorial_repairs_251.sh root`。结果位于同级的 `root-write-repairs/<窗口>/`，每个 `q<原始题号>-suffix<动作>.json` 保存两条事实重放、补写后重跑的写入轨迹与补检后回答。相同的本地贪心请求复用有校验的原归档；新请求和 token 写到独立响应目录及窗口用量日志。两个任务都按 251 的 GPU 租约运行。
 
 `memskill-251-root-overlap` 等待全部首段修复回执，再在 GPU 上拟合仅改变首段的附加信用。`source-compression/root-overlap/` 单独保存首次规则登记、数值冻结、此前已出过分的窗口、四路径校准和滚动结果。该项目的 52 个后续训练窗口中，27 个窗口的干预点在首段（257 题），25 个在末段（209 题）；末段焦点概率沿用原策略，首段概率也会通过路径到达率影响两段回报估计。
 
