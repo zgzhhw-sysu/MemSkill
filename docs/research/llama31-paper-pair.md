@@ -1,6 +1,12 @@
 # Llama-3.1-8B 的 MemSkill 基线与 span 级信用实验
 
-本轮使用 MemSkill 附表 7 的 Meta-Llama-3.1-8B-Instruct。作者报告 LoCoMo 20.59、LongMemEval-S 18.13。历史 Llama-3-8B 实验中，512 token、K=7 的原版得到 16.14。整 session、K=3 的原版与日期修订分别得到 16.18、18.06。下表给出 3.1 版本原版与冻结 Controller 策略的同模型测试结果。[论文附表 7](https://arxiv.org/pdf/2602.02474v3#page=16) · [固定测试协议](memskill-paper-f1.md)
+本轮使用 MemSkill 附表 7 的 Meta-Llama-3.1-8B-Instruct。作者报告 LoCoMo 20.59、LongMemEval-S 18.13。历史 Llama-3-8B 实验中，512 token、K=7 的原版得到 16.14。整 session、K=3 的原版与日期修订分别得到 16.18、18.06。下文汇总 3.1 版本的读取和选技对照。[论文附表 7](https://arxiv.org/pdf/2602.02474v3#page=16) · [固定测试协议](memskill-paper-f1.md)
+
+## 固定 314 题上的读取和选技结果
+
+使用同一模型、作者 F1 和同一批问题，归档原版为 **25.2476**。更改 Controller 的冻结截秩版本得到 **25.7481**。保持原版 Controller 和原版记忆库，按来源回读得到 **27.5359**；只有能保留问题线索时才回读，得到 **28.2478**。相对本地原版提高 **3.0002 个 F1 点**，相对总回读提高 **0.7119 点**。两段测试历史各有 156、158 题，线索选择相对总回读分别提高 1.1587、0.2708 点。后两组在同一份真实 GPU 回答面板上计分。归档原版与本轮原版重答 25.2788 的差异另保留。[线索规则、逐题配对和研究边界](algorithm-notes.md#在回读前检查会失去哪些问题线索)
+
+结果目录为 `runs/llama31-paper-v1-attribution/source-readback/`。其中 `clues/validation/upstream.json` 和 `clues/test/upstream.json` 是两台服务器独立复算的作者分数。独立重答保存于 `clues/test/fresh/`。`upstream-changed.json` 评估两种读法实际不同的全部 40 题，`upstream-complete.json` 收录全部 314 题的新响应后生成。按段变化技能的训练干预使用另外的六段历史，共 885 题。
 
 ## 冻结秩 166 Controller 的 LoCoMo 完整测试
 
