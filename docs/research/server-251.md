@@ -25,6 +25,27 @@ LoCoMo 另有一组按作者脚本编码批大小 64 的正式对照，同样评
 
 248 的原版收集器也备份尚在建库的长历史。它根据进行中的 `usage.jsonl` 取回相应的不可变模型响应，校验请求键、内容散列和 token 数，将已验证的前缀保存在对应数据集的 `live-recovery.json`。正式完整得分仍由 `baseline.json` 和 `upstream-score.json` 记录。对已完成的每条 LongMemEval-S 历史，收集器还会在 `native/<id>/upstream-score.json` 写入作者评分器的逐题复核结果。
 
+## 11 月 22 日的 314 题读法与选技复核
+
+251 的原始响应在 `~/memskill-work/runs/llama31-paper-v1-attribution/`。248 的同名目录在 `研究生大论文/runs/`。换机时一并复制这个目录中的 `run-repairs.sh`、`verify-repairs.py`、原版训练和测试记忆库、精确响应缓存，以及私有实验代码。读法实现位于 `experiments/controller/passage_prefix_sources.py`，选技顺序探针位于 `experiments/controller/controller_credit_study.py`，冻结口径在 `experiments/controller/protocols/memskill_paper_f1.json`。当前运行的私有源码目录是 251 上的 `~/memskill-work/deploy/sources/locomo-credit-attribution-v1`。研究汇总和数字解释见[同模型配对结果](llama31-paper-pair.md)。
+
+| 要核对的结果 | 相对归因运行目录的路径 |
+| --- | --- |
+| 已冻结的逐题选路、314 题实测 F1 | `source-readback/clues/test/upstream.json` |
+| 40 道改变读法的题与全部 314 题的独立重答 | `source-readback/clues/test/fresh/upstream-{changed,complete}.json` |
+| 普通读法和回读反馈对下一段的事前选技 | `source-readback/forks/<历史>/forecast{,-result}.json` |
+| 依写入前重复文本比例选技，在同一线索 Reader 下结算 | `source-readback/clues/forks/<历史>/conditional-{forecast,result}.json` |
+| 直接检索原始对话的同预算对照 | `source-readback/direct/{validation,test}/upstream.json` |
+| LongMemEval-S 的已完成独立历史与两种运行配置 | `source-readback/longmemeval/{primary,paper}/upstream.json` |
+
+在 251 查看生成、直接检索和独立评分的进度。
+
+```bash
+cd ~/memskill-work/runs/llama31-paper-v1-attribution
+systemctl --user status memskill-llama31-{baseline-tp2,direct-rank,direct-reader,clues-fresh,conditional-skill}.service --no-pager
+tail -n 3 cross.log fresh-score.log conditional-forecast.log direct-rank.log
+```
+
 ## 11 月 21 日的旧模型训练实验
 
 `memskill-251-factorial-repairs` 用物理 GPU 2 重放四路径窗口的末段。它复用历史写入动作，核对两条原始读者上下文，再分别补入遗漏原文或替换一条检索结果。每个已完成窗口对应 `source-compression/factorial-repairs/conv-*_s*.json`。同目录的 `usage.jsonl` 记载真实调用和缓存命中。
