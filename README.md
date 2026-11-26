@@ -29,6 +29,29 @@
 
 
 
+## Repository layout
+
+| Directory | Contents |
+| --- | --- |
+| [`src/cli.py`](src/cli.py) | Training and evaluation entry point, also available through `python main.py` |
+| [`src/`](src/) | Controller, Designer, Executor, memory bank, and retrieval |
+| [`src/data_processing/`](src/data_processing/) | Dataset loading, fixed splits, and dataset-specific input processors |
+| [`src/inference/`](src/inference/) | Shared memory construction and caching, text question answering, and ALFWorld rollouts |
+| [`src/eval/`](src/eval/) | Dataset-specific evaluation metrics |
+| [`experiments/designer/`](experiments/designer/) | LoCoMo pilots, fault injection, and replay of proposed skill revisions |
+| [`experiments/controller/`](experiments/controller/) | Span-level credit assignment experiments and checks against known faults. [Paired study protocol](docs/research/span-credit-paired.md) · [换机交接与断点续跑](docs/research/server-handoff.md) |
+| [`scripts/train/`](scripts/train/) and [`scripts/eval/`](scripts/eval/) | Training and evaluation launchers for the supported datasets. [论文 F1 对照、固定测试题与运行命令](docs/research/memskill-paper-f1.md) |
+| [`scripts/data/`](scripts/data/) | ALFWorld expert trajectory preparation |
+| [`tests/`](tests/) | Replay and credit assignment regression tests |
+
+Run the main program and experiment modules from the repository root. To inspect their options:
+
+```bash
+python main.py --help
+python -m experiments.designer.designer_pilot --help
+python -m experiments.controller.controller_credit_study --help
+```
+
 ## 🧩 Overview
 
 **MemSkill** is a framework for learning and evolving **memory skills** for long-horizon agents. It replaces static, hand-designed memory operations with a data-driven loop where skills are **learned, refined, and reused** from task feedback, enabling more adaptive memory construction across settings.
@@ -64,7 +87,7 @@
 
 - 🚀 **[2026-03]**: `--locomo-train-query-sampling-ratio` is now available for training-time stratified test-query sampling on LoCoMo. It significantly reduces evaluation cost during training by sampling LoCoMo test queries by category, while leaving the full-evaluation protocol unchanged for `eval-only` and formal testing. For more details, please refer to [Commonly Used Configs](#️-commonly-used-configs).
 
-- 🛠️ **[2026-03]**: We have added support for interrupted training recovery. You can now resume training in the `train_*.sh` scripts by passing `--load-checkpoint`, which restores key training state such as the controller/optimizer, operation bank, designer state (for example, the rolling failure-case pool), and other resume-critical metadata. At the moment, recovery is supported only from checkpoints saved at **outer-epoch boundaries**. By default, resumed runs continue logging to the original W&B run; if you prefer a fresh run for logging, use `--resume-new-wandb-run` instead. For more details, please refer to [Commonly Used Configs](#️-commonly-used-configs).
+- 🛠️ **[2026-03]**: We have added support for interrupted training recovery. You can now resume training in the `scripts/train/train_*.sh` scripts by passing `--load-checkpoint`, which restores key training state such as the controller/optimizer, operation bank, designer state (for example, the rolling failure-case pool), and other resume-critical metadata. At the moment, recovery is supported only from checkpoints saved at **outer-epoch boundaries**. By default, resumed runs continue logging to the original W&B run; if you prefer a fresh run for logging, use `--resume-new-wandb-run` instead. For more details, please refer to [Commonly Used Configs](#️-commonly-used-configs).
 
 - 🚀 **[2026-03]**: We have improved the parallel memory extraction pipeline for evaluation and cache building, making MemSkill noticeably faster in large-scale runs. We also added clearer controls for concurrency with `--inference-workers` at the sample level and `--inference-session-workers` within each sample at the chunk/span level, which together can significantly accelerate memory extraction. For more details, please refer to [Commonly Used Configs](#️-commonly-used-configs).
 
@@ -101,7 +124,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/ViktorAxelsen/MemSkill
+git clone https://github.com/zgzhhw-sysu/MemSkill
 cd MemSkill
 
 # Create and activate virtual environment
@@ -127,7 +150,7 @@ MemSkill builds training and evaluation data from the datasets below. Please dow
 
 #### **1) LoCoMo**
 - Download LoCoMo from the official repo: [LoCoMo](https://github.com/snap-research/locomo)  
-- **Splits**: LoCoMo splits are **already configured in `main.py`** (no extra split file needed).  
+- **Splits**: LoCoMo splits are configured in [`src/data_processing/datasets.py`](src/data_processing/datasets.py) (no extra split file needed).
 - Put the downloaded files under:
   - `data/locomo10.json`
 
@@ -159,9 +182,9 @@ We use **offline expert trajectories** as the interaction corpus for memory cons
 
 ```bash
 # Collect expert trajectories for train / seen / unseen splits
-python alfworld_replay.py --split train --output ./data/alfworld_train_offline.json
-python alfworld_replay.py --split eval_in_distribution --output ./data/alfworld_expert_eval_in_distribution.json
-python alfworld_replay.py --split eval_out_of_distribution --output ./data/alfworld_expert_eval_out_of_distribution.json
+python scripts/data/alfworld_replay.py --split train --output ./data/alfworld_train_offline.json
+python scripts/data/alfworld_replay.py --split eval_in_distribution --output ./data/alfworld_expert_eval_in_distribution.json
+python scripts/data/alfworld_replay.py --split eval_out_of_distribution --output ./data/alfworld_expert_eval_out_of_distribution.json
 ```
 
 Note that:
@@ -225,9 +248,9 @@ Before running, please check the parameter configuration in the `.sh` scripts.
 Choose the training script based on the dataset you want to use. Make sure `--data-file`, `--model`, and API settings are set correctly.
 
 ```bash
-bash train_locomo.sh
+bash scripts/train/train_locomo.sh
 # or
-bash train_alfworld.sh
+bash scripts/train/train_alfworld.sh
 ```
 
 
@@ -236,13 +259,13 @@ bash train_alfworld.sh
 Use the matching evaluation script after training. Set --load-checkpoint and dataset paths before running.
 
 ```bash
-bash eval_locomo.sh
+bash scripts/eval/eval_locomo.sh
 # or
-bash eval_alfworld.sh
+bash scripts/eval/eval_alfworld.sh
 # or
-bash eval_hp.sh
+bash scripts/eval/eval_hp.sh
 # or
-bash eval_longmemeval.sh
+bash scripts/eval/eval_longmemeval.sh
 ```
 
 

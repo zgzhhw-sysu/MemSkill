@@ -1,0 +1,213 @@
+{
+  "paper": "https://arxiv.org/pdf/2602.02474v3",
+  "upstream_revision": "f65b797338033f4f9c34822f1810f9c2747e6022",
+  "metric": "100 * mean(native per-question F1), separately for each dataset",
+  "reported_f1": {
+    "Llama-3.3-70B-Instruct": {"table": 1, "locomo": 44.21, "longmemeval": 31.12},
+    "Qwen3-Next-80B-A3B-Instruct": {"table": 1, "locomo": 42.08, "longmemeval": 25.29},
+    "Llama-3.1-8B-Instruct": {"table": 7, "locomo": 20.59, "longmemeval": 18.13}
+  },
+  "inference_defaults": {
+    "session_mode": "fixed-length", "chunk_size": 512, "chunk_overlap": 64,
+    "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
+    "retriever": "qwen3-embedding-0.6b"
+  },
+  "longmemeval_launcher": {"script": "eval_longmemeval.sh", "action_top_k": 5, "encode_batch_size": 64},
+  "downstream_swap_repairs": {
+    "development_histories": ["conv-26", "conv-30"],
+    "cohort": "For all 885 training questions, select round-zero 0-to-1 or 1-to-0 switches whose changed ranks include no focal-unique text. Require available annotated evidence for the annotated arms, record unmeasured cases. The other four training histories were uninspected at registration.",
+    "design": "Use the weaker branch and its actual bank. Run the same two-repeat matched retrieval, source and reader controls as competing_repair_panel. Also substitute the omitted item returned by question-only lexical retrieval with no source annotations, versus a different length-matched item. Keep the first 19 ranks and the original question.",
+    "query_only": true
+  },
+  "repair_credit": {
+    "treatments": ["terminal","repeat","repair"],
+    "training": "Six preregistered native training spans, 885 questions total. For each question use two independently generated native/swap pairs and two current-source versus matched earlier-source writing pairs. Raw terminal uses the average swapped minus native F1. Repeat keeps only the nonoverlapping signed gap between the two observed score ranges. From a positive gap subtract at most the replicated native-skill write advantage, min(current) minus max(prior and native), floored at zero. Negative gaps discourage introducing a harmful swap. Average over every question in the history and weight histories equally. Annotated-source and exploratory follow-ups do not enter the fitted targets.",
+    "oracle": "The measured repairs discount avoidable gains; the residual is not proof of a unique cause. Check the local history's count of discounted questions and its opportunity to change a deployed action.",
+    "candidate": "repair", "comparators": ["native", "terminal", "repeat", "rate"],
+    "rule": "Use the same GPU state features, ridge and rate-matched bias as the original state-credit comparison. Report identical target columns as a null comparison. Release held-out testing only after the full 341-question native-author verification, a positive paired difference against every comparator and changed Controller membership."
+  },
+  "source_readback": {
+    "keep_native_ranks": 10, "max_excerpt_tokens": 256,
+    "choice": "Use original GPU-ranked top 20. Each distinct displayed memory text votes for its most recent writing span by reciprocal rank; break ties by first ranked appearance. Center the excerpt at the longest contiguous tokenizer match of that span's highest-ranked voting memory with its source, or the middle on no match.",
+    "control": "Identical retained top ten. Take a dated excerpt from the span half a history away at the same fractional position. Both prompts must fit the original question's native input-token budget. Primary selection and length are independent of the sham.",
+    "evaluation": "Register prompts before generation. Evaluate all 341 disjoint validation questions against a fresh native repeat and the time-shifted source. Freeze method before validation, no annotation, reference or question-dependent source search. Only release the full 314 test after independent verification of gains over native in both validation histories and over sham pooled.",
+    "storage": "Requires the original chunks and a version-to-writing-span index in addition to the existing bank."
+  },
+  "readback_transfer": {
+    "dataset": "LongMemEval-S fixed 101 answerable histories in the original split, one question each. Keep abstention exclusions, question date and the upstream 512-token completion limit.",
+    "treatment": "Freeze the exact LoCoMo top-ten plus one excerpt rule and shifted source control after the 314 LoCoMo test. Use the original session date prefix on LongMemEval without changing the rank or alignment rule. Use no gold sessions, labels, or target task fitting.",
+    "cohorts": {"primary": {"encode_batch_size":2,"action_top_k":7}, "paper":{"encode_batch_size":64,"action_top_k":5}},
+    "scoring": "Independent author scorer. Publish both native archived and repeated endpoints, paired questions improved/equal/worse, each question type, input and output tokens. Keep paper-launcher and primary settings separate. Completed-history prefixes reflect machine completion order; report full-cohort effects only after all 101."
+  },
+  "ordered_writer_probe": {
+    "histories": ["conv-30","conv-26","conv-41","conv-42","conv-43","conv-44"],
+    "action": "At the six prespecified training pivots keep every selected skill and swap only capture_temporal_context and capture_activity_details at ranks 3 and 4. Require that the original CUDA Controller shadow-forward receipt for the exact state gives distinct writer prompt hashes and exactly equal input tokens. Repeat native and reordered writer outputs twice at temperature 0, seed 42, cap 2048 in distinct fresh caches. Preserve source, retrieved text order, model and all other writer settings.",
+    "outcomes": "Record parsed operation mix, distinct successful INSERT/UPDATE texts and token cost. Among training questions whose evidence intersects the pivot and whose normalized full answer (at least four characters) is a contiguous token sequence in the visible raw input, report how many are represented verbatim by at least one successful write. A proxy for local literal retention only. Do not label this as full QA performance. Preserve repetitions and genuine zero eligible counts."
+  },
+  "repair_conditioned_forecast": {
+    "initial": ["conv-30","conv-26"],
+    "targets": ["conv-41","conv-42","conv-43","conv-44"],
+    "feature": "At the registered pre-write state take one minus the number of distinct retrieved memory texts divided by the number of retrieved slots, as an exact fraction. Use zero for an empty list. Select the prior measured history with the closest fraction, ties broken by chronological registration order. No downstream answers, labels or writes from the target are features.",
+    "labels": "For each earlier history compute three mean signed advantages, all expressed as delete minus the relation skill: ordinary Reader; frozen deployed clue router on both banks; and a conservative margin. For the latter per question compare [min,max] attained under ordinary and pointer reads on each bank. Give a positive magnitude min(B)-max(A) if the swapped bank strictly wins under both options; a negative magnitude max(B)-min(A) if the original strictly wins; otherwise zero. Aggregate over all questions. The margin only tests the two measured reading repairs, with one writer realization per bank.",
+    "decision": "At each target predict separately from each nearest-history label. Also predict from equal-history global means under each label and from always-original and always-swap. A tie or different skill pair keeps the native action. Every decision is scored on the same source-aware, clue-routed Reader actually deployed on the chosen bank. Only conv-41 onward are forecast targets. Prior original-bank and ordinary first-swap aggregate scores on all six histories and two crossed outcomes were already known."
+  },
+  "clue_longmemeval": {
+    "cohort": "Apply the unchanged LoCoMo clue rule to all 101 fixed independent LongMemEval-S histories, separately for replay K7 and original launcher K5. Each question gets its own dated evidence and corpus IDF. No target threshold fitting. At registration the K7 static (memory and pointer) prefix of 15 had been examined; keep those distinct from later arrivals.",
+    "control": "Each history contains one question, so compare uniform routing at the realized source rate within each question type, then weight those means by the actual counts. Keep full author output cap of 512 and report exact paired changes, native/source/shifted-source end points, coverage by type and tokens."
+  },
+  "clue_replication": {
+    "cohort": "Fixed 314 LoCoMo items and original native banks after the frozen clue router achieved 28.2478 in the existing panel. Run native and pointer inputs again through the same Llama-3.1-8B BF16 251 service with a separate fresh cache and unchanged generation settings. Shared prompts reuse exactly one fresh response.",
+    "order": "First all 40 questions routed to native, then the 274 routed to source. The latter have identical routed and always-source prompts and hence exactly zero paired difference under the common-response design. The early paired effect divides the sum of the 40 independent differences by all 314. Publish full absolute scores only after both original and source endpoints for all 314 are generated and rescored.",
+    "report": "Report decrease or increase without refitting, full real usage, number of exact response repeats and the single-call routed cost separately from research comparison cost."
+  },
+  "clue_retention": {
+    "rule": "English lowercase alphanumeric terms of length at least 2 including two-digit numbers. Use the listed function words as stopwords. Each distinct question term has weight 1 + log((N+1)/(1+df)) where N counts the native raw source spans in this same history and df counts spans that contain it. Exclude terms already visible in the retained first ten memories. Compare the sum of weights of the remaining terms present only in the incoming excerpt with the sum present only in the displaced last ten native memories. Read the source on ties within 1e-9, otherwise use the arm that preserves greater question-term weight. Use no evidence label, future model answer, or gold reference in routing.",
+    "stopwords": "a an the this that these those am is are was were be been being do did does have has had would could should can may might will shall must would which what when where who whom whose why how of on to in from with by and but or as if at for than after before about into during while whether it its they their them he his she her herself himself you your i my me we our us",
+    "evaluation": "Prespecify before calculating these routing outcomes. Select one of the already measured GPU prompts. Verify each response against the same request receipt and author F1. Compare always native, always source and a uniformly random selection of the same count of source reads within each history (exact expectation). Use both banks in all six training histories. Release the 314 test only if validation on all 341 beats native, source and rate-matched random on the pooled mean and does not regress against always source in either history. Report switches, tokens and per-history effects. Existing static-panel aggregate scores had already been inspected."
+  },
+  "direct_raw_retrieval": {
+    "cohorts": ["validation","test"],
+    "source": "Use raw dated sessions, one passage for every turn with its immediate neighbors within its session. Deduplicate identical dated passage strings, retaining chronological order. Never use gold or eventual answers to rank. Use the frozen official Qwen3-Embedding-0.6B (97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3) for both raw passages and unmodified user questions, normalized embeddings, FP32 cosine on leased CUDA, stable chronological ties. Save the first twenty ranks and scores.",
+    "arms": ["native","source","direct","raw"],
+    "treatment": "The two established original-memory and pointer-readback responses come from their frozen physically audited panel. For direct use the same first 10 native memories, add the best directly retrieved dated raw passage up to 256 tokens and cap the prompt at that question's actual pointer-readback input length. For raw use only directly retrieved dated passages, skip source windows sharing a turn with a previously appended passage, add in ranked order and crop the last to the same pointer-readback input budget. Neither new arm uses reference answers or support annotations. Reuse an already measured matching prompt. The raw budget uses the reference run's lengths solely for a paired cost comparison.",
+    "evaluation": "Run both original validation histories (341 questions) and both original test histories (314 questions). This fixed comparator was specified after the published source-readback results were seen. Report full cohorts independently, per history, by type and paired answer changes. Report real GPU reader tokens, storage and encoding work. Existing policy promotion decisions stay separate."
+  },
+  "writer_marker_probe": {
+    "cohort": "All 885 questions across the six registered native training banks, after the two-bank source-readback cross for that history. Freeze per-question prompts before any output.",
+    "change": "Replay original writer responses with the same parser and suppress a standalone INSERT, UPDATE, DELETE or NOOP heading only when the immediately following ACTION line repeats that same operation. Require archived parsed actions match exactly and only trailing memory text changes. Keep the native bank, ordering, original top 20 and all later writes fixed. Clean changes only version-proven suffixes. Neutral replaces the suffix word with NOTE and retains the physical native token count.",
+    "prediction": "If bare action words contribute to Reader errors, clean formatting should improve native F1 and outperform the equal-token neutral control. Similar gains from both variants are compatible with the original word itself causing interference. The design tests presentation only. It cannot establish whether reparsing before embedding or later writing improves the deployed policy."
+  },
+  "fork_forecast": {
+    "order": ["conv-30","conv-26","conv-41","conv-42","conv-43","conv-44"],
+    "actions": ["handle_entity_relationships","delete"],
+    "rule": "Use conv-30 only to initialize. Before inspecting each following full crossed outcome, independently predict the skill for a reader that will use source readback. For each earlier full history orient the swap advantage to delete minus handle_entity_relationships, and average equally across histories. Make a prediction from ordinary reads, from source reads and from time-shifted reads separately. Positive mean chooses delete, negative mean chooses relationships, exact tie keeps native. Always keep native for a target with a different skill pair. Never learn from the same history or the downstream questions at deployment.",
+    "evaluation": "Prequential decisions are scored on the actual full retained or swapped bank under the same deployed source reader. Compare always-native and always-swap, report each realized action and history, macro and question-weighted F1. These two-skill action decisions do not establish generalization to all Controller states."
+  },
+  "fork_readback": {
+    "cohort": "All 885 questions in six registered training histories. Cross the original first full single-skill swap and original native bank with unchanged top 20, source readback, and matched time-shifted readback. Freeze both banks' prompts before inference per history, start conv-30, then conv-26, 41, 42, 43, 44. First four swaps have been inspected; last two are prospective.",
+    "contrast": "Delta for each reading rule is swapped minus original selection on the same question. Interaction is delta under source readback minus delta under top 20. A time-shifted control tests whether changing the reading budget composition alone gives a similar interaction. Count improved and harmed questions and compare the sign of each whole-history advantage.",
+    "prediction": "Providing real source text to both banks will eliminate some apparent benefits of switching under the default reader, and can expose other benefits. Benefits and harms may coexist within the same history. No sign assumed for the mean interaction.",
+    "measurement": "One fresh common answer cache per history and same prompt uses the same model response. Each branch uses its native input-token cap. Report the original archived first-swap delta, fresh native delta and both readback deltas; one writing trajectory per action in this panel. These are diagnostic targets, never fit or tune on validation or test."
+  },
+  "training_swap_reader_slots": {
+    "cohort": "All 885 training questions in the six registered complete-history boundary swaps, round zero, ordered top 20 per arm. No selection on score difference.",
+    "direct": "A changed rank where a displayed version was last written at the focal span and its exact text is absent from the other final bank. The paired rank includes any displaced item. All other changed ranks form a second group.",
+    "measurement": "On mixed questions physically cross the two slot groups and rerun both endpoints. Rotate arm order by question, reverse on repeat two, independent caches. When only one group changes, use the archived endpoints as the four prompts collapse to two. Report these separately.",
+    "readout": "Average the marginal change from switching direct ranks across both other-rank backgrounds, retain the complementary contribution, and report the difference between the two marginal changes as an interaction. Sum to each measured endpoint difference; no causal allocation to individual downstream modules."
+  },
+  "competing_repair_panel": {
+    "sample": "26 pre-registered evidence-linked questions across six native LoCoMo training histories. One fixed diagnostic panel; no model selection on test.",
+    "controls": "Top-20 contexts retain ranks 1–19. Replace only rank 20 with an omitted bank item chosen by question/source token Jaccard or a different hidden item matched on token length; annotated source turns or disjoint same-history turns matched by date, speaker and length. Reader instruction leaves all 20 items in place.",
+    "reader_instructions": {
+      "reader": "Check which person, event and time the question refers to. Use only supporting details in the supplied memories.",
+      "reader_sham": "Read the following material and the question that goes with it. Provide your answer in the usual way."
+    },
+    "label": "Two distinct generation caches, reversed arm order. An intervention is a sufficient rescue on this panel only when both repeats achieve F1=1 and both the original and matched sham score below 1 in each repeat. Keep overlaps. A null result is unresolved; raw source repair alone does not isolate a writer error."
+  },
+  "later_write_case": {
+    "history": "conv-30", "span": 32, "total_spans": 39, "questions": 81,
+    "source_sha256": "6e2b9531da776bde42e567ddb112afda2c8aa4dca8476d1bc26c766d68bbd36e",
+    "linked_question_indices": [23, 24, 32, 33, 77], "focal_question": 77,
+    "trigger": "Exploratory conv-30 example identified after round-zero analysis. Run two independent current/prior native-skill writing controls at the later evidence-bearing span only if both fresh readers recover question 77 from source and matched foils fail. Score all 81 questions and natural top-20 exposure. This case is separate from the six preregistered controller decisions."
+  },
+  "training_write_control": "Keep native skills, original writer response and all original bank mutations through the registered training span. Separately append the complete two-turn dated notes visible in the current span, or the same count of earlier visible notes matched by word length without replacement. For each arm replay the real suffix, retrieval and all questions. Two independent suffix caches per history and reversed arm order. Neither intervention reads a future question or gold answer.",
+  "training_boundary_swap": {
+    "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
+    "independent_repeats": 2,
+    "repeat_order": "odd swap then native; even native then swap; each arm seeds only earlier writer receipts",
+    "histories": {
+      "conv-26": {"span": 22, "total_spans": 47, "questions": 152, "linked_question_indices": [42, 66, 118, 119], "source_sha256": "2b4a47f4db70688de295ded1291a889e04899a2ba8321f6c40a82c37f63a0f01"},
+      "conv-30": {"span": 19, "total_spans": 39, "questions": 81, "linked_question_indices": [27, 61], "source_sha256": "caa14fe66ac3b58b7e860c9f74b117b400cbcea6492a183e75657fc8d616ab8a"},
+      "conv-41": {"span": 32, "total_spans": 66, "questions": 152, "linked_question_indices": [29, 32, 101, 102], "source_sha256": "f9af7ba38b3d0547f4a62134c1a2e11ca18007cd5ae4a43da971cf17ae0c9aba"},
+      "conv-42": {"span": 29, "total_spans": 60, "questions": 199, "linked_question_indices": [31, 32, 78, 80, 136, 137, 138, 140, 141, 142], "source_sha256": "9662537e8b5e00f8d499fa04a76ba60f060658e7e2a47f6b5b1fc73691d9ce45"},
+      "conv-43": {"span": 33, "total_spans": 68, "questions": 178, "linked_question_indices": [14, 41, 67, 123, 124], "source_sha256": "f232a3aea55d296fa4a2fed64a44aad6a9dbc7e54b0a8459677781f60896f02d"},
+      "conv-44": {"span": 31, "total_spans": 64, "questions": 123, "linked_question_indices": [31], "source_sha256": "3e2e29f26d9aa8aa3fd7c791e64e105e02e461fea9ba72efb898a39ff202690b"}
+    }
+  },
+  "native_reader_ablation": {
+    "cohort": "All six preregistered LoCoMo training pivots, with every scored question in each history",
+    "exposure": "An actual ordered Reader slot contains a memory version last written at the focal span",
+    "target": "Remove every slot from the focal span, keeping the relative order of the other slots",
+    "sham": "Remove an equal number of disjoint slots minimizing total token-length distance then slot-rank distance; report unmatched when infeasible",
+    "repeat": "Use a separate greedy response cache for all exposed requests, rotate arm order by question position, reuse native receipts on unexposed questions",
+    "readout": "Report complete-history F1, all directly exposed, evidence-linked, and directly exposed unlinked; Reader contribution diagnostic only"
+  },
+  "native_reader_copy_ablation": {
+    "cohort": "All scored questions in the same six training histories and the same preregistered focal spans",
+    "target": "Extend the directly retrieved focal versions to every slot with exactly the same displayed text. Preserve case, whitespace and the relative order of all other slots.",
+    "sham": "Recompute a disjoint equal-count length- and rank-matched deletion on the extended slots; report infeasible controls separately.",
+    "repeat": "Share exact measured requests with the earlier version ablation, including every repeated native answer. Generate only previously unseen prompts.",
+    "readout": "Paired F1 for exact-copy deletion minus original version deletion, all histories and the subset with additional copies; measure shared text dependence without assigning its full effect to a single write."
+  },
+  "native_reader_copy_interaction": {
+    "cohort": "Every scored training question with an actually retrieved focal version and at least one identical copy from another span at the six registered pivots. Report coverage of each full history.",
+    "design": "Cross removal of focal versions D and other identical texts C. For the control S, match C to equally many nonfocal, noncopy slots using token lengths and ranks after D is removed. Compare S alone and D+S; omit both controls if infeasible.",
+    "credit": "Average the focal marginal with copies present and absent. Report the analogous copy-group marginal and their sum. The control-adjusted interaction is the focal marginal with copies removed minus that with matched background removed.",
+    "inference": "Reuse the measured original, D, and D+C responses; rotate the new conditions in question order. Keep each retained slot in its native order and share only exact request receipts. These are training Reader effects."
+  },
+  "native_writer_read_paths": {
+    "cohort": "All native states and scored questions in the six fixed LoCoMo training histories. Use each registered pivot and its immediately preceding and following span, irrespective of output counts. Do not select spans by coverage or QA outcomes.",
+    "edge": "A memory version displayed in a later writer prompt links its producing span to the later span. A memory version displayed to the Reader links its producer to the question. Validate all ordered writer refs against live versions and exact text.",
+    "coverage": "Report minimum writer hops per question: zero (direct), exactly one, two or more, or unreachable. Report label-free overlap with the sets reached from the two neighboring spans, and overlap with the pre-existing evidence-linked question IDs. These are observed routes of possible influence.",
+    "paired_outcomes": "When both registered independent swap repeats are complete, report the mean signed per-question swap-minus-native F1 separately for each hop group and repeat. Use the frozen native paths for both arms. Do not feed these diagnostics into the preregistered four-arm selection."
+  },
+  "forward_rank_boundary": {
+    "layer": "actor_head.0.weight", "calibration": "conv-26",
+    "screen": "Search retained ranks from full rank minus one through 1 on all native training states in the first registered history. Use FP64 SVD, cast each truncated weight to native FP32 and execute the serial deterministic Controller.",
+    "select": "Freeze the largest rank for which at least one state keeps its native ordered top-K and at least one replaces only its last skill by the native next-ranked skill. Every calibration state must have one of these two outcomes. Save no candidate if the set is empty.",
+    "transfer": "Evaluate the frozen rank unchanged on the remaining five registered training histories. No QA answers, rewards or validation/test histories may enter rank selection."
+  },
+  "forward_rank_skill_projection": {
+    "layer": "op_net.2.weight",
+    "motivation": "After the actor projection preserved the action at every rank on conv-26, test the final skill encoder projection. It transforms each candidate embedding before it is paired with the state. Inherit the same calibration, transfer and selection rules. Make no layer or rank choices using QA outcomes."
+  },
+  "native_rank_path_placement": {
+    "scope": "Describe where the frozen conv-26 skill projection applies on the six native training trajectories. The first three histories already have neighboring-pivot path results. The last three follow this rule prospectively. Do not use labels, predictions or postfork states to select a policy.",
+    "decision": "Eligible if the native seventh and eighth skills are the registered outgoing and incoming skills in that order. Count a placement only if the frozen policy substitutes the eighth for the seventh while preserving the first six. Report other action changes separately.",
+    "control": "Partition the full chronological span sequence into four intervals using floor(4 * zero_based_span / history_span_count). Within each interval choose the same number of eligible spans as the frozen policy, uniformly without replacement. Compute the exact expected number of distinct questions reached, for direct reads, at most one writer hop, and any finite number of writer hops."
+  },
+  "frozen_skill_projection_outcome": {
+    "split": "train", "treatment": "projected", "questions": 885,
+    "design": "After both fixed test baselines have been verified, deploy the selected skill projection from conv-26 on all six complete original training conversations. Keep the matrix fixed, rebuild each bank from empty, and compare every prediction with the same-model native training run using exact shared requests. Report each history and the paired question mean. This outcome does not select a rank or qualify a policy for testing."
+  },
+  "frozen_skill_projection_test": {
+    "split": "test", "questions": 314, "rank": 166,
+    "weight_sha256": "57f2d8d1d0ffd2dcf375e3d7f3da002433bf277c8a4bea846310e080a713089a",
+    "design": "Direct paired evaluation requested for the existing conv-26-frozen skill projection. Rebuild both histories from empty, reuse only identical full model requests, report all fixed test questions and same-state choices. Compare once with the author-scored batch-64 original without test-based rank selection."
+  },
+  "state_credit": {
+    "outgoing": "handle_entity_relationships", "incoming": "delete",
+    "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
+    "training": "mean of independent repeats per history; equal weights across histories",
+    "rate_search": "monotone search over representable FP32 shifts under deployed top-k",
+    "rate_control": "constant boundary logit shift with closest incoming-skill count on all native training states, minimum absolute shift on ties",
+    "validation": "two complete histories; native, terminal, span and rate-matched fixed bias from empty memory banks"
+  },
+  "state_credit_test": {
+    "candidate": "span", "comparators": ["native", "terminal", "rate"],
+    "selection_split": "validation", "test_split": "test",
+    "rule": "Verified positive pooled paired F1 against all three controls and at least one Controller decision with both a changed first-draw probability and changed top-K membership on validation",
+    "weights": "Use the exact validated frozen file for all arms without refitting"
+  },
+  "datasets": {
+    "locomo": {
+      "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+      "test_indices": [8, 9],
+      "development_splits": {
+        "train": {"indices": [0, 1, 2, 3, 4, 5], "scored_questions": 885, "scored_key_sha256": "1f3e7fb9bab5f5b2003adfa67d4f6160bfa04d0b043c814662b6cf09d176c489"},
+        "validation": {"indices": [6, 7], "scored_questions": 341, "scored_key_sha256": "809d6962e3f7656c85b84e38ec67c8c012d94c119a28beb64fca9d278d28ffce"}
+      },
+      "excluded_category": 5,
+      "scored_questions": 314,
+      "scored_key_sha256": "13f60907e23796ec66289de04aee6644430d7df7bdedde48e83ebae77baaaf86"
+    },
+    "longmemeval": {
+      "data_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "split_file": "data/longmemeval_s_splits.json",
+      "split_sha256": "d13012b04e6e2d23aa2c57df6ee121ec55be710d7f19b2d0527a1b5457d7031f",
+      "excluded_id_suffix": "_abs",
+      "scored_questions": 101,
+      "scored_key_sha256": "92cdbb8fc3bac13e37b20cf55e246d27a05aa84d0fa6fcc1bc0d4dfa994a2445"
+    }
+  }
+}

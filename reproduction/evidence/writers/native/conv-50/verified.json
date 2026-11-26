@@ -1,0 +1,20 @@
+{
+  "complete": true,
+  "arm": "native",
+  "history": "conv-50",
+  "blocks": 65,
+  "questions": 158,
+  "exact_writer_and_reader_context_parity": true,
+  "controller_k": 7,
+  "source_only_for_insert": false,
+  "actual_choice_counts": {
+    "insert/noop/capture_temporal_context/capture_activity_details/refine_temporal_details_with_context/capture_entity_nuances/handle_entity_relationships": 65
+  },
+  "suppressed_inserts": 0,
+  "writer_calls": 65,
+  "new_physical_writer_calls": 0,
+  "registration_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+  "scores_sha256": "319b02c26444deee1ce8b289ba78913aa2f905437ebb56f0432e1cb53f0f16e8",
+  "device": "NVIDIA GeForce RTX 3090",
+  "cuda_visible_devices": "GPU-a36d30b9-035b-9eb8-2493-c86150c97f0e"
+}

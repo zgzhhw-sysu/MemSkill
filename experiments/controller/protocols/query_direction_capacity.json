@@ -1,0 +1,3 @@
+{
+  "question": "Could tuning only the amplitude of the query-displacement policy reach the registered F1 target in the measured action space? Diagnostic only. Use the sign of its frozen probability change at every reached state. Zero must stay zero, a positive change can range from the raw logit to raw+2, and a negative change from raw-2 to raw. Also bound a shrink-only family between raw and the actual predicted probability. Maximize shared-window return exactly at the corners of the focal or two-step multilinear return. Group by history, retain matched endpoints and unobserved coverage. These retrospective windows cannot serve as operating policies or prove prospects on the unmeasured population."
+}

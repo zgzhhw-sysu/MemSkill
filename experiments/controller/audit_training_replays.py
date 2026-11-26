@@ -1,0 +1,189 @@
+"""Compare frozen decisions on recorded single-span interventions in held-out training dialogues."""
+import argparse
+from collections import Counter, defaultdict
+import json
+import math
+from pathlib import Path
+from statistics import mean
+
+import torch
+from torch.nn import functional as F
+
+from experiments.controller.paired_policy import (fit_anchored_credit, fit_constrained_placement, fit_memory_novelty, fit_policy,
+                                                  fit_source_count_correction, match_training_probability, novelty_logit_shift)
+from experiments.controller.resume_status import load_episode
+from src.replay import attributed_turn_pairs
+
+
+def read_windows(study, protocol, *, source_counts=False):
+    windows = {}
+    for start, end in protocol["train_sessions"]:
+        for sample in protocol["train"]:
+            directory = study / "train" / f"{sample}_s{start}"
+            rows = load_episode(directory, sample, end - start + 1,
+                                deployment_writer=protocol.get("deployment_writer", False))
+            trace, = (directory / "traces").glob("*.jsonl")
+            events = [json.loads(line) for line in trace.read_text().splitlines()]
+            if source_counts:
+                spans = (e for e in events if e["kind"] == "span")
+                for row, span in zip(rows, spans, strict=True):
+                    row["source_item_count"] = len(set(attributed_turn_pairs(span["source"])) - set(span["retrieved"]))
+            diagnoses = [e["diagnosis"] for e in events if e["kind"] == "span_credit"]
+            windows[sample, start] = list(zip(rows, diagnoses, strict=True))
+    return windows
+
+
+def probability_placement(records):
+    """Evaluate a single randomized decision using the two measured outcomes at its state."""
+    grouped = defaultdict(list)
+    for r in records:
+        grouped[r["dialogue"], r["window"], r["span"]].append(r)
+    dialogues = defaultdict(list)
+    for (dialogue, _, _), links in grouped.items():
+        probabilities = links[0]["probabilities"]
+        if any(link["probabilities"] != probabilities for link in links):
+            raise ValueError("A single span must have the same policy for every linked question")
+        plain = mean(link["scores"]["plain"] for link in links)
+        gain = mean(link["scores"]["always"] for link in links) - plain
+        dialogues[dialogue].append((probabilities, plain, gain))
+    by_dialogue = {}
+    for dialogue, spans in dialogues.items():
+        arms = {}
+        for arm in spans[0][0]:
+            mean_p = mean(p[arm] for p, _, _ in spans)
+            expected = mean(plain + p[arm] * gain for p, plain, gain in spans)
+            shuffled = mean(plain + mean_p * gain for _, plain, gain in spans)
+            arms[arm] = {"mean_probability": mean_p, "expected_f1": expected,
+                         "permuted_expected_f1": shuffled, "placement_delta": expected - shuffled}
+        by_dialogue[dialogue] = {"spans": len(spans), "arms": arms}
+    n = len(grouped)
+    aggregate = {arm: {key: sum(d["spans"] * d["arms"][arm][key] for d in by_dialogue.values()) / n
+                       for key in metrics} for arm, metrics in next(iter(by_dialogue.values()))["arms"].items()}
+    paired = [(plain, gain) for spans in dialogues.values() for _, plain, gain in spans]
+    upper_bound = {"always_grounded_f1": mean(plain + gain for plain, gain in paired),
+                   "best_measured_action_f1": mean(plain + max(0., gain) for plain, gain in paired),
+                   "grounded_better_spans": sum(gain > 1e-12 for _, gain in paired),
+                   "plain_better_spans": sum(gain < -1e-12 for _, gain in paired),
+                   "tied_spans": sum(abs(gain) <= 1e-12 for _, gain in paired)}
+    return {"weighting": "equal spans; average observed linked questions within each span",
+            "permutation": "all permutations of the same probabilities among covered spans within each held dialogue",
+            "spans": n, "dialogues": by_dialogue, "arms": aggregate, "measured_action_upper_bound": upper_bound}
+
+
+def compare(study, *, centered_candidate=False, source_count_candidate=False, duration_references=None, novelty_candidate=False,
+            constrained_candidate=False):
+    protocol = json.loads((study / "protocol.json").read_text())
+    windows = read_windows(study, protocol, source_counts=source_count_candidate)
+    counts = Counter()
+    source_fits, novelty_fits, constrained_fits = {}, {}, {}
+    if duration_references is not None:
+        from experiments.controller.audit_duration_credit import audit
+        duration_report, corrected = audit(study, duration_references)
+    records = []
+    for held in protocol["train"]:
+        train = [r for (sample, _), pairs in windows.items() if sample != held for r, _ in pairs]
+        terminal = fit_policy(train, 0)
+        anchor = fit_anchored_credit(train, terminal)
+        weights = {"terminal": terminal, "anchor": anchor, "rate": match_training_probability(train, terminal, anchor)}
+        if constrained_candidate:
+            weights["constrained"], constrained_fits[held] = fit_constrained_placement(train, weights["rate"], anchor)
+        if novelty_candidate:
+            novelty_fits[held] = fit_memory_novelty(train, anchor)
+        if centered_candidate:
+            candidate = fit_anchored_credit(train, terminal, center_states=True)
+            weights["centered"] = match_training_probability(train, candidate, anchor)
+        if source_count_candidate:
+            intercept, slope = fit_source_count_correction(train, anchor)
+            source_fits[held] = {"intercept": intercept, "slope_for_log1p_count": slope}
+        if duration_references is not None:
+            adjusted = [dict(row, delta=corrected[row["episode"], row["span"]]) for row in train]
+            checked = fit_anchored_credit(adjusted, terminal)
+            weights["duration_checked"] = match_training_probability(train, checked, anchor)
+        for (sample, start), pairs in windows.items():
+            if sample != held:
+                continue
+            for row, diagnosis in pairs:
+                control, swap = diagnosis.get("control", {}), diagnosis.get("swap", {})
+                questions = diagnosis["questions"]
+                counts["spans"] += 1
+                counts["linked"] += len(questions)
+                if diagnosis.get("execution_fault") or control.get("contract_fault") or swap.get("contract_fault"):
+                    counts["write_fault"] += len(questions)
+                    continue
+                state = F.normalize(torch.tensor(row["state"]), dim=0)
+                logits = {arm: row["base_logit"] + w[0] + state @ w[1:] for arm, w in weights.items()}
+                if novelty_candidate:
+                    logits["novelty"] = logits["anchor"] + novelty_logit_shift(row["state"], novelty_fits[held])
+                if source_count_candidate:
+                    logits["source_count"] = logits["anchor"] + intercept + slope * math.log1p(row["source_item_count"])
+                actions = {arm: logit.item() >= 0 for arm, logit in logits.items()}
+                probabilities = {arm: logit.sigmoid().item() for arm, logit in logits.items()}
+                actions.update(always=True, plain=False)
+                for question in questions:
+                    key = str(question["qa_index"])
+                    original = control.get("qa", {}).get(key)
+                    other = swap.get("qa", {}).get(key)
+                    if (not question["control_matched"] or not original or not original["ok"]
+                            or original["f1"] != question["original_f1"]):
+                        counts["unmatched_original"] += 1
+                        continue
+                    if not other or not other["ok"]:
+                        counts["no_swap_answer"] += 1
+                        continue
+                    scores = {arm: (original if row["use"] == decision else other)["f1"]
+                              for arm, decision in actions.items()}
+                    records.append({"dialogue": sample, "window": start, "span": row["span"],
+                                    "question": question["original_index"], "actions": actions,
+                                    "probabilities": probabilities, "scores": scores})
+    if not records:
+        raise ValueError("No linked questions have an observed answer for both actions")
+    eligible = {(r["dialogue"], r["window"], r["span"]): r["actions"] for r in records}
+    means = {a: mean(r["scores"][a] for r in records) for a in records[0]["scores"]}
+    differences = {a: {"paired_delta": means["anchor"] - means[a],
+                       "spans_switched": sum(v["anchor"] != v[a] for v in eligible.values()),
+                       "improved": sum(r["scores"]["anchor"] > r["scores"][a] for r in records),
+                       "worse": sum(r["scores"]["anchor"] < r["scores"][a] for r in records)}
+                   for a in means if a != "anchor"}
+    expectation = probability_placement(records)
+    report = {"scope": "one decision on a held training dialogue, with the suffix exploration noise fixed",
+            "coverage": dict(counts), "matched_span_question_links": len(records), "matched_spans": len(eligible),
+            "unique_questions": len({(r["dialogue"], r["question"]) for r in records}),
+            "mean_link_f1": means, "anchor_minus": differences,
+            "single_decision_expectation": expectation, "records": records}
+    for candidate_name, enabled in (("centered", centered_candidate), ("source_count", source_count_candidate),
+                                    ("novelty", novelty_candidate), ("constrained", constrained_candidate),
+                                    ("duration_checked", duration_references is not None)):
+        if not enabled:
+            continue
+        required = ("expected_f1", "placement_delta")
+        contrasts = {a: {k: expectation["arms"][candidate_name][k] - expectation["arms"][a][k] for k in required}
+                     for a in ("anchor", "rate")}
+        report[candidate_name + "_training_screen"] = {"differences": contrasts,
+                "advance": all(v > 0 for group in contrasts.values() for v in group.values())}
+    if constrained_candidate:
+        report["constrained_training_screen"]["fits_by_held_dialogue"] = constrained_fits
+    if novelty_candidate:
+        report["novelty_training_screen"]["fits_by_held_dialogue"] = novelty_fits
+    if source_count_candidate:
+        report["source_count_training_screen"]["training_fits_by_held_dialogue"] = source_fits
+    if duration_references is not None:
+        report["duration_checked_training_screen"]["flagged_links"] = duration_report["flagged_links"]
+    return report
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("study", type=Path)
+    parser.add_argument("--centered-candidate", action="store_true",
+                        help="Test a centered, dispersion-scaled credit correction at the original training mean probability")
+    parser.add_argument("--source-count-candidate", action="store_true",
+                        help="Learn a correction from the number of source items available before choosing the skill")
+    parser.add_argument("--novelty-candidate", action="store_true",
+                        help="Fit credit versus session-to-memory cosine distance at the anchor training probability")
+    parser.add_argument("--constrained-candidate", action="store_true",
+                        help="Fit signed span credit at the anchor's training usage and Bernoulli KL")
+    parser.add_argument("--duration-references", type=Path, help="LoCoMo corpus for a training-only duration-alias correction")
+    args = parser.parse_args()
+    print(json.dumps(compare(args.study, centered_candidate=args.centered_candidate,
+                             source_count_candidate=args.source_count_candidate, novelty_candidate=args.novelty_candidate,
+                             duration_references=args.duration_references, constrained_candidate=args.constrained_candidate), indent=2))

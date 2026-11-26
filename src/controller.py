@@ -12,6 +12,7 @@ import numpy as np
 from typing import List, Tuple, Optional, Dict, Union
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModel, AutoTokenizer
+from src.evaluation_cache import encode_batch
 
 
 class PPOBuffer:
@@ -446,7 +447,7 @@ class PPOController(nn.Module):
     def forward(self, state_embedding: torch.Tensor,
                 op_embeddings: torch.Tensor,
                 deterministic: bool = False,
-                new_op_mask: Optional[torch.Tensor] = None
+                new_op_mask: Optional[torch.Tensor] = None, *, record_noise=None, replay_noise=None, policy_trace=None
                 ) -> Tuple[Union[int, List[int]], float, float]:
         """
         Forward pass with action selection (supports top-K)
@@ -456,6 +457,7 @@ class PPOController(nn.Module):
             op_embeddings: [num_ops, op_dim]
             deterministic: If True, always select top actions by logits
             new_op_mask: Optional mask for new action bias
+            policy_trace: If supplied, record logits and first-draw probabilities from this forward pass
 
         Returns:
             - action: int (if K=1) or List[int] (if K>1) selected action indices
@@ -485,6 +487,9 @@ class PPOController(nn.Module):
 
         num_ops = logits.shape[0]
         k = min(self.action_top_k, num_ops)  # Can't select more than available ops
+        if policy_trace is not None:
+            scores = logits.detach()
+            policy_trace.update(logits=scores.tolist(), first_draw_probabilities=scores.softmax(dim=-1).tolist())
 
         if k == 1:
             # Original single-action behavior
@@ -492,6 +497,13 @@ class PPOController(nn.Module):
 
             if deterministic:
                 action = torch.argmax(logits).item()
+            elif record_noise is not None or replay_noise is not None:
+                # torch.multinomial's one-sample exponential race, exposed for coupled suffix replay.
+                race = (logits.new_tensor(replay_noise["race"]) if replay_noise is not None
+                        else torch.empty_like(dist.probs).exponential_())
+                action = (dist.probs / race).argmax().item()
+                if record_noise is not None:
+                    record_noise["race"] = race.tolist()
             else:
                 action = dist.sample().item()
 
@@ -506,7 +518,10 @@ class PPOController(nn.Module):
             else:
                 # Sample K actions without replacement using Gumbel-top-k trick
                 # This provides proper sampling from the categorical distribution
-                gumbel = torch.distributions.Gumbel(0, 1).sample(logits.shape).to(logits.device)
+                gumbel = (logits.new_tensor(replay_noise["gumbel"]) if replay_noise is not None
+                          else torch.distributions.Gumbel(0, 1).sample(logits.shape).to(logits.device))
+                if record_noise is not None:
+                    record_noise["gumbel"] = gumbel.tolist()
                 perturbed = logits + gumbel
                 _, top_k_indices = torch.topk(perturbed, k)
                 actions = top_k_indices.tolist()
@@ -763,7 +778,7 @@ class BaseTextEncoder:
             batch_size = self.encode_batch_size
 
         if self._use_sentence_transformer:
-            return self.model.encode(texts, convert_to_numpy=True, batch_size=batch_size)
+            return encode_batch(self.model, texts, batch_size)
         else:
             # Process in batches to avoid OOM
             all_embeddings = []

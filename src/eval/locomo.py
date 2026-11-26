@@ -233,7 +233,7 @@ class LoCoMoEvaluator(Evaluator):
         Returns:
             F1 score (0-1)
         """
-        from eval_utils import f1_score, f1_max
+        from src.eval_utils import f1_score, f1_max
         if qa_item is None:
             return f1_score(prediction, ground_truth)
 

@@ -1,0 +1,27 @@
+{
+  "complete": true,
+  "questions": 314,
+  "histories": [
+    {
+      "history": "conv-49",
+      "questions": 156,
+      "blocks": 50,
+      "original_same_block_duplicate_inserts": 2213,
+      "all_original_prompt_and_physical_receipts_verified": true,
+      "historical_mixed_prompt_exact": true,
+      "new_model_calls": 0
+    },
+    {
+      "history": "conv-50",
+      "questions": 158,
+      "blocks": 65,
+      "original_same_block_duplicate_inserts": 2857,
+      "all_original_prompt_and_physical_receipts_verified": true,
+      "historical_mixed_prompt_exact": true,
+      "new_model_calls": 0
+    }
+  ],
+  "gpu_raw_rank_receipts_verified": true,
+  "filter_actual_archived_actions_checked": true,
+  "new_model_calls": 0
+}

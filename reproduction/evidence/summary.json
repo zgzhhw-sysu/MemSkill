@@ -1,0 +1,176 @@
+{
+  "complete": true,
+  "questions": 314,
+  "histories": [
+    {
+      "complete": true,
+      "history": "conv-49",
+      "questions": 156,
+      "arms": {
+        "native": {
+          "questions": 156,
+          "f1": 27.895067919740395,
+          "input_tokens": 81481,
+          "output_tokens": 1737,
+          "new_physical_qa_calls": 156
+        },
+        "mixed": {
+          "questions": 156,
+          "f1": 35.78312762183891,
+          "input_tokens": 67405,
+          "output_tokens": 1599,
+          "new_physical_qa_calls": 156
+        },
+        "best": {
+          "questions": 156,
+          "f1": 43.58855347116099,
+          "input_tokens": 61225,
+          "output_tokens": 1472,
+          "new_physical_qa_calls": 156
+        }
+      },
+      "paired": {
+        "mixed_vs_native": {
+          "delta_f1": 7.888059702098511,
+          "higher_equal_lower": [
+            46,
+            85,
+            25
+          ],
+          "changed_answers": 120
+        },
+        "best_vs_mixed": {
+          "delta_f1": 7.805425849322082,
+          "higher_equal_lower": [
+            45,
+            85,
+            26
+          ],
+          "changed_answers": 101
+        },
+        "best_vs_native": {
+          "delta_f1": 15.693485551420594,
+          "higher_equal_lower": [
+            70,
+            57,
+            29
+          ],
+          "changed_answers": 138
+        }
+      },
+      "registration_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+      "scorer_commit": "f65b797338033f4f9c34822f1810f9c2747e6022",
+      "scorer_manifest_sha256": "9eb3b0f667541aa6e677a52811e149d28bcf4610b921d6895ed0c8b08d97d18d",
+      "completed_at_utc": "2026-11-26T08:04:39.479758+00:00"
+    },
+    {
+      "complete": true,
+      "history": "conv-50",
+      "questions": 158,
+      "arms": {
+        "native": {
+          "questions": 158,
+          "f1": 22.638935173373,
+          "input_tokens": 82810,
+          "output_tokens": 1722,
+          "new_physical_qa_calls": 158
+        },
+        "mixed": {
+          "questions": 158,
+          "f1": 32.871899111903645,
+          "input_tokens": 70779,
+          "output_tokens": 1619,
+          "new_physical_qa_calls": 158
+        },
+        "best": {
+          "questions": 158,
+          "f1": 37.779273582941556,
+          "input_tokens": 63275,
+          "output_tokens": 1575,
+          "new_physical_qa_calls": 158
+        }
+      },
+      "paired": {
+        "mixed_vs_native": {
+          "delta_f1": 10.232963938530643,
+          "higher_equal_lower": [
+            38,
+            96,
+            24
+          ],
+          "changed_answers": 130
+        },
+        "best_vs_mixed": {
+          "delta_f1": 4.907374471037911,
+          "higher_equal_lower": [
+            36,
+            106,
+            16
+          ],
+          "changed_answers": 109
+        },
+        "best_vs_native": {
+          "delta_f1": 15.140338409568557,
+          "higher_equal_lower": [
+            58,
+            76,
+            24
+          ],
+          "changed_answers": 142
+        }
+      },
+      "registration_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+      "scorer_commit": "f65b797338033f4f9c34822f1810f9c2747e6022",
+      "scorer_manifest_sha256": "9eb3b0f667541aa6e677a52811e149d28bcf4610b921d6895ed0c8b08d97d18d",
+      "completed_at_utc": "2026-11-26T08:19:27.307437+00:00"
+    }
+  ],
+  "arms": {
+    "native": {
+      "questions": 314,
+      "f1": 25.25026227029438,
+      "input_tokens": 164291,
+      "output_tokens": 3459
+    },
+    "mixed": {
+      "questions": 314,
+      "f1": 34.31824193849569,
+      "input_tokens": 138184,
+      "output_tokens": 3218
+    },
+    "best": {
+      "questions": 314,
+      "f1": 40.66541263568752,
+      "input_tokens": 124500,
+      "output_tokens": 3047
+    }
+  },
+  "paired": {
+    "mixed_vs_native": {
+      "delta_f1": 9.067979668201303,
+      "higher_equal_lower": [
+        84,
+        181,
+        49
+      ]
+    },
+    "best_vs_mixed": {
+      "delta_f1": 6.34717069719183,
+      "higher_equal_lower": [
+        81,
+        191,
+        42
+      ]
+    },
+    "best_vs_native": {
+      "delta_f1": 15.415150365393135,
+      "higher_equal_lower": [
+        128,
+        133,
+        53
+      ]
+    }
+  },
+  "registration_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+  "scope": "Official historically exposed test cohort, two histories; fixed method, no test-driven tuning; semantic answer review still required."
+}

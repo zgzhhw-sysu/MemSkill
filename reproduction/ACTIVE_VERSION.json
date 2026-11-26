@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "test_questions": 314,
+  "histories": [
+    "conv-49",
+    "conv-50"
+  ],
+  "controller_checkpoint_sha256": "fe784612b0d4028f431379e7cae618d743761175532f0f8feb14959ed37d0226",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "temperature": 0,
+  "seed": 42,
+  "answer_max_tokens": 32,
+  "chunk_size": 512,
+  "chunk_overlap": 64,
+  "chunk_tokenizer": "cl100k_base",
+  "writer_retrieved_memories": 20,
+  "answer_memory_count": 10,
+  "question_retrieved_raw_passages": 1,
+  "budget": "Each question uses the native20 full-prompt token count as input ceiling; mixed and best use the same frozen raw passage.",
+  "registered_experiment_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+  "version": "memskill-memory10-raw",
+  "arm": "mixed",
+  "controller_top_k": 7,
+  "insert_source_only": false,
+  "deduplicate_insert_within_block": false,
+  "writer_entry": "frozen/fair_test_writer.py (FAIR_TEST_ARM=native)",
+  "reader_entry": "frozen/fair_test_mixed.py",
+  "mean_f1": 34.31824193849569,
+  "normalized_exact_match_count": 47,
+  "f1_full_score_count": 48
+}

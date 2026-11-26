@@ -1,6 +1,7 @@
 """
 Executor: Executes operations using LLM API
 """
+import hashlib
 import json
 import re
 import logging
@@ -9,9 +10,28 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from json_repair import repair_json
-from llm_utils import get_llm_response_via_api
-from rag_utils import get_embeddings
+from src.llm_utils import get_llm_response_via_api
+from src.rag_utils import get_embeddings
 from typing import List, Union
+
+
+def deployment_operations(operations):
+    """Return the selected operations that are included in the evaluation writer prompt."""
+    return [op for op in operations
+            if str(getattr(op, "name", "")).lower() != "noop"
+            and str(getattr(op, "update_type", "")).lower() != "noop"]
+
+
+def capped_empty_insert(response, output_tokens, cap, results):
+    """Recognize a final empty block following successfully decoded writes."""
+    return (
+        output_tokens == cap and len(results) >= 2
+        and re.search(r"(?im)^\s*ACTION[ \t]*:[ \t]*INSERT[ \t]*\Z", response.rstrip()) is not None
+        and not results[-1].success and results[-1].action_type == "NOOP"
+        and results[-1].reasoning == "Failed to parse MEMORY_ITEM for INSERT"
+        and all(r.success for r in results[:-1])
+        and any(r.action_type == "INSERT" for r in results[:-1])
+    )
 
 
 class ExecutionResult:
@@ -39,6 +59,7 @@ class Executor:
         self.args = args
         self.retriever_name = args.retriever
         self.logger = logging.getLogger('AgenticMemory')
+        self.writer_context = None
 
     def _build_executor_prompt(self, operations: List, session_text: str,
                                retrieved_memories: List[str]) -> str:
@@ -105,7 +126,7 @@ class Executor:
         )
 
     def execute_operation(self, operation: Union[object, List[object]], session_text: str,
-                          retrieved_memories: List[str]) -> List[ExecutionResult]:
+                          retrieved_memories: List[str], *, audit=None, response_provider=None, repair_capped_source=False) -> List[ExecutionResult]:
         """
         Execute a memory operation
         Args:
@@ -128,26 +149,38 @@ class Executor:
                 reasoning="No operations provided"
             )]
 
-        sub_chunks = [session_text]
-        all_results = []
-        for sub_text in sub_chunks:
-            if not sub_text.strip():
-                continue
-            # Build executor prompt from selected skills
-            instruction = self._build_executor_prompt(operations, sub_text, retrieved_memories)
+        def build_prompt(text):
+            return self._build_executor_prompt(operations, text, retrieved_memories)
 
+        requests = []
+        if session_text.strip():
+            if self.writer_context is None:
+                requests = [(0, len(session_text), build_prompt(session_text), None, self.args.max_new_tokens)]
+            else:
+                requests = self.writer_context.prepare(session_text, build_prompt, self.args.max_new_tokens)
+        request = get_llm_response_via_api if response_provider is None else response_provider
+        all_results = []
+        for start, end, instruction, expected_tokens, output_cap in requests:
             # Call LLM API
             try:
-                  response, _, _ = get_llm_response_via_api(
-                      prompt=instruction,
-                      LLM_MODEL=self.args.model,
-                      base_url=self.args.api_base,
-                      api_key=self.args.api_key,
-                      MAX_TOKENS=self.args.max_new_tokens,
-                      TAU=self.args.temperature,
-                      MAX_TRIALS=10,
-                      TIME_GAP=3,
-                  )
+                response, input_tokens, output_tokens = request(
+                    prompt=instruction,
+                    LLM_MODEL=self.args.model,
+                    base_url=self.args.api_base,
+                    api_key=self.args.api_key,
+                    MAX_TOKENS=output_cap,
+                    TAU=self.args.temperature,
+                    MAX_TRIALS=10,
+                    usage_kind="executor",
+                    TIME_GAP=3,
+                )
+                if expected_tokens is not None and int(input_tokens) != expected_tokens:
+                    raise ValueError("Writer client and server token counts disagree")
+                if audit is not None:
+                    audit.append({"prompt_sha256": hashlib.sha256(instruction.encode()).hexdigest(),
+                                  "response": response, "input_tokens": input_tokens, "output_tokens": output_tokens})
+                    if expected_tokens is not None:
+                        audit[-1].update(source_range=[start, end], output_cap=output_cap)
             except Exception as e:
                 self.logger.warning(f"Executor API call failed: {e}")
                 all_results.append(ExecutionResult(
@@ -158,7 +191,13 @@ class Executor:
                 continue
 
             # Parse response (may contain multiple actions)
-            all_results.extend(self._parse_response(response, len(retrieved_memories)))
+            parsed = self._parse_response(response, len(retrieved_memories))
+            if (repair_capped_source and end == len(session_text) and all(r.success for r in all_results)
+                    and capped_empty_insert(response, output_tokens, output_cap, parsed)
+                    and any(op.update_type.lower() == "insert" and getattr(op, "source_rule", None)
+                            in ("dated_single_turns", "dated_adjacent_turns") for op in operations)):
+                parsed = parsed[:-1]
+            all_results.extend(parsed)
 
         if not all_results:
             return [ExecutionResult(
@@ -166,6 +205,18 @@ class Executor:
                 success=False,
                 reasoning="No executor results produced"
             )]
+        if all(r.success for r in all_results):
+            from .replay import attributed_turn_pairs, dated_relative_turns, dated_turn_groups
+            rules = {getattr(op, "source_rule", None) for op in operations if op.update_type.lower() == "insert"}
+            seen = set(retrieved_memories) | {r.memory_content for r in all_results}
+            for name, extract in (("dated_relative_turns", dated_relative_turns), ("attributed_turn_pairs", attributed_turn_pairs),
+                                  ("dated_single_turns", lambda text: dated_turn_groups(text, 1)),
+                                  ("dated_adjacent_turns", lambda text: dated_turn_groups(text, 2))):
+                if name in rules:
+                    for item in extract(session_text):
+                        if item not in seen:
+                            all_results.append(ExecutionResult("INSERT", True, memory_content=item, reasoning=name))
+                            seen.add(item)
         return all_results
 
     def _parse_response(self, response: str, num_retrieved: int) -> List[ExecutionResult]:
@@ -556,6 +607,8 @@ class Executor:
                     'context'
                 )
             except Exception as e:
+                if getattr(memory_bank, "trace", None) is not None:
+                    raise
                 self.logger.warning(f"Failed to batch compute retriever embeddings: {e}")
                 all_success = False
                 # Fall back to empty embeddings (operations will fail individually)
@@ -567,6 +620,8 @@ class Executor:
             try:
                 all_state_encoder_embeddings = memory_bank.state_encoder._encode_texts(all_contents)
             except Exception as e:
+                if getattr(memory_bank, "trace", None) is not None:
+                    raise
                 self.logger.warning(f"Failed to batch compute state encoder embeddings: {e}")
                 # Fall back to None (memory_bank will compute individually if needed)
                 all_state_encoder_embeddings = [None] * len(all_contents)
@@ -624,6 +679,8 @@ class Executor:
         # 3. Process INSERTs last (doesn't affect existing indices)
         for i, result in enumerate(inserts):
             try:
+                if result.reasoning == "dated_relative_turns" and result.memory_content in memory_bank.get_all_contents():
+                    continue
                 retriever_emb = insert_retriever_embeddings[i]
                 state_encoder_emb = (
                     insert_state_encoder_embeddings[i] if i < len(insert_state_encoder_embeddings) else None

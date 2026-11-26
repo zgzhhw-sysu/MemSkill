@@ -1,0 +1,18 @@
+{
+  "original_run_root": "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126",
+  "completed_test_root": "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair-test-three-v1",
+  "original_native_run": "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64",
+  "controller": {
+    "path": "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/assets/conversation_controller.pt",
+    "sha256": "fe784612b0d4028f431379e7cae618d743761175532f0f8feb14959ed37d0226"
+  },
+  "corpus": {
+    "path": "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/assets/locomo10.json",
+    "sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4"
+  },
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "model_revision": "0e9e39f249a16976918f6564b8830bc894c89659",
+  "backend": "llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1",
+  "original_python": "/home/lixian/Documents/AgentMemory/.venv-judge24b/bin/python",
+  "note": "Weights, data, raw per-question prompts, generated memory banks, response caches and logs remain at their original server paths. This Git repository saves code/configuration/aggregate evidence, not a self-contained data/model bundle. Frozen scripts retain the tested directory conventions; do not rerun them into the completed output directories."
+}

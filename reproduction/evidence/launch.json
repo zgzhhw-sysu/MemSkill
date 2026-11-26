@@ -1,0 +1,53 @@
+{
+  "registration_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
+  "jobs": [
+    {
+      "history": "conv-49",
+      "gpu": 5,
+      "unit": "memskill-fair-test-three-20261126-conv-49",
+      "time_utc": "2026-11-26T06:36:41.233468+00:00",
+      "state": "ActiveState=active\nSubState=running\nInvocationID=25941d742aef4f0d8b7ecadf40b2f999\nMainPID=527489\n",
+      "command": [
+        "systemd-run",
+        "--user",
+        "--unit",
+        "memskill-fair-test-three-20261126-conv-49",
+        "--collect",
+        "--property=WorkingDirectory=/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126",
+        "--property=StandardOutput=append:/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair-test-three-v1/conv-49.log",
+        "--property=StandardError=append:/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair-test-three-v1/conv-49.log",
+        "/home/lixian/Documents/AgentMemory/.venv-judge24b/bin/python",
+        "-u",
+        "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair_test_queue.py",
+        "conv-49",
+        "5"
+      ],
+      "systemd_output": "Running as unit: memskill-fair-test-three-20261126-conv-49.service; invocation ID: 25941d742aef4f0d8b7ecadf40b2f999\n",
+      "actual_cmdline": "(python)                                                                              "
+    },
+    {
+      "history": "conv-50",
+      "gpu": 6,
+      "unit": "memskill-fair-test-three-20261126-conv-50",
+      "time_utc": "2026-11-26T06:36:41.257407+00:00",
+      "state": "ActiveState=active\nSubState=running\nInvocationID=8c7b49bd12fe4f548cb474b2b8d51a3e\nMainPID=527493\n",
+      "command": [
+        "systemd-run",
+        "--user",
+        "--unit",
+        "memskill-fair-test-three-20261126-conv-50",
+        "--collect",
+        "--property=WorkingDirectory=/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126",
+        "--property=StandardOutput=append:/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair-test-three-v1/conv-50.log",
+        "--property=StandardError=append:/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair-test-three-v1/conv-50.log",
+        "/home/lixian/Documents/AgentMemory/.venv-judge24b/bin/python",
+        "-u",
+        "/home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair_test_queue.py",
+        "conv-50",
+        "6"
+      ],
+      "systemd_output": "Running as unit: memskill-fair-test-three-20261126-conv-50.service; invocation ID: 8c7b49bd12fe4f548cb474b2b8d51a3e\n",
+      "actual_cmdline": "/home/lixian/Documents/AgentMemory/.venv-judge24b/bin/python -u /home/lixian/Documents/研究生大论文/review-stage/hybrid-controller-20261126/fair_test_queue.py conv-50 6 "
+    }
+  ]
+}

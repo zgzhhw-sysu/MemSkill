@@ -139,6 +139,12 @@ class AgenticMemoryConfig:
         self.failure_budget = 0.05  # penalty for LLM parsing/API failures
         self.noop_match_scale = 0.2  # reduce NOOP match reward to discourage "always NOOP" hacking
         self.shaping_scale = 1.0  # global scaling factor for shaping rewards
+        self.span_credit_weight = 0.0
+        self.span_credit_clip = 0.5
+        self.span_credit_spans = 2
+        self.span_credit_questions = 6
+        self.span_credit_rule_version = 2
+        self.span_credit_audit = False
 
         # Reward shaping for long horizon
         # redistribute_reward: spread final reward across all steps using exponential decay
@@ -348,6 +354,29 @@ def get_agentic_memory_args():
     parser.add_argument('--round', type=int, default=10, help='Number of retry rounds for LLM API calls')
 
     # Evaluation
+    parser.add_argument('--designer-output-limit', type=int, default=4096, help='Maximum output tokens per Designer call')
+    parser.add_argument('--trace-dir', help='Append LoCoMo training span, write and QA events here')
+    parser.add_argument('--span-credit-weight', type=float, default=0.0,
+                        help='Weight of the verified sampled-minus-alternative F1 reward')
+    parser.add_argument('--span-credit-clip', type=float, default=0.5)
+    parser.add_argument('--span-credit-spans', type=int, default=2, help='Maximum probed spans per training episode')
+    parser.add_argument('--span-credit-questions', type=int, default=6, help='Maximum linked questions per probed span')
+    parser.add_argument('--span-credit-rule-version', type=int, choices=(1, 2), default=2,
+                        help='2 withholds credit for plausible competing causes; 1 reproduces the original strict-only study')
+    parser.add_argument('--span-credit-audit', action='store_true',
+                        help='Run span probes even at zero weight, for matched offline comparisons')
+    parser.add_argument('--designer-replay-scope', choices=['local', 'suffix'], default='local')
+    parser.add_argument('--designer-calibration-ids', nargs='+', default=[],
+                        help='Reserve these LoCoMo training conversations to test skill proposals before applying')
+    parser.add_argument('--designer-calendar-proposal', action='store_true',
+                        help='Propose a versioned time rule when matched reader probes recover a date')
+    parser.add_argument('--designer-confirmed-proposals', action='store_true',
+                        help='Only submit the exact writer edit that improved a reproduced final QA')
+    parser.add_argument('--designer-dated-source-rule', action='store_true',
+                        help='Test an executable INSERT rule that retains dated quotes with relative times')
+    parser.add_argument('--designer-replay-cases', type=int, default=0,
+                        help='Maximum evidence-guided paired local interventions per training episode')
+    parser.add_argument('--eval-f1-only', action='store_true', help='Evaluate with native F1 and save per-question scores')
     parser.add_argument('--eval-only', action='store_true')
     parser.add_argument('--load-checkpoint', type=str, default=None)
     parser.add_argument('--skip-load-operation-bank', action='store_true',
@@ -366,4 +395,24 @@ def get_agentic_memory_args():
                         help='When resuming from a checkpoint, start a new wandb run instead of resuming the saved run ID')
 
     args = parser.parse_args()
+    if not (math.isfinite(args.span_credit_weight) and args.span_credit_weight >= 0
+            and math.isfinite(args.span_credit_clip) and args.span_credit_clip > 0
+            and args.span_credit_spans > 0 and args.span_credit_questions > 0):
+        parser.error("Span credit requires finite nonnegative weight, positive clip and positive probe budgets")
+    if (args.span_credit_weight or args.span_credit_audit) and not (
+            args.dataset == 'locomo' and args.trace_dir and args.reward_metric == 'f1' and args.api):
+        parser.error("Span credit requires LoCoMo, --api, --reward-metric f1 and --trace-dir")
+    if args.designer_replay_cases < 0:
+        parser.error("--designer-replay-cases must be nonnegative")
+    if args.designer_calibration_ids and not (args.dataset == "locomo" and args.enable_designer):
+        parser.error("--designer-calibration-ids requires LoCoMo and --enable-designer")
+    if args.designer_calendar_proposal and args.designer_confirmed_proposals:
+        parser.error("Select only one proposal mechanism")
+    if args.designer_dated_source_rule and not args.designer_calendar_proposal:
+        parser.error("The dated source rule requires --designer-calendar-proposal")
+    if (args.designer_calendar_proposal or args.designer_confirmed_proposals) and not (
+            args.designer_replay_scope == "suffix" and args.designer_replay_cases and args.designer_calibration_ids):
+        parser.error("Evidence-based proposals require suffix replay cases and independent calibration IDs")
+    if args.designer_replay_cases and not (args.trace_dir and args.enable_designer and args.dataset == "locomo"):
+        parser.error("Designer replay requires --trace-dir, --enable-designer and LoCoMo")
     return args

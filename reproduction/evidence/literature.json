@@ -1,0 +1,21 @@
+{
+  "round": "fair-test-three-20261126",
+  "recorded_at_utc": "2026-11-26T06:36:40.882462+00:00",
+  "papers": [
+    {
+      "title": "SimpleMem: Efficient Lifelong Memory for LLM Agents",
+      "url": "https://arxiv.org/html/2601.02553v1",
+      "read": "Sections2.1-2.3",
+      "borrow": "Check exact redundancy reduction separately from coverage and terminal answers.",
+      "limits": "Our exact-string filter does not synthesize abstracts or change retrieval; no lossless-semantic guarantee."
+    },
+    {
+      "title": "Do Conversational Agents Need Explicit Memory? A Controlled Comparison with Raw-History Retrieval",
+      "url": "https://arxiv.org/html/2610.24671v1",
+      "read": "Sections3.1,5 andAppendixC",
+      "borrow": "Freeze the answer model, retriever and token accounting; distinguish original-configuration comparisons from component attribution.",
+      "limits": "Our comparison uses LoCoMo314F1 and a mixed reader, not their datasets/models/judge or64configurationgrid. Upper bounds equal; actualtokenusagecan differ."
+    }
+  ],
+  "decision": "User explicitly requested best cumulative package rather than isolated dedup ablation before any newtest inference. Freeze K1originalController+source-onlyinsert+exact-within-blockdedup+10+1; do not tune on test."
+}

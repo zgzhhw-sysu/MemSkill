@@ -150,7 +150,7 @@ class Evaluator(ABC):
         Returns:
             F1 score (0-1)
         """
-        from eval_utils import f1_score
+        from src.eval_utils import f1_score
         return f1_score(prediction, ground_truth)
 
     def build_judge_prompt(self, question: str, ground_truth, prediction: str, qa_item: Dict) -> str:
@@ -192,8 +192,8 @@ class Evaluator(ABC):
         Returns:
             EvalSummary with results and statistics
         """
-        from llm_utils import get_llm_response
-        from rag_utils import get_embeddings
+        from src.llm_utils import get_llm_response
+        from src.rag_utils import get_embeddings
 
         # Filter valid QA items
         valid_qa = self.filter_qa_list(qa_list)
@@ -298,7 +298,7 @@ class Evaluator(ABC):
         Returns:
             List of LLM judge scores (0.0, 0.5, or 1.0)
         """
-        from eval_utils import llm_judge
+        from src.eval_utils import llm_judge
         from prompts.prompt_pool import LLM_JUDGE_GENERAL_PROMPT
 
         if not results:

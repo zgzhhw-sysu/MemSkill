@@ -1,0 +1,99 @@
+{
+  "paper": "https://arxiv.org/pdf/2602.02474v3",
+  "upstream_revision": "f65b797338033f4f9c34822f1810f9c2747e6022",
+  "metric": "100 * mean(native per-question F1), separately for each dataset",
+  "reported_f1": {
+    "Llama-3.3-70B-Instruct": {"table": 1, "locomo": 44.21, "longmemeval": 31.12},
+    "Qwen3-Next-80B-A3B-Instruct": {"table": 1, "locomo": 42.08, "longmemeval": 25.29},
+    "Llama-3.1-8B-Instruct": {"table": 7, "locomo": 20.59, "longmemeval": 18.13}
+  },
+  "inference_defaults": {
+    "session_mode": "fixed-length", "chunk_size": 512, "chunk_overlap": 64,
+    "action_top_k": 7, "mem_top_k": 20, "mem_top_k_eval": 20,
+    "retriever": "qwen3-embedding-0.6b"
+  },
+  "longmemeval_launcher": {"script": "eval_longmemeval.sh", "action_top_k": 5, "encode_batch_size": 64},
+  "training_boundary_swap": {
+    "selection": "closest evidence-linked span to dialogue midpoint, earlier span on ties; all valid questions scored",
+    "independent_repeats": 2,
+    "repeat_order": "odd swap then native; even native then swap; each arm seeds only earlier writer receipts",
+    "histories": {
+      "conv-26": {"span": 22, "total_spans": 47, "questions": 152, "linked_question_indices": [42, 66, 118, 119], "source_sha256": "2b4a47f4db70688de295ded1291a889e04899a2ba8321f6c40a82c37f63a0f01"},
+      "conv-30": {"span": 19, "total_spans": 39, "questions": 81, "linked_question_indices": [27, 61], "source_sha256": "caa14fe66ac3b58b7e860c9f74b117b400cbcea6492a183e75657fc8d616ab8a"},
+      "conv-41": {"span": 32, "total_spans": 66, "questions": 152, "linked_question_indices": [29, 32, 101, 102], "source_sha256": "f9af7ba38b3d0547f4a62134c1a2e11ca18007cd5ae4a43da971cf17ae0c9aba"},
+      "conv-42": {"span": 29, "total_spans": 60, "questions": 199, "linked_question_indices": [31, 32, 78, 80, 136, 137, 138, 140, 141, 142], "source_sha256": "9662537e8b5e00f8d499fa04a76ba60f060658e7e2a47f6b5b1fc73691d9ce45"},
+      "conv-43": {"span": 33, "total_spans": 68, "questions": 178, "linked_question_indices": [14, 41, 67, 123, 124], "source_sha256": "f232a3aea55d296fa4a2fed64a44aad6a9dbc7e54b0a8459677781f60896f02d"},
+      "conv-44": {"span": 31, "total_spans": 64, "questions": 123, "linked_question_indices": [31], "source_sha256": "3e2e29f26d9aa8aa3fd7c791e64e105e02e461fea9ba72efb898a39ff202690b"}
+    }
+  },
+  "native_reader_ablation": {
+    "cohort": "All six preregistered LoCoMo training pivots, with every scored question in each history",
+    "exposure": "An actual ordered Reader slot contains a memory version last written at the focal span",
+    "target": "Remove every slot from the focal span, keeping the relative order of the other slots",
+    "sham": "Remove an equal number of disjoint slots minimizing total token-length distance then slot-rank distance; report unmatched when infeasible",
+    "repeat": "Use a separate greedy response cache for all exposed requests, rotate arm order by question position, reuse native receipts on unexposed questions",
+    "readout": "Report complete-history F1, all directly exposed, evidence-linked, and directly exposed unlinked; Reader contribution diagnostic only"
+  },
+  "native_reader_copy_ablation": {
+    "cohort": "All scored questions in the same six training histories and the same preregistered focal spans",
+    "target": "Extend the directly retrieved focal versions to every slot with exactly the same displayed text. Preserve case, whitespace and the relative order of all other slots.",
+    "sham": "Recompute a disjoint equal-count length- and rank-matched deletion on the extended slots; report infeasible controls separately.",
+    "repeat": "Share exact measured requests with the earlier version ablation, including every repeated native answer. Generate only previously unseen prompts.",
+    "readout": "Paired F1 for exact-copy deletion minus original version deletion, all histories and the subset with additional copies; measure shared text dependence without assigning its full effect to a single write."
+  },
+  "native_reader_copy_interaction": {
+    "cohort": "Every scored training question with an actually retrieved focal version and at least one identical copy from another span at the six registered pivots. Report coverage of each full history.",
+    "design": "Cross removal of focal versions D and other identical texts C. For the control S, match C to equally many nonfocal, noncopy slots using token lengths and ranks after D is removed. Compare S alone and D+S; omit both controls if infeasible.",
+    "credit": "Average the focal marginal with copies present and absent. Report the analogous copy-group marginal and their sum. The control-adjusted interaction is the focal marginal with copies removed minus that with matched background removed.",
+    "inference": "Reuse the measured original, D, and D+C responses; rotate the new conditions in question order. Keep each retained slot in its native order and share only exact request receipts. These are training Reader effects."
+  },
+  "forward_rank_boundary": {
+    "layer": "actor_head.0.weight", "calibration": "conv-26",
+    "screen": "Search retained ranks from full rank minus one through 1 on all native training states in the first registered history. Use FP64 SVD, cast each truncated weight to native FP32 and execute the serial deterministic Controller.",
+    "select": "Freeze the largest rank for which at least one state keeps its native ordered top-K and at least one replaces only its last skill by the native next-ranked skill. Every calibration state must have one of these two outcomes. Save no candidate if the set is empty.",
+    "transfer": "Evaluate the frozen rank unchanged on the remaining five registered training histories. No QA answers, rewards or validation/test histories may enter rank selection."
+  },
+  "forward_rank_skill_projection": {
+    "layer": "op_net.2.weight",
+    "motivation": "After the actor projection preserved the action at every rank on conv-26, test the final skill encoder projection. It transforms each candidate embedding before it is paired with the state. Inherit the same calibration, transfer and selection rules. Make no layer or rank choices using QA outcomes."
+  },
+  "frozen_skill_projection_outcome": {
+    "split": "train", "treatment": "projected", "questions": 885,
+    "design": "After both fixed test baselines have been verified, deploy the selected skill projection from conv-26 on all six complete original training conversations. Keep the matrix fixed, rebuild each bank from empty, and compare every prediction with the same-model native training run using exact shared requests. Report each history and the paired question mean. This outcome does not select a rank or qualify a policy for testing."
+  },
+  "state_credit": {
+    "outgoing": "handle_entity_relationships", "incoming": "delete",
+    "prior_questions": 4, "ridge": 0.25, "max_logit_shift": 0.10, "reward_scale": 0.05,
+    "training": "mean of independent repeats per history; equal weights across histories",
+    "rate_search": "monotone search over representable FP32 shifts under deployed top-k",
+    "rate_control": "constant boundary logit shift with closest incoming-skill count on all native training states, minimum absolute shift on ties",
+    "validation": "two complete histories; native, terminal, span and rate-matched fixed bias from empty memory banks"
+  },
+  "state_credit_test": {
+    "candidate": "span", "comparators": ["native", "terminal", "rate"],
+    "selection_split": "validation", "test_split": "test",
+    "rule": "Verified positive pooled paired F1 against all three controls and at least one Controller decision with both a changed first-draw probability and changed top-K membership on validation",
+    "weights": "Use the exact validated frozen file for all arms without refitting"
+  },
+  "datasets": {
+    "locomo": {
+      "data_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+      "test_indices": [8, 9],
+      "development_splits": {
+        "train": {"indices": [0, 1, 2, 3, 4, 5], "scored_questions": 885, "scored_key_sha256": "1f3e7fb9bab5f5b2003adfa67d4f6160bfa04d0b043c814662b6cf09d176c489"},
+        "validation": {"indices": [6, 7], "scored_questions": 341, "scored_key_sha256": "809d6962e3f7656c85b84e38ec67c8c012d94c119a28beb64fca9d278d28ffce"}
+      },
+      "excluded_category": 5,
+      "scored_questions": 314,
+      "scored_key_sha256": "13f60907e23796ec66289de04aee6644430d7df7bdedde48e83ebae77baaaf86"
+    },
+    "longmemeval": {
+      "data_sha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "split_file": "data/longmemeval_s_splits.json",
+      "split_sha256": "d13012b04e6e2d23aa2c57df6ee121ec55be710d7f19b2d0527a1b5457d7031f",
+      "excluded_id_suffix": "_abs",
+      "scored_questions": 101,
+      "scored_key_sha256": "92cdbb8fc3bac13e37b20cf55e246d27a05aa84d0fa6fcc1bc0d4dfa994a2445"
+    }
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "registered_at_utc": "2026-11-26T06:36:40.882709+00:00",
+  "experiment": "fair-test-three-v1",
+  "user_request": "Compare original MemSkill, native10+1raw, and current best full package on exactly the same testset. User permits K1and source-only writing in thirdarm.",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "revision": "0e9e39f249a16976918f6564b8830bc894c89659",
+  "backend": "llama31-0e9e39f-vllm0102-bf16-tp2-eager-duty80-8192-v1",
+  "dtype": "BF16",
+  "temperature": 0,
+  "seed": 42,
+  "answer_max_output_tokens": 32,
+  "histories": {
+    "conv-49": {
+      "questions": 156,
+      "blocks": 50,
+      "gpu": 5
+    },
+    "conv-50": {
+      "questions": 158,
+      "blocks": 65,
+      "gpu": 6
+    }
+  },
+  "questions": 314,
+  "test_key_sha256": "13f60907e23796ec66289de04aee6644430d7df7bdedde48e83ebae77baaaf86",
+  "arms": {
+    "native": "Original checkpoint,skillbank,K7,writer retrieves20; answer reads20native memories. FullGPU identity replay must match original115source/choice/write/retrieval traces; freshQAresponses in shared newcache.",
+    "mixed": "Exactly the same native bank and first10GPUretrieved memories, append exactlyone frozen question-retrieved dated rawpassage. Re-answer using the samebackend/cache/32tokenlimit.",
+    "best": "Original checkpoint live deterministicK1; only originalinsert receives empty executor memorycontext; all otherselectedskillsifany retainoriginalcontext. Suppress later identical successfulINSERTcontents within eachblock. Preserve cross-block repeats and allnonINSERTactions. Rebuildall downstreamstates,embed/retrieve onGPU,answerusing10memories+samefrozenraw."
+  },
+  "interpretation": "best-minus-mixed is cumulative package gain, NOTdedup-only or learned-selector gain. best is selected from training results only, not an oracle over test variants.",
+  "prior_training": {
+    "complete_histories": 6,
+    "questions": 885,
+    "source_only_insert_f1": 39.429009384015224,
+    "unique_package_f1": 40.6967316690967,
+    "single_pilot_unique_delta": 2.9433692120248693
+  },
+  "budget": "For everyquestion, all3share the originalnative20-memory fullprompt token count as ceiling. Nativeprompt unchanged. Mixedprompt exactly reproduces priorfrozen10+1prompt. Best keeps identical rawexcerpt, cropsmemoryslots from10backto1asnecessary, neverincreasesceiling. Log actual renderedandphysical tokens; equalceilingdoesnotmean equalusedtokens.",
+  "raw": "Frozen originalGPUQwen0.6B query-to-dated-turn-neighborhood ranking; no gold/supportlabels usedto rank. Verifycompletecosinematrices/IDs/passage/questionSHA andhistoricaldirectpromptsha beforeinference. No newretriever tuning.",
+  "hypothesis": "The best training package may improve mixed-reader F1, but removal of duplicate emphasis or source-only loss of context may harm either history. Report complete314 regardlesssign; no test-driven changes/stopping.",
+  "parity_and_evaluation": [
+    "Beforebest perhistory require fullGPU nativewriterandreader-contextidentity. No bestinference if identityfails.",
+    "Same314questionIDs, authorpinnedscorer and all3physicalcachedresponsechecks.",
+    "Compare perquestion andperhistory, bycategory, actualtokensandwriterrequests. Review allnonzero best-vs-mixedanswerchanges against source; do notcall lexical gains factualcorrections."
+  ],
+  "test_exposure": "conv49/50 officialtest dialogues have priorreading/selection results. This is frozenmethod confirmation on historicallyexposed test, not untouchedindependent evidence; only2histories, not314independentconversations.",
+  "hardware": "Original251guardedLlamaBF16TP2GPU3/4 reused; new248normalguardGPU5forconv49and6forconv50. NoCPUmodel inference, noforeignprocess kill, no0-3on248, noGPU7.",
+  "schedule": "Two independentfullhistoryqueues: nativeGPUidentity+freshnativeQA -> mixedQA -> bestGPUwriter+QA -> independentauthorscore. No automaticrestarts. ExistingGPU4trainingqueue untouched.",
+  "files_sha256": {
+    "fair_test_common.py": "cfe6357f4eba50cef5ab1f4713183ad0faa72684345d538b2c99e66fc91a2450",
+    "prepare_fair_test.py": "7f96d660a79b11540d130751eafd75ce117dfc3a4778d14eaac464fefeea11aa",
+    "fair_test_writer.py": "50ec1664d6ff1c4ff7a1266091f366f9a2aa880366accf68a0f4d3e0d93cc727",
+    "fair_test_mixed.py": "47f833e7b1b412dce5c761296757c50acbb8b5f2539b01172227be17ae1bea79",
+    "score_fair_test.py": "de45ee4f5afd5558943f604fd815f747b2d6736047479411466fac216f3fd74e",
+    "fair_test_queue.py": "6378d7783926e86460c46ccf670655afdcd66ead96ed689465483d965bf1dc57",
+    "run_fair_test.sh": "9194bc42314476ec0cef49a417aaff7adefddd2f7e6561b2fda8a50bebed7dd7",
+    "assets/locomo10.json": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+    "assets/conversation_controller.pt": "fe784612b0d4028f431379e7cae618d743761175532f0f8feb14959ed37d0226",
+    "audit-author/manifest.json": "9eb3b0f667541aa6e677a52811e149d28bcf4610b921d6895ed0c8b08d97d18d",
+    "snapshot/models/Llama-3.1-8B-Instruct/verified-model.json": "ea345ea15696d5a0e7198d3871b89b3bf433bddff4d55071ef704dafa915ecda",
+    "snapshot/runs/llama31-paper-v1/verified-qwen.json": "8ec94970b2d3c6bcb9a4d5025b129d4ac8a5ba438e7fc551d331716d4aeb357d",
+    "fair-test-three-v1/imported/conv-50/direct-plan.json": "9b3bde07efde04815dc5f83aabe047a88aec7c40b516205ad556741f704a1333",
+    "fair-test-three-v1/imported/conv-50/ranks.json": "12fe8e91914b96b4865c023cdea71de91bdea236bc080375ada6725095cc5e37",
+    "fair-test-three-v1/imported/conv-50/source-plan.json": "895a9381cd85106265c0bef9337ab7f6138f850fa1d7e18d17e56b9ca62087ac",
+    "fair-test-three-v1/imported/conv-50/cosines.npy": "a3ecb940b469207c91474f1fc68f9127c7c41532dcb413963b175281b9858437",
+    "fair-test-three-v1/imported/conv-49/direct-plan.json": "6d6bc16b7ed1fb6c5a5c4b1fb2fd0eb73acf30ff4e4abdbd7da0c1c9a1313690",
+    "fair-test-three-v1/imported/conv-49/ranks.json": "c1533a21de2e18b92b61df6a4cfca1c7bccecb3b9795aeb1e38aeffba2983cb4",
+    "fair-test-three-v1/imported/conv-49/source-plan.json": "85b492d1978aa242b75cfe8a595731e1d6d700f3109618d56b4280ec5df1ef43",
+    "fair-test-three-v1/imported/conv-49/cosines.npy": "ff9b1a4cf07804e12cfb06ed94746ea068f93ac6b516c4f8adcee45a5101cd72",
+    "fair-test-three-v1/plans/conv-50/plan.json": "eede8900fc6fe230b6f1a7526379326e42dec641e0625f56856506fcd3b858a1",
+    "fair-test-three-v1/plans/conv-49/plan.json": "4c246a8b88bf6995355ce203a8a676e17a581eb461f5d289507b462c3b627ade",
+    "fair-test-three-v1/data-preflight.json": "32747705a683ef611ca82b61e860e58eeda57915c47cd8667a813690c9b56fcc",
+    "fair-test-three-v1/writer-cache-import.json": "4df16a93ec02594f6718982ad014917e63915c061b03124f8fc4b6fba689a357",
+    "snapshot/run-linked-questions-v1/experiments/designer/paper_date_pair.py": "beb8b6986cab8ed3314f8e39b25b8331054f37e13572701591f0f019716eeee3",
+    "snapshot/run-linked-questions-v1/src/trainer.py": "aeec93631e408f1725f7d630eb9cc32110d8e623d75e59b8334a3f98c932dfbf",
+    "snapshot/run-linked-questions-v1/src/executor.py": "2e2b9497a61d3051dd3eb35736b671585e60a1b054766df0cf7ec8fd19906d57",
+    "snapshot/run-linked-questions-v1/src/eval/locomo.py": "396a2b5de7c635a87600ae78daee1804651266437d30ae551dc659251a7e4b18",
+    "snapshot/run-linked-questions-v1/src/replay.py": "535c8eac73e1a68244452cca32ee40f1abac5867fa0a7186bee8d7f22b617c53",
+    "fair-test-three-v1/literature.json": "88ed9caf56062e5a0b517f0886809c8a48d3e9c357a58b68369f488073e4e654"
+  },
+  "reference_sha256": {
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/protocol.json": "408dd60da50c0f3a5b966c59585306f67788ce334e35196394cef6fde3b719fb",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-49/scores.json": "c019e8a26f0a082a65ad5d53caa6608ff25dcb47a947a58fbd258687e7fc6ffe",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-49/usage.jsonl": "c4e2f4f8261e1851724d97817041487c547361e930038cb41dcc5f4d3f85a166",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-49/traces/1cedf04fb25e44f7a1282b996071e605.jsonl": "86242111f266c52d75fd53a9ac3f127f3ad5fdeb73214ca55ceafa19927d257a",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-50/scores.json": "b82b2c962277bec1063fc84b34bc8c8a548b365426f68972ce30aceaab2c2395",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-50/usage.jsonl": "97445bbcc2e58291cff810ab4e4d93fcdd5c820c68f2ccd155b2e9ae4bb605a3",
+    "/home/lixian/Documents/研究生大论文/runs/llama31-paper-v1-locomo-batch64/locomo/native/conv-50/traces/e18992abe62a460f9cbc9c3b231057fa.jsonl": "01fbe30a283d55fd656f577b5aa27032971e2854ac7fe31a1e7c8faa5abfb23a"
+  }
+}

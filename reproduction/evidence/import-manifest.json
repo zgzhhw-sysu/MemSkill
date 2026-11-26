@@ -1,0 +1,34 @@
+{
+  "conv-49/source-plan.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/test/conv-49/plan.json",
+    "sha256": "85b492d1978aa242b75cfe8a595731e1d6d700f3109618d56b4280ec5df1ef43"
+  },
+  "conv-49/direct-plan.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-49/plan.json",
+    "sha256": "6d6bc16b7ed1fb6c5a5c4b1fb2fd0eb73acf30ff4e4abdbd7da0c1c9a1313690"
+  },
+  "conv-49/ranks.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-49/ranks.json",
+    "sha256": "c1533a21de2e18b92b61df6a4cfca1c7bccecb3b9795aeb1e38aeffba2983cb4"
+  },
+  "conv-49/cosines.npy": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-49/cosines.npy",
+    "sha256": "ff9b1a4cf07804e12cfb06ed94746ea068f93ac6b516c4f8adcee45a5101cd72"
+  },
+  "conv-50/source-plan.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/test/conv-50/plan.json",
+    "sha256": "895a9381cd85106265c0bef9337ab7f6138f850fa1d7e18d17e56b9ca62087ac"
+  },
+  "conv-50/direct-plan.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-50/plan.json",
+    "sha256": "9b3bde07efde04815dc5f83aabe047a88aec7c40b516205ad556741f704a1333"
+  },
+  "conv-50/ranks.json": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-50/ranks.json",
+    "sha256": "12fe8e91914b96b4865c023cdea71de91bdea236bc080375ada6725095cc5e37"
+  },
+  "conv-50/cosines.npy": {
+    "source": "/home/lixian/memskill-work/runs/llama31-paper-v1-attribution/source-readback/direct/test/conv-50/cosines.npy",
+    "sha256": "a3ecb940b469207c91474f1fc68f9127c7c41532dcb413963b175281b9858437"
+  }
+}

@@ -15,11 +15,12 @@ class Operation:
     """Single memory operation"""
     def __init__(self, name: str, description: str,
                  instruction_template: str, update_type: str,
-                 meta_info: Optional[Dict] = None):
+                 meta_info: Optional[Dict] = None, source_rule: Optional[str] = None):
         self.name = name
         self.description = description
         self.instruction_template = instruction_template
         self.update_type = update_type  # insert, update, delete, noop
+        self.source_rule = source_rule
         self.meta_info = meta_info or {
             "usage_count": 0,
             "avg_reward": 0.0,
@@ -87,6 +88,7 @@ class Operation:
             'description': self.description,
             'instruction_template': self.instruction_template,
             'update_type': self.update_type,
+            'source_rule': getattr(self, 'source_rule', None),
             'meta_info': self.meta_info,
             'embedding': self.embedding.tolist() if self.embedding is not None else None
         }
@@ -98,7 +100,7 @@ class Operation:
             description=data['description'],
             instruction_template=data['instruction_template'],
             update_type=data['update_type'],
-            meta_info=data.get('meta_info', {})
+            meta_info=data.get('meta_info', {}), source_rule=data.get('source_rule')
         )
         if data.get('embedding') is not None:
             op.embedding = np.array(data['embedding'])

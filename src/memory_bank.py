@@ -1,6 +1,9 @@
 """
 Memory Bank: Stores and retrieves memory items
 """
+import os
+
+from functools import lru_cache
 import numpy as np
 from typing import List, Dict, Tuple, Optional, Union
 import copy
@@ -33,6 +36,68 @@ def get_retriever_embedding_dim(retriever_name: str) -> int:
     """Get embedding dimension for a retriever, with fallback"""
     canonical_name = canonicalize_retriever_name(retriever_name)
     return RETRIEVER_EMBEDDING_DIMS.get(canonical_name, 768)
+
+
+@lru_cache(maxsize=1)
+def _skylakex_dot_kernel():
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def dot_rows(matrix, query, partials, rows):
+        row = tl.program_id(0)
+        lane = tl.arange(0, 8)
+        # OpenBLAS SGEMV handles blocks of four rows, then a pair and a final single row.
+        full_block = row < rows - rows % 4
+        width = tl.where(full_block | (row >= rows - rows % 2), 8, 4)
+        acc = tl.full((8,), 0, tl.float32)
+        for step in range(1024 // width):
+            col = step * width + lane % width
+            x = tl.load(matrix + row * 1024 + col)
+            y = tl.load(query + col)
+            if full_block:
+                acc = tl.fma(x, y, acc)
+            else:
+                acc = acc + x * y
+        tl.store(partials + row * 8 + lane, tl.where(lane < width, acc, 0.0))
+
+    return dot_rows
+
+
+def _numpy_norm_1024(matrix):
+    """Reproduce NumPy's contiguous FP32 row reduction on the tensor's device."""
+    squares = matrix.square().reshape(-1, 8, 16, 8)
+    lanes = squares[:, :, 0, :]
+    for step in range(1, 16):
+        lanes = lanes + squares[:, :, step, :]
+    while lanes.shape[-1] > 1:
+        lanes = lanes[..., ::2] + lanes[..., 1::2]
+    blocks = lanes.squeeze(-1)
+    while blocks.shape[-1] > 1:
+        blocks = blocks[:, ::2] + blocks[:, 1::2]
+    return blocks.sqrt()
+
+
+def _skylakex_cuda_order(embeddings, query_embedding, normalize_memories, k):
+    """Use 251's single-threaded OpenBLAS 0.3.29 accumulation order for Qwen embeddings."""
+    import torch
+
+    matrix = torch.as_tensor(embeddings, device="cuda", dtype=torch.float32).contiguous()
+    query = torch.as_tensor(query_embedding, device=matrix.device, dtype=matrix.dtype).reshape(1, -1)
+    if matrix.shape[1] != 1024 or query.shape[1] != 1024:
+        raise ValueError("cuda-skylakex requires 1024-dimensional memory and query embeddings")
+    if len(matrix) == 1:
+        return np.arange(1)[:k]
+    if normalize_memories:
+        matrix = matrix / (_numpy_norm_1024(matrix) + 1e-8)
+    query = (query / (_numpy_norm_1024(query) + 1e-8)).contiguous()
+    partials = torch.empty((len(matrix), 8), device=matrix.device, dtype=matrix.dtype)
+    kernel = _skylakex_dot_kernel()
+    kernel[(len(matrix),)](matrix, query, partials, len(matrix), num_warps=1, enable_fp_fusion=False)
+    pairs = partials[:, :4] + partials[:, 4:]
+    scores = (pairs[:, 0] + pairs[:, 1]) + (pairs[:, 2] + pairs[:, 3])
+    # NumPy's default unstable argsort determines which equal-score memory versions are returned.
+    return np.argsort(scores.cpu().numpy())[::-1][:k]
 
 
 class MemoryItem:
@@ -101,6 +166,7 @@ class MemoryBank:
         self.memories: List[MemoryItem] = []
         self.retriever_name = retriever_name
         self.top_k = top_k
+        self.trace = None
         self.timestep = 0
         self._faiss_index = None
         self._state_encoder = state_encoder  # StateEncoder for computing state embeddings
@@ -178,6 +244,8 @@ class MemoryBank:
             else:
                 memory_item.operation_history.append(str(operation_name))
         self.memories.append(memory_item)
+        if self.trace is not None:
+            self.trace.change("INSERT", len(self.memories)-1, None, content)
         self._rebuild_index()
 
     def update_memory(self, index: int, new_content: str, new_embedding: np.ndarray,
@@ -211,6 +279,8 @@ class MemoryBank:
                             mem.operation_history.append(str(name))
                 else:
                     mem.operation_history.append(str(operation_name))
+            if self.trace is not None:
+                self.trace.change("UPDATE", index, mem.content_history[-1], new_content)
             self._rebuild_index()
         else:
             raise IndexError(f"Memory index {index} out of range [0, {len(self.memories)})")
@@ -218,6 +288,8 @@ class MemoryBank:
     def delete_memory(self, index: int):
         """Delete a memory item"""
         if 0 <= index < len(self.memories):
+            if self.trace is not None:
+                self.trace.change("DELETE", index, self.memories[index].content, None)
             del self.memories[index]
             self._rebuild_index()
         else:
@@ -252,28 +324,41 @@ class MemoryBank:
 
         # Get embeddings matrix based on embedding type
         embeddings = self._get_embeddings_matrix(use_state_encoder=use_state_encoder)
-        embeddings_for_sim = embeddings
-
-        if use_state_encoder or self.retriever_name == 'dragon':
-            emb_norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            embeddings_for_sim = embeddings / (emb_norms + 1e-8)
-
-        # Compute similarities (normalize embeddings only for similarity)
-        if isinstance(query_embedding, np.ndarray):
-            q = query_embedding.reshape(1, -1).astype('float32')
-        else:
-            q = np.asarray(query_embedding, dtype='float32').reshape(1, -1)
-
-        # Normalize query
-        q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
-
-        # Compute similarities
-        similarities = np.dot(q_norm, embeddings_for_sim.T)[0]
-
-        # Get top-k indices
+        normalize_memories = use_state_encoder or self.retriever_name == 'dragon'
         actual_k = min(top_k, len(self.memories))
-        top_indices = np.argsort(similarities)[::-1][:actual_k]
+        top_indices = None
+        search = os.environ.get("MEMSKILL_MEMORY_SEARCH")
+        if search == "cuda-skylakex":
+            top_indices = _skylakex_cuda_order(embeddings, query_embedding, normalize_memories, actual_k)
+        elif search == "cuda":
+            import torch
 
+            matrix = torch.as_tensor(embeddings, device="cuda", dtype=torch.float32)
+            query = torch.as_tensor(query_embedding, device=matrix.device, dtype=torch.float32).reshape(-1)
+            if normalize_memories:
+                matrix = matrix / (torch.linalg.vector_norm(matrix, dim=1, keepdim=True) + 1e-8)
+            query = query / (torch.linalg.vector_norm(query) + 1e-8)
+            similarities = torch.mv(matrix, query)
+            values, indices = similarities.sort(descending=True)
+            boundary = values[:actual_k + 1]
+            # A changed order of equal/near-equal scores can change which memory version gets credit.
+            # Bound float32 norm/dot rounding by the vector length and the largest possible inner product.
+            max_norm = 1.0 if normalize_memories else torch.linalg.vector_norm(matrix, dim=1).amax()
+            margin = 4 * torch.finfo(matrix.dtype).eps * matrix.shape[1] * max_norm
+            gaps = boundary[:-1] - boundary[1:]
+            if actual_k >= 0 and (torch.isfinite(boundary).all() & (gaps > margin).all()).item():
+                top_indices = indices[:actual_k].cpu().numpy()
+
+        if top_indices is None:
+            # Preserve upstream BLAS accumulation and NumPy's tie order when ranking is ambiguous.
+            embeddings_for_sim = embeddings
+            if normalize_memories:
+                emb_norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+                embeddings_for_sim = embeddings / (emb_norms + 1e-8)
+            q = np.asarray(query_embedding, dtype='float32').reshape(1, -1)
+            q_norm = q / (np.linalg.norm(q, axis=1, keepdims=True) + 1e-8)
+            similarities = np.dot(q_norm, embeddings_for_sim.T)[0]
+            top_indices = np.argsort(similarities)[::-1][:actual_k]
         # Update access statistics
         for idx in top_indices:
             self.memories[idx].access_count += 1
