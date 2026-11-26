@@ -18,14 +18,17 @@
   "question_retrieved_raw_passages": 1,
   "budget": "Each question uses the native20 full-prompt token count as input ceiling; mixed and best use the same frozen raw passage.",
   "registered_experiment_sha256": "477ee0ec91f5d91b52a45a9e668e955ae4dadd3bb8b193a7af1328173db861e8",
-  "version": "memskill-memory10-raw",
-  "arm": "mixed",
-  "controller_top_k": 7,
-  "insert_source_only": false,
-  "deduplicate_insert_within_block": false,
-  "writer_entry": "frozen/fair_test_writer.py (FAIR_TEST_ARM=native)",
-  "reader_entry": "frozen/fair_test_mixed.py",
-  "mean_f1": 34.31824193849569,
-  "normalized_exact_match_count": 47,
-  "f1_full_score_count": 48
+  "version": "memskill-best",
+  "arm": "best",
+  "controller_top_k": 1,
+  "insert_source_only": true,
+  "deduplicate_insert_within_block": true,
+  "writer_entry": "frozen/fair_test_writer.py (FAIR_TEST_ARM=best)",
+  "reader_entry": "frozen/fair_test_common.py:test_reader",
+  "mean_f1": 40.66541263568752,
+  "normalized_exact_match_count": 59,
+  "f1_full_score_count": 61,
+  "observed_skill_counts": {
+    "insert": 115
+  }
 }

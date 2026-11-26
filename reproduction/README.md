@@ -41,4 +41,4 @@ Llama-3.1-8B-Instruct BF16/TP2，Qwen3-Embedding-0.6B；同一Controller checkpo
 
 ## 当前分支
 
-本分支采用原版K7写入，只修改答题阶段的10＋1读取。
+本分支在10＋1读取上启用K1、insert只看当前原文、块内精确去重三项写入改动。
